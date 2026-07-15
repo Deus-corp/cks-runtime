@@ -6,7 +6,9 @@ def create_session():
 
     sessions = SessionManager()
 
-    return sessions.create({})
+    return sessions.create_session(
+        knowledge_structure={}
+    )
 
 
 def test_create_version():
@@ -88,5 +90,19 @@ def test_list_versions():
     history = manager.list_versions(session)
 
     assert len(history) == 2
-
     assert isinstance(history, tuple)
+
+
+def test_list_versions_returns_new_tuple():
+
+    session = create_session()
+
+    manager = VersionManager()
+
+    manager.create(session)
+
+    history1 = manager.list_versions(session)
+    history2 = manager.list_versions(session)
+
+    assert history1 == history2
+    assert history1 is not history2

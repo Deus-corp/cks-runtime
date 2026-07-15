@@ -35,3 +35,9 @@ def test_runtime_version_is_frozen():
 
     except FrozenInstanceError:
         pass
+
+def test_runtime_version_metadata():
+
+    version = create_version()
+
+    assert version.metadata == {}

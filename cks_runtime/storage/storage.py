@@ -45,6 +45,15 @@ class RuntimeStorage(ABC):
         """
 
     @abstractmethod
+    def has_session(
+        self,
+        session_id: str,
+    ) -> bool:
+        """
+        Check whether a Runtime Session exists.
+        """
+
+    @abstractmethod
     def save_version(
         self,
         version: RuntimeVersion,
@@ -60,4 +69,22 @@ class RuntimeStorage(ABC):
     ) -> RuntimeVersion:
         """
         Restore a Runtime Version.
+        """
+
+    @abstractmethod
+    def has_version(
+        self,
+        version_id: str,
+    ) -> bool:
+        """
+        Check whether a Runtime Version exists.
+        """
+
+    @abstractmethod
+    def clear(self) -> None:
+        """
+        Remove every persisted object.
+
+        Intended primarily for testing and
+        deterministic reference implementations.
         """

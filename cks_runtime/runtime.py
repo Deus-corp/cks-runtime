@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from cks_runtime.config import RuntimeConfig
 
-from cks_runtime.core.interfaces import CoreInterface
+from cks_runtime.core_api.interfaces import CoreInterface
 
 from cks_runtime.diagnostics.aggregator import (
     DiagnosticAggregator,

@@ -13,7 +13,9 @@ def test_save_and_restore_session():
 
     storage = InMemoryStorage()
 
-    session = RuntimeSession()
+    session = RuntimeSession(
+        knowledge_structure={}
+    )
 
     storage.save_session(session)
 
@@ -46,7 +48,9 @@ def test_has_session():
 
     storage = InMemoryStorage()
 
-    session = RuntimeSession()
+    session = RuntimeSession(
+        knowledge_structure={}
+)
 
     storage.save_session(session)
 
@@ -73,7 +77,9 @@ def test_clear():
 
     storage = InMemoryStorage()
 
-    session = RuntimeSession()
+    session = RuntimeSession(
+        knowledge_structure={}
+)
 
     storage.save_session(session)
 
@@ -96,3 +102,31 @@ def test_missing_version():
 
     with pytest.raises(VersionNotFound):
         storage.load_version("missing")
+
+
+def test_storage_returns_deep_copy():
+
+    storage = InMemoryStorage()
+
+    session = RuntimeSession(
+        knowledge_structure={
+            "value": 1,
+        }
+    )
+
+    storage.save_session(session)
+
+    restored = storage.load_session(
+        session.session_id
+    )
+
+    restored.knowledge_structure["value"] = 42
+
+    restored_again = storage.load_session(
+        session.session_id
+    )
+
+    assert (
+        restored_again.knowledge_structure["value"]
+        == 1
+    )

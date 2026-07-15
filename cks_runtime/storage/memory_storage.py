@@ -95,3 +95,33 @@ class InMemoryStorage(RuntimeStorage):
             ) from exc
 
         return deepcopy(version)
+
+    def has_session(
+        self,
+        session_id: str,
+    ) -> bool:
+        """
+        Determine whether a Runtime Session exists.
+        """
+
+        return session_id in self._sessions
+
+
+    def has_version(
+        self,
+        version_id: str,
+    ) -> bool:
+        """
+        Determine whether a Runtime Version exists.
+        """
+
+        return version_id in self._versions
+
+
+    def clear(self) -> None:
+        """
+        Remove every persisted Runtime object.
+        """
+
+        self._sessions.clear()
+        self._versions.clear()

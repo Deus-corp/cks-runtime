@@ -14,11 +14,14 @@ def test_begin_transaction():
     sessions = SessionManager()
     manager = TransactionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
     tx = manager.begin(session)
 
     assert session.active_transaction is tx
+
     assert manager.retrieve(
         tx.transaction_id
     ) is tx
@@ -29,7 +32,9 @@ def test_commit_transaction():
     sessions = SessionManager()
     manager = TransactionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
     tx = manager.begin(session)
 
@@ -40,6 +45,8 @@ def test_commit_transaction():
     manager.commit(tx)
 
     assert tx.status == TransactionStatus.COMMITTED
+    assert tx.completed is True
+
     assert session.active_transaction is None
 
 
@@ -48,13 +55,17 @@ def test_rollback_transaction():
     sessions = SessionManager()
     manager = TransactionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
     tx = manager.begin(session)
 
     manager.rollback(tx)
 
     assert tx.status == TransactionStatus.ROLLED_BACK
+    assert tx.completed is True
+
     assert session.active_transaction is None
 
 
@@ -63,13 +74,17 @@ def test_abort_transaction():
     sessions = SessionManager()
     manager = TransactionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
     tx = manager.begin(session)
 
     manager.abort(tx)
 
     assert tx.status == TransactionStatus.ABORTED
+    assert tx.completed is True
+
     assert session.active_transaction is None
 
 
@@ -78,7 +93,9 @@ def test_cannot_begin_second_transaction():
     sessions = SessionManager()
     manager = TransactionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
     manager.begin(session)
 
@@ -91,7 +108,9 @@ def test_list_transactions():
     sessions = SessionManager()
     manager = TransactionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
     tx = manager.begin(session)
 
@@ -99,3 +118,23 @@ def test_list_transactions():
 
     assert tx in transactions
     assert len(transactions) == 1
+
+
+def test_list_transactions_returns_copy():
+
+    sessions = SessionManager()
+    manager = TransactionManager()
+
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
+
+    manager.begin(session)
+
+    transactions = manager.list_transactions()
+
+    transactions.clear()
+
+    assert len(
+        manager.list_transactions()
+    ) == 1

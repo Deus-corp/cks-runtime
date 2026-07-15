@@ -9,9 +9,13 @@ def create_transaction():
 
     sessions = SessionManager()
 
-    session = sessions.create({})
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
 
-    return RuntimeTransaction(session=session)
+    return RuntimeTransaction(
+        session=session
+    )
 
 
 def test_transaction_initial_state():
@@ -28,22 +32,30 @@ def test_add_operation():
 
     tx = create_transaction()
 
-    operation = {"action": "load"}
+    operation = {
+        "action": "load"
+    }
 
     tx.add_operation(operation)
 
-    assert tx.operations == [operation]
+    assert tx.operations == [
+        operation
+    ]
 
 
 def test_add_diagnostic():
 
     tx = create_transaction()
 
-    diagnostic = {"message": "warning"}
+    diagnostic = {
+        "message": "warning"
+    }
 
     tx.add_diagnostic(diagnostic)
 
-    assert tx.diagnostics == [diagnostic]
+    assert tx.diagnostics == [
+        diagnostic
+    ]
 
 
 def test_mark_executing():
@@ -92,3 +104,14 @@ def test_abort():
 
     assert tx.status == TransactionStatus.ABORTED
     assert tx.completed is True
+
+
+def test_completed_transaction_cannot_change_state():
+
+    tx = create_transaction()
+
+    tx.commit()
+
+    tx.mark_executing()
+
+    assert tx.status == TransactionStatus.COMMITTED

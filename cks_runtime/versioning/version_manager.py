@@ -1,9 +1,8 @@
 """
 Runtime Version Manager.
 
-Coordinates Runtime Version creation and retrieval.
-
-Runtime Versions remain owned by Runtime Sessions.
+Creates immutable Runtime Versions from the
+current Runtime Session state.
 """
 
 from __future__ import annotations
@@ -14,12 +13,7 @@ from cks_runtime.versioning.version import RuntimeVersion
 
 class VersionManager:
     """
-    Coordinates Runtime Version lifecycle.
-
-    Ownership:
-
-    - RuntimeSession owns Runtime Versions.
-    - VersionManager coordinates Version operations.
+    Coordinates Runtime Version creation.
     """
 
     def create(
@@ -33,11 +27,33 @@ class VersionManager:
         Session Version History.
         """
 
-        version = RuntimeVersion()
+        version = RuntimeVersion(
+            session_id=session.session_id,
+            transaction_id=(
+                session.active_transaction.transaction_id
+                if session.active_transaction is not None
+                else ""
+            ),
+            knowledge_structure=session.knowledge_structure,
+            metadata=dict(session.metadata),
+        )
 
         session.version_history.append(version)
 
         return version
+
+    def latest(
+        self,
+        session: RuntimeSession,
+    ) -> RuntimeVersion | None:
+        """
+        Return the latest Runtime Version.
+        """
+
+        if not session.version_history:
+            return None
+
+        return session.version_history[-1]
 
     def retrieve(
         self,
@@ -45,7 +61,7 @@ class VersionManager:
         version_id: str,
     ) -> RuntimeVersion | None:
         """
-        Retrieve a Version by identity.
+        Retrieve a Runtime Version by identifier.
         """
 
         for version in session.version_history:
@@ -54,30 +70,12 @@ class VersionManager:
 
         return None
 
-    def latest(
-        self,
-        session: RuntimeSession,
-    ) -> RuntimeVersion | None:
-        """
-        Return the latest Runtime Version.
-
-        Returns None when no Versions exist.
-        """
-
-        if not session.version_history:
-            return None
-
-        return session.version_history[-1]
-
     def list_versions(
         self,
         session: RuntimeSession,
     ) -> tuple[RuntimeVersion, ...]:
         """
-        Return an immutable snapshot
-        of Version History.
+        Return immutable Runtime Version history.
         """
 
-        return tuple(
-            session.version_history
-        )
+        return tuple(session.version_history)

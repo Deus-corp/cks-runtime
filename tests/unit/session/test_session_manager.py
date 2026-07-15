@@ -12,15 +12,20 @@ def test_create_session():
     )
 
     assert session is not None
+    assert session.knowledge_structure == {}
 
-    assert len(manager.list_sessions()) == 1
+    assert len(
+        manager.list_sessions()
+    ) == 1
 
 
 def test_get_session():
 
     manager = SessionManager()
 
-    created = manager.create_session({})
+    created = manager.create_session(
+        knowledge_structure={}
+    )
 
     loaded = manager.get_session(
         created.session_id
@@ -33,7 +38,9 @@ def test_close_session():
 
     manager = SessionManager()
 
-    session = manager.create_session({})
+    session = manager.create_session(
+        knowledge_structure={}
+    )
 
     manager.close_session(
         session.session_id
@@ -55,3 +62,18 @@ def test_unknown_session_returns_none():
     assert manager.get_session(
         "unknown"
     ) is None
+
+
+def test_list_sessions_returns_copy():
+
+    manager = SessionManager()
+
+    manager.create_session({})
+
+    sessions = manager.list_sessions()
+
+    sessions.clear()
+
+    assert len(
+        manager.list_sessions()
+    ) == 1

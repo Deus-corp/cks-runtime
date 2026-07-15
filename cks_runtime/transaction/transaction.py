@@ -57,6 +57,14 @@ class RuntimeTransaction:
         TransactionStatus.CREATED
     )
 
+    def _ensure_not_completed(self) -> bool:
+        """
+        Return False when the Transaction has
+        already reached a terminal state.
+        """
+
+        return not self.completed
+
     def add_operation(
         self,
         operation: Any,
@@ -82,12 +90,18 @@ class RuntimeTransaction:
         Mark Transaction as executing.
         """
 
+        if not self._ensure_not_completed():
+            return
+
         self.status = TransactionStatus.EXECUTING
 
     def mark_validating(self) -> None:
         """
         Mark Transaction as validating.
         """
+
+        if not self._ensure_not_completed():
+            return
 
         self.status = TransactionStatus.VALIDATING
 
@@ -96,6 +110,9 @@ class RuntimeTransaction:
         Complete Transaction successfully.
         """
 
+        if not self._ensure_not_completed():
+            return
+
         self.status = TransactionStatus.COMMITTED
 
     def rollback(self) -> None:
@@ -103,12 +120,18 @@ class RuntimeTransaction:
         Roll back pending operational changes.
         """
 
+        if not self._ensure_not_completed():
+            return
+
         self.status = TransactionStatus.ROLLED_BACK
 
     def abort(self) -> None:
         """
         Abort Transaction execution.
         """
+
+        if not self._ensure_not_completed():
+            return
 
         self.status = TransactionStatus.ABORTED
 

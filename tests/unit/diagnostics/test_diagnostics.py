@@ -7,6 +7,7 @@ from cks_runtime.diagnostics.diagnostic import (
 
 
 def test_empty_aggregator():
+
     agg = DiagnosticAggregator()
 
     assert agg.count() == 0
@@ -14,24 +15,26 @@ def test_empty_aggregator():
 
 
 def test_add_runtime_diagnostic():
+
     agg = DiagnosticAggregator()
 
-    d = Diagnostic(
+    diagnostic = Diagnostic(
         message="Session created",
         source=DiagnosticSource.RUNTIME,
         severity=DiagnosticSeverity.INFO,
     )
 
-    agg.add(d)
+    agg.add(diagnostic)
 
     assert agg.count() == 1
-    assert agg.all()[0] == d
+    assert agg.all()[0] == diagnostic
 
 
 def test_extend():
+
     agg = DiagnosticAggregator()
 
-    ds = [
+    diagnostics = (
         Diagnostic(
             message="A",
             source=DiagnosticSource.RUNTIME,
@@ -42,14 +45,15 @@ def test_extend():
             source=DiagnosticSource.CORE,
             severity=DiagnosticSeverity.WARNING,
         ),
-    ]
+    )
 
-    agg.extend(ds)
+    agg.extend(diagnostics)
 
     assert agg.count() == 2
 
 
 def test_clear():
+
     agg = DiagnosticAggregator()
 
     agg.add(
@@ -63,9 +67,11 @@ def test_clear():
     agg.clear()
 
     assert agg.count() == 0
+    assert agg.all() == ()
 
 
 def test_has_errors():
+
     agg = DiagnosticAggregator()
 
     agg.add(
@@ -77,6 +83,7 @@ def test_has_errors():
     )
 
     assert agg.has_errors()
+
 
 def test_diagnostics_are_returned_as_tuple():
 
@@ -90,7 +97,7 @@ def test_diagnostics_are_returned_as_tuple():
         )
     )
 
-    assert isinstance(
-        agg.all(),
-        tuple,
-    )
+    diagnostics = agg.all()
+
+    assert isinstance(diagnostics, tuple)
+    assert len(diagnostics) == 1
