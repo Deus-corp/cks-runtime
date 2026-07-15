@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+
+title: "CKS Runtime"
+
+message: >
+  If you use CKS Runtime,
+  please cite it using the metadata provided in this file.
+
+type: software
+
+authors:
+  - family-names: "Hruznov"
+    given-names: "Vladyslav"
+
+repository-code: "https://github.com/Deus-corp/cks-runtime"
+
+url: "https://github.com/Deus-corp/cks-runtime"
+
+license: "MIT"
+
+version: "0.1.0"
+
+date-released: "2026-07-15"
+
+abstract: >
+  CKS Runtime is the reference operational environment for
+  Canonical Knowledge Structures. It provides session management,
+  transaction coordination, storage abstraction, version history,
+  diagnostics aggregation, and adapter integration while preserving
+  the semantic guarantees established by CKS Core.
+
+keywords:
+  - runtime
+  - canonical knowledge structure
+  - knowledge management
+  - session management
+  - transactions
+  - version history
+  - storage abstraction
+  - diagnostics
+  - interoperability
+  - reference implementation
+
+language: "en"
+
+preferred-citation:
+  type: software
+  authors:
+    - family-names: "Hruznov"
+      given-names: "Vladyslav"
+  title: "CKS Runtime"
+  version: "0.1.0"
+  url: "https://github.com/Deus-corp/cks-runtime"
