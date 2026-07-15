@@ -1,106 +1,55 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cks-runtime"
-version = "0.1.0"
+version = "0.1.1"
 
-description = "Canonical Runtime for Canonical Knowledge Structures"
+description = "Canonical Runtime for the Canonical Knowledge Structure ecosystem"
 
 readme = "README.md"
 
-requires-python = ">=3.11"
+authors = [
+    { name = "Vladyslav Hruznov" }
+]
 
 license = { text = "MIT" }
 
-authors = [
-    { name = "Deus Corp" }
+requires-python = ">=3.12"
+
+dependencies = [
+    "cks-core>=1.1.1",
 ]
 
 keywords = [
-    "cks",
+    "canonical-knowledge-structure",
     "runtime",
-    "knowledge",
-    "architecture",
-    "canonical"
+    "knowledge-runtime",
+    "transactions",
+    "sessions",
+    "versioning",
 ]
 
 classifiers = [
     "Development Status :: 3 - Alpha",
-
     "Intended Audience :: Developers",
-
     "License :: OSI Approved :: MIT License",
-
-    "Programming Language :: Python :: 3",
-
-    "Programming Language :: Python :: 3.11",
-
     "Programming Language :: Python :: 3.12",
-
-    "Operating System :: OS Independent"
-]
-
-dependencies = [
-    "cks-core>=0.1.0"
-]
-
-[project.optional-dependencies]
-
-dev = [
-    "pytest>=8",
-    "ruff>=0.6",
-    "mypy>=1.10"
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 [project.urls]
-
 Homepage = "https://github.com/Deus-corp/cks-runtime"
-
-Repository = "https://github.com/Deus-corp/cks-runtime"
-
-Issues = "https://github.com/Deus-corp/cks-runtime/issues"
-
-[tool.setuptools]
-
-include-package-data = true
+Documentation = "https://github.com/Deus-corp/cks-runtime"
 
 [tool.setuptools.packages.find]
+where = ["."]
+include = ["cks_runtime*"]
 
-include = [
-    "cks_runtime*"
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.0",
 ]
-
-[tool.pytest.ini_options]
-
-testpaths = [
-    "tests"
-]
-
-python_files = [
-    "test_*.py"
-]
-
-[tool.ruff]
-
-line-length = 88
-
-target-version = "py311"
-
-[tool.ruff.lint]
-
-select = [
-    "E",
-    "F",
-    "I",
-    "UP"
-]
-
-[tool.mypy]
-
-python_version = "3.11"
-
-strict = true
-
-ignore_missing_imports = true
