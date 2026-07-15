@@ -19,7 +19,7 @@ license = { text = "MIT" }
 requires-python = ">=3.11.15"
 
 dependencies = [
-    "cks-core>=1.1.1",
+    "cks-core>=1.0.0",
 ]
 
 keywords = [
