@@ -19,4 +19,4 @@ class RuntimeConfig:
 
     runtime_name: str = "CKS Runtime"
 
-    runtime_version: str = "0.1.1"
+    runtime_version: str = "0.1.2"
