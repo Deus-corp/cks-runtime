@@ -51,6 +51,10 @@ persist and reason about.
 Every knowledge lifecycle operation shall execute within exactly one
 Runtime Session.
 
+The reference implementation encodes this decision in the
+RuntimeSession dataclass (cks_runtime.session.session), which
+holds all operational state for a single execution context.
+
 The Session is the canonical owner of Runtime operational state.
 
 Knowledge lifecycle operations shall never execute outside a Session.
@@ -88,6 +92,9 @@ Session identity:
 - is not a canonical object identity;
 - shall never replace identities defined by CKS Core.
 
+In the reference implementation, the session identity is a UUID
+generated automatically by RuntimeSession.__init__.
+
 ---
 
 # Dependency Model
@@ -112,11 +119,20 @@ Canonical Knowledge Structure
         ▼
 
 CKS Core
-````
+```
+
+The reference implementation stores the reference to the
+Canonical Knowledge Structure in
+RuntimeSession.knowledge_structure.
 
 Runtime manages lifecycle.
 
 CKS Core defines semantics.
+
+The reference implementation delegates session ownership to the
+SessionManager class, which maintains a registry of active
+sessions and enforces the rule that each session belongs to
+exactly one Runtime instance.
 
 ---
 

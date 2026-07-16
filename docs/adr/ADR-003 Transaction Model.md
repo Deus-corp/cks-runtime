@@ -51,6 +51,11 @@ occur through a Runtime Transaction.
 Transactions are the exclusive mechanism for coordinated Runtime state
 transitions.
 
+The reference implementation enforces this rule through the
+TransactionManager class, which owns the registry of active
+transactions and provides the sole interface for beginning,
+committing, rolling back, and aborting them.
+
 Runtime components shall not directly modify Session lifecycle state.
 
 ---
@@ -87,6 +92,9 @@ Transaction identity:
 - is not a canonical identity;
 - shall never replace identities defined by CKS Core.
 
+In the reference implementation, the transaction identity is a UUID
+generated automatically by RuntimeTransaction.__init__.
+
 ---
 
 # Execution Model
@@ -119,7 +127,13 @@ Commit / Rollback / Abort
     │
 
 Updated Session State
-````
+```
+
+The reference implementation realises this execution model in the
+ExecutionPipeline.commit method: it first invokes Core validation
+via CksCoreAdapter.validate, then either commits the transaction
+through TransactionManager.commit or rolls it back, depending on
+the validation outcome.
 
 All lifecycle-relevant state transitions occur inside the Transaction
 boundary.
@@ -135,6 +149,12 @@ A successful Transaction commit:
 * enables persistence.
 
 Transaction commit does not itself create Versions or persist data.
+
+In the reference implementation, the commit flow is orchestrated by
+ExecutionPipeline.commit, which calls CksCoreAdapter.validate
+before delegating the final commit to TransactionManager.commit.
+This ensures that no transaction is committed without prior
+semantic validation by CKS Core.
 
 ---
 

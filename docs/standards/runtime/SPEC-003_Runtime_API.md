@@ -101,6 +101,12 @@ Adapters
 Applications
 ```
 
+In the reference implementation, this boundary is realised by the
+`Runtime` class in `cks_runtime.runtime`.  The `Runtime` façade
+exposes methods that correspond to the canonical capabilities
+described in this specification, and it delegates all semantic
+calls to the `CksCoreAdapter` from `cks-runtime-core`.
+
 The Runtime API represents operational capabilities only.
 
 ---
@@ -236,6 +242,18 @@ History
     retrieve
 ```
 
+The reference implementation provides these capabilities as methods
+on the `Runtime` class:
+
+| Conceptual Capability | Reference Implementation |
+|-----------------------|--------------------------|
+| Session create / retrieve / close | `create_session`, `get_session`, `close_session` |
+| Knowledge load / retrieve | `create_session` (with `knowledge_structure`) |
+| Validation validate | delegated to `CksCoreAdapter.validate` |
+| Transactions begin / commit / rollback | `begin_transaction`, `commit_transaction`, `rollback_transaction`, `abort_transaction` |
+| Diagnostics retrieve | `runtime.diagnostics` (via `DiagnosticAggregator`) |
+| History retrieve | `runtime.versions.latest`, `runtime.versions.list_versions` |
+
 The Runtime API may request knowledge evolution operations.
 
 The resulting semantic evolution is defined exclusively by CKS Core.
@@ -267,6 +285,11 @@ The Runtime API shall not reinterpret Core Diagnostics.
 # 7. Session-Centric Design
 
 Every Runtime API operation shall execute within exactly one Session.
+
+The reference implementation enforces this rule: `create_session`
+returns a `RuntimeSession`, and `begin_transaction` requires a
+valid `RuntimeSession` as its argument.  There are no global
+operations that bypass the session context.
 
 No operation shall implicitly operate on global Runtime state.
 

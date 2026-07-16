@@ -61,6 +61,11 @@ A clear separation is required.
 
 CKS Runtime shall use an implementation-independent Storage abstraction.
 
+The reference implementation provides this abstraction through the
+RuntimeStorage abstract class in cks_runtime.storage.storage,
+which defines the canonical interface that every storage backend
+must satisfy.
+
 Storage is responsible only for persistence of Runtime operational state.
 
 Storage shall never define, validate or interpret knowledge semantics.
@@ -126,6 +131,11 @@ Storage may provide:
 * persistence of Runtime metadata;
 * restoration capability.
 
+The reference implementation ships with InMemoryStorage, a
+deterministic in‑memory backend that implements the
+RuntimeStorage interface and is suitable for testing and
+single‑process usage.
+
 Storage shall not provide:
 
 * semantic validation;
@@ -162,6 +172,12 @@ Version Creation
 Storage Persistence
 ```
 
+In the reference implementation, this flow is enforced by the
+ExecutionPipeline.commit method, which calls
+self._runtime.storage.save_version and
+self._runtime.storage.save_session only after a successful
+transaction commit.
+
 Storage shall never:
 
 * commit Transactions;
@@ -179,6 +195,11 @@ Runtime owns:
 * recovery process;
 * Session reconstruction;
 * lifecycle restoration.
+
+The reference implementation provides load_session and
+load_version methods on the RuntimeStorage interface, with
+corresponding error types (SessionNotFound, VersionNotFound)
+defined in cks_runtime.storage.exceptions.
 
 ---
 

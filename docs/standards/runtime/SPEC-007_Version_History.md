@@ -63,7 +63,12 @@ Transaction
 Commit
       │
 Version
-````
+```
+
+In the reference implementation, version creation is handled by the
+`VersionManager.create` method, which is called from
+`ExecutionPipeline.commit` only after a transaction has been
+successfully validated and committed.
 
 Version creation is an observable consequence of successful Transaction completion.
 
@@ -86,6 +91,11 @@ Immutability applies to:
 * Version metadata;
 * Version ordering information.
 
+The reference implementation enforces immutability by making
+`RuntimeVersion` a frozen dataclass with `__post_init__` performing
+a deep copy of the `knowledge_structure` and `metadata` fields,
+ensuring that no mutable objects are shared with the live session.
+
 Subsequent Runtime evolution produces new Versions rather than altering existing ones.
 
 ---
@@ -105,6 +115,11 @@ Version 3
      │
 Version N
 ```
+
+In the reference implementation, version history is stored as a
+list on `RuntimeSession.version_history`. The `VersionManager`
+provides `latest`, `retrieve`, and `list_versions` methods for
+accessing this history in a controlled manner.
 
 Ordering reflects Runtime operational evolution.
 

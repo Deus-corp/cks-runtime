@@ -50,6 +50,12 @@ between operational history and semantic knowledge.
 CKS Runtime shall represent history as an ordered collection of immutable
 Runtime Versions.
 
+The reference implementation encodes this decision in the
+VersionManager class, which creates RuntimeVersion instances
+only after a successful transaction commit. RuntimeVersion is a
+frozen dataclass that deep‑copies its knowledge_structure and
+metadata fields in __post_init__, guaranteeing immutability.
+
 Every committed Transaction that produces an observable Session state
 transition shall create a new Version.
 
@@ -109,7 +115,7 @@ Transaction
 Version
 
     records resulting Session state
-````
+```
 
 Versions are not Core semantic objects.
 
@@ -159,6 +165,11 @@ Commit
 
 Version Creation
 ```
+
+In the reference implementation, this flow is enforced by
+ExecutionPipeline.commit, which calls
+self._runtime.versions.create(transaction.session) only after
+CksCoreAdapter.validate returns a valid result.
 
 The following shall never create Versions:
 
@@ -243,6 +254,10 @@ Restore
 Runtime Session
 ```
 
+The reference implementation provides restoration through the
+load_session and load_version methods of the RuntimeStorage
+interface, with InMemoryStorage as the reference implementation.
+
 Restoration creates operational state equivalent to the selected Version.
 
 Restoration shall:
@@ -291,6 +306,11 @@ Storage shall preserve:
 * Version lineage.
 
 The Storage implementation remains independent.
+
+In the reference implementation, InMemoryStorage.save_version
+performs a deepcopy of the version before storing it, ensuring
+that the persisted copy is fully isolated from any future
+modifications.
 
 ---
 

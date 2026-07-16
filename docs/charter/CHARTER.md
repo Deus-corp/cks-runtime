@@ -239,20 +239,22 @@ Runtime provides operational capabilities without modifying semantic meaning.
 
 ---
 
-# 9. Long-Term Roadmap
+## 9. Long-Term Roadmap
 
-The initial Runtime Standard is expected to comprise the following normative specifications:
+The initial Runtime Standard comprises the following normative
+specifications:
 
-- Runtime Overview
-- Session Model
-- Runtime API
-- Diagnostics
-- Transactions
-- Storage Abstraction
-- Version History
-- Conformance
+- Runtime Overview (SPEC‑001)
+- Session Model (SPEC‑002)
+- Runtime API (SPEC‑003)
+- Diagnostics (SPEC‑004)
+- Transactions (SPEC‑005)
+- Storage Abstraction (SPEC‑006)
+- Version History (SPEC‑007)
+- Conformance (SPEC‑008)
 
-Future specifications may extend Runtime while preserving the architectural principles established by this Charter.
+Future specifications may extend Runtime while preserving the
+architectural principles established by this Charter.
 
 ---
 

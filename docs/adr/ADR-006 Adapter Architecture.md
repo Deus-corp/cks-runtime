@@ -60,7 +60,13 @@ CKS Runtime
         ↓
 
 CKS Core
-````
+```
+
+The reference implementation realises this architecture through the
+Runtime façade, which exposes the canonical Runtime API. The
+CksCoreAdapter (from cks-runtime-core) ensures that all semantic
+calls flow through the public cks-core API, strictly enforcing
+the dependency direction defined here.
 
 Reverse dependencies are prohibited.
 
@@ -182,6 +188,11 @@ Adapters shall:
 
 Adapters shall never access internal Runtime components directly.
 
+The cks-mcp server is the first conformant adapter. It
+communicates with Runtime exclusively through the Runtime class
+and never imports internal Runtime modules. This pattern will be
+replicated for all future adapters (CLI, HTTP, etc.).
+
 The following is prohibited:
 
 ```text
@@ -293,6 +304,11 @@ HTTP Request
 Python API Call
 ```
 
+A validation request issued via cks-mcp (MCP tool call) and the
+same request issued via cks-cli produce identical Runtime API
+calls and therefore identical Transaction outcomes, Version History
+entries, and diagnostics.
+
 Transport differences shall not affect:
 
 * Runtime semantics;
@@ -372,6 +388,11 @@ New Adapters may be introduced without modifying:
 
 Adding a new Adapter is an ecosystem extension rather than a semantic
 extension.
+
+The planned cks-http and cks-cli adapters will follow this
+model, each wrapping the same Runtime façade in a
+transport‑specific layer without duplicating any operational or
+semantic logic.
 
 ---
 

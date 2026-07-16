@@ -79,6 +79,12 @@ Storage
 Future Runtime
 ````
 
+In the reference implementation, the `RuntimeStorage` abstract class
+defines the canonical interface that every storage backend must
+satisfy.  The bundled `InMemoryStorage` provides a deterministic,
+in‑memory reference implementation suitable for testing and
+single‑process usage.
+
 Storage operates exclusively on Runtime operational state.
 
 Storage shall never become a source of semantic interpretation.
@@ -194,6 +200,11 @@ Examples of possible implementations include:
 * file-based persistence;
 * cloud services.
 
+The reference implementation ships with `InMemoryStorage`, which is
+deterministic and suitable for testing.  Additional backends (SQLite,
+PostgreSQL) are planned for future releases, all implementing the
+same `RuntimeStorage` interface.
+
 The choice of storage technology is an implementation concern.
 
 Observable Runtime behavior is the subject of standardization.
@@ -224,6 +235,11 @@ Storage restores Runtime Sessions.
 Storage does not manage Session lifecycle.
 
 Session lifecycle is defined separately by the Runtime Session model.
+
+The reference implementation provides `save_session` and
+`load_session` methods on the `RuntimeStorage` interface.
+`InMemoryStorage` implements these by deep‑copying the session
+state, guaranteeing isolation between persisted and live objects.
 
 ---
 

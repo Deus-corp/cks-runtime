@@ -89,6 +89,10 @@ A conformant Runtime shall:
 - expose Runtime capabilities through the Runtime API;
 - preserve transport-independent observable behaviour.
 
+The reference implementation satisfies these requirements through the
+`Runtime` façade, `SessionManager`, `TransactionManager`,
+`VersionManager`, and `ExecutionPipeline` classes in `cks-runtime`.
+
 ---
 
 # 6. Semantic Preservation
@@ -118,6 +122,11 @@ A conformant Runtime shall:
 - preserve atomic operational behaviour;
 - prevent externally observable intermediate states.
 
+In the reference implementation, transaction atomicity and isolation
+are enforced by the `ExecutionPipeline.commit` method, which invokes
+Core validation via `CksCoreAdapter` before committing the
+transaction through `TransactionManager.commit`.
+
 Transaction behaviour shall remain consistent with SPEC-005.
 
 ---
@@ -132,6 +141,10 @@ A conformant Runtime shall:
 - preserve historical Runtime evolution;
 - support restoration according to Version History rules.
 
+The reference implementation guarantees version immutability through
+the `RuntimeVersion` frozen dataclass, which performs a deep copy of
+the `knowledge_structure` and `metadata` fields in `__post_init__`.
+
 Existing Versions shall never be modified or rewritten.
 
 ---
@@ -144,6 +157,11 @@ A conformant Runtime shall:
 - distinguish Core Diagnostics from Runtime Diagnostics;
 - aggregate diagnostics without modifying ownership or meaning;
 - expose diagnostics through Runtime interfaces.
+
+The reference implementation satisfies these requirements through the
+`DiagnosticAggregator` class and the `RuntimeValidationResult`
+dataclass, which together preserve Core diagnostic ownership and
+separate Core from Runtime diagnostics.
 
 Runtime diagnostics may describe operational behaviour only.
 
@@ -169,6 +187,11 @@ Storage technology may influence:
 - deployment characteristics.
 
 Storage technology shall not alter observable Runtime behaviour.
+
+The reference implementation ships with `InMemoryStorage`, a
+deterministic in‑memory backend that implements the `RuntimeStorage`
+interface.  Additional backends (SQLite, PostgreSQL) are planned for
+future releases and will adhere to the same interface.
 
 ---
 
@@ -204,6 +227,11 @@ a conformant Runtime shall produce equivalent observable results including:
 - diagnostics;
 - Transaction outcomes;
 - Runtime API responses.
+
+The reference implementation achieves determinism through immutable
+data structures (`frozen` dataclasses, `deepcopy` in
+`RuntimeVersion.__post_init__`) and the predictable behaviour of
+`InMemoryStorage`.
 
 Internal implementation details may differ.
 
@@ -241,6 +269,11 @@ The suite shall verify:
 - transport independence.
 
 Future editions may extend the Conformance Suite while preserving existing observable requirements.
+
+The current test suite (89 tests, located in `tests/unit/`) already
+covers sessions, transactions, versioning, diagnostics, storage, and
+runtime integration, providing a foundation for the future official
+Conformance Suite.
 
 ---
 

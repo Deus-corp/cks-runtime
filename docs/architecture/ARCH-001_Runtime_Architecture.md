@@ -198,6 +198,15 @@ Runtime extends Core operationally.
 
 Runtime never extends Core semantically.
 
+The reference implementation provides this boundary through the
+CksCoreAdapter class (part of the cks-runtime-core package).
+CksCoreAdapter implements the abstract CoreInterface and
+delegates every semantic call—validation, serialization, evolution,
+and explainability—to the canonical cks-core library. This
+adapter is the single point of contact between Runtime components
+and the Core, guaranteeing that the architectural boundary remains
+strictly enforced.
+
 ---
 
 # 6. Runtime Components
@@ -457,6 +466,10 @@ Public CKS Core API
 
 CKS Core
 
+The reference implementation realises this boundary with the
+cks-runtime-core package and its CksCoreAdapter class, which
+wraps the public Python API of cks-core.
+
 This boundary prevents Runtime components from depending upon internal implementation details of CKS Core.
 
 Only the public semantic API forms the supported integration contract between the two standards.
@@ -469,26 +482,17 @@ A conformant Reference Runtime may be organised conceptually as:
 
 ```text
 cks_runtime/
-
     runtime.py
-
     api/
-
     facade/
-
     session/
-
     transaction/
-
     diagnostics/
-
     versioning/
-
     storage/
-
     explainability/
-
     core_api/
+    cks_runtime_core/    # concrete CoreInterface implementation
 ```
 
 Equivalent layouts are permitted provided architectural responsibilities

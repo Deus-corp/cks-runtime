@@ -54,7 +54,12 @@ CKS Runtime
         │
         ▼
 CKS Core
-````
+```
+
+The reference implementation realises this layering through the
+`CoreInterface` abstraction (defined in `cks_runtime.core_api.interfaces`)
+and its concrete implementation, `CksCoreAdapter` (part of the
+`cks-runtime-core` package).
 
 Detailed Runtime architecture is defined separately by ARCH-001.
 
@@ -151,6 +156,10 @@ Runtime
 Core
 ```
 
+These rules are reflected in the project's `pyproject.toml`: the
+`cks-runtime` package declares `cks-core` as a dependency, while
+`cks-core` has no dependency on `cks-runtime`.
+
 The following rules are mandatory:
 
 * Core shall never depend on Runtime.
@@ -190,6 +199,11 @@ Positive consequences include:
 * simplified testing;
 * improved maintainability;
 * stable semantic compatibility.
+
+The introduction of the `cks-runtime-core` package with
+`CksCoreAdapter` is a direct consequence of this decision: it
+provides a single, swappable integration point between the
+operational and semantic layers.
 
 Negative consequences include:
 

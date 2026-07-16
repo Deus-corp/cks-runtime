@@ -47,6 +47,12 @@ Transactions control operational state transitions.
 
 Transactions never redefine knowledge semantics.
 
+In the reference implementation, the `RuntimeTransaction` dataclass
+holds the transaction state, associated session, operations, and
+diagnostics.  The `TransactionManager` class owns the registry of
+active transactions and provides the sole interface for beginning,
+committing, rolling back, and aborting them.
+
 Semantic interpretation remains exclusively defined by CKS Core.
 
 ---
@@ -57,7 +63,8 @@ Every Transaction belongs to exactly one Runtime Session.
 
 A Transaction shall never simultaneously belong to multiple Sessions.
 
-A Runtime coordinates Transactions through Session ownership.
+A Runtime coordinates Transactions through its TransactionManager.
+Each Transaction belongs to exactly one Runtime Session.
 
 Transaction ownership is operational and shall not be interpreted as semantic ownership.
 
@@ -91,6 +98,12 @@ Validation
     ↓
 Completed
 ````
+
+The reference implementation tracks this lifecycle through the
+`TransactionStatus` enum, which defines the states `CREATED`,
+`EXECUTING`, `VALIDATING`, `COMMITTED`, `ROLLED_BACK`, and
+`ABORTED`.  The `TransactionManager` is responsible for
+transitioning transactions through these states.
 
 A Runtime implementation may internally refine this lifecycle provided that the observable behavior defined by this specification is preserved.
 
@@ -167,6 +180,12 @@ Canonical outcomes are:
 * Committed
 * Rolled Back
 * Aborted
+
+In the reference implementation, these outcomes correspond to the
+`commit`, `rollback`, and `abort` methods of `TransactionManager`.
+The `ExecutionPipeline.commit` method invokes Core validation via
+`CksCoreAdapter` before calling `TransactionManager.commit`,
+ensuring that only semantically valid transactions are committed.
 
 The outcome of a Transaction describes only the operational result of Runtime processing.
 

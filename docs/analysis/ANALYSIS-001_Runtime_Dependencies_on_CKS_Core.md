@@ -246,6 +246,11 @@ Official Runtime implementations may provide automatic integration with the offi
 
 Such integration is an implementation convenience rather than an architectural dependency.
 
+The reference implementation of this integration is provided by the
+cks-runtime-core package, which contains CksCoreAdapter — a
+concrete implementation of CoreInterface that delegates every
+semantic call to cks-core.
+
 The architectural dependency remains:
 
 ```text

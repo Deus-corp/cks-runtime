@@ -77,6 +77,11 @@ Conceptually, Session state consists of:
 * Storage context;
 * explainability context.
 
+In the reference implementation, `RuntimeSession` is a dataclass that
+holds the `knowledge_structure`, session metadata, diagnostics,
+version history, and an optional active transaction.  The
+`SessionManager` owns the registry of active sessions.
+
 Runtime implementations may maintain additional implementation-specific state provided such state does not alter canonical semantics.
 
 ---
@@ -98,6 +103,10 @@ Closed
 Transactions, persistence operations and version creation occur during the Active lifecycle state.
 
 Implementations may internally refine this lifecycle provided its externally observable behaviour remains equivalent.
+
+The reference implementation tracks the lifecycle state through a
+`closed` flag on `RuntimeSession`.  The `SessionManager` is
+responsible for removing closed sessions from the active registry.
 
 ---
 
@@ -164,6 +173,12 @@ Canonical Knowledge Structure
         ↓
 CKS Core
 ```
+
+In the reference implementation this hierarchy is realised by the
+`Runtime` façade, which delegates session management to
+`SessionManager`.  `SessionManager` owns the collection of
+`RuntimeSession` objects and provides the sole interface for creating,
+retrieving, and closing sessions.
 
 Each layer owns a distinct architectural responsibility.
 

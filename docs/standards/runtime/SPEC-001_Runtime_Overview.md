@@ -117,6 +117,10 @@ Core provides:
 
 Runtime invokes these services without modifying their behaviour.
 
+The reference implementation provides this integration through the
+`cks-runtime-core` package, which contains `CksCoreAdapter` — a
+concrete implementation of `CoreInterface`.
+
 The dependency direction defined by ANALYSIS-001 is normative and shall remain unchanged throughout the evolution of the Runtime Standard.
 
 ---
@@ -144,6 +148,11 @@ The Runtime architecture consists of several cooperating conceptual subsystems.
                         │
                    CKS Core
 ```
+
+Communication between CKS Runtime and CKS Core passes exclusively
+through the Core API Boundary, as defined in ANALYSIS‑001 and
+ARCH‑001. The reference implementation realises this boundary via
+the `CksCoreAdapter` class.
 
 Each conceptual subsystem owns a single operational responsibility.
 
@@ -174,6 +183,13 @@ Coordinates atomic Runtime state transitions.
 ## Validation Coordinator
 
 Invokes canonical validation provided by CKS Core.
+
+**Validation Coordinator**
+
+Invokes canonical validation provided by CKS Core. In the reference
+implementation this responsibility is carried by `CksCoreAdapter`
+(part of the `cks-runtime-core` package), which wraps the public
+Python API of `cks-core`.
 
 ---
 

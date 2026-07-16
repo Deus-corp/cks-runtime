@@ -124,6 +124,11 @@ Conceptually:
    Core Diagnostics    Runtime Diagnostics
 ````
 
+In the reference implementation, aggregation is performed by the
+`DiagnosticAggregator` class. It collects both `Diagnostic` objects
+(Runtime‑owned) and diagnostics forwarded from `CksCoreAdapter`
+(Core‑owned), preserving their ownership and immutability.
+
 Aggregation shall preserve diagnostic ownership.
 
 Aggregation shall never modify diagnostic content.
@@ -185,6 +190,11 @@ Runtime Operation Result
 
         └── Runtime Diagnostics
 ```
+
+The reference implementation realises this model in the
+`RuntimeValidationResult` class, which combines the validation
+outcome, Core diagnostics, and Runtime diagnostics into a single
+immutable object returned by `CksCoreAdapter.validate`.
 
 Diagnostic exposure shall preserve:
 
@@ -273,6 +283,12 @@ Core Diagnostics   Runtime Diagnostics
 
             Adapters
 ```
+
+The reference implementation follows this flow in the
+`ExecutionPipeline.commit` method: Core validation is invoked via
+`CksCoreAdapter`, diagnostics are aggregated through
+`runtime.diagnostics`, and the final `RuntimeValidationResult` is
+propagated back to the caller.
 
 ---
 
