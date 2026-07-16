@@ -19,7 +19,7 @@ class RuntimeConfig:
 
     runtime_name: str = "CKS Runtime"
 
-    runtime_version: str = "0.1.2"
+    runtime_version: str = "0.2.0"
 
     auto_version_on_commit: bool = True
 
