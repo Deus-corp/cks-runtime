@@ -36,8 +36,49 @@ def test_runtime_version_is_frozen():
     except FrozenInstanceError:
         pass
 
+
 def test_runtime_version_metadata():
 
     version = create_version()
 
     assert version.metadata == {}
+
+
+def test_runtime_version_copies_metadata():
+
+    metadata = {
+        "author": "runtime",
+    }
+
+    version = RuntimeVersion(
+        session_id="session",
+        transaction_id="tx",
+        knowledge_structure={},
+        metadata=metadata,
+    )
+
+    metadata["author"] = "changed"
+
+    assert version.metadata == {
+        "author": "runtime",
+    }
+
+
+def test_runtime_version_copies_knowledge_structure():
+
+    ks = {
+        "nodes": [],
+    }
+
+    version = RuntimeVersion(
+        session_id="session",
+        transaction_id="tx",
+        knowledge_structure=ks,
+        metadata={},
+    )
+
+    ks["nodes"].append("A")
+
+    assert version.knowledge_structure == {
+        "nodes": [],
+    }

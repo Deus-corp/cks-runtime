@@ -90,6 +90,7 @@ def test_list_versions():
     history = manager.list_versions(session)
 
     assert len(history) == 2
+
     assert isinstance(history, tuple)
 
 
@@ -106,3 +107,20 @@ def test_list_versions_returns_new_tuple():
 
     assert history1 == history2
     assert history1 is not history2
+
+
+def test_version_is_snapshot():
+
+    session = create_session()
+
+    manager = VersionManager()
+
+    version = manager.create(session)
+
+    session.knowledge_structure["new"] = 123
+
+    session.metadata["user"] = "runtime"
+
+    assert version.knowledge_structure == {}
+
+    assert version.metadata == {}

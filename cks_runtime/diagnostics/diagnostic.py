@@ -3,6 +3,8 @@ Runtime Diagnostic model.
 
 Runtime Diagnostics describe operational observations.
 
+Diagnostics are immutable.
+
 They never modify Runtime state and never redefine
 CKS Core semantics.
 """
@@ -44,7 +46,8 @@ class Diagnostic:
 
     - Core Diagnostics belong to CKS Core;
     - Runtime Diagnostics belong to Runtime;
-    - Runtime preserves diagnostics without modifying them.
+    - Runtime preserves Diagnostics without
+      modifying them.
     """
 
     message: str
@@ -64,5 +67,18 @@ class Diagnostic:
     )
 
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC)
+        default_factory=lambda: datetime.now(
+            UTC
+        )
     )
+
+    def __str__(self) -> str:
+        """
+        Human-readable representation.
+        """
+
+        return (
+            f"[{self.severity.value.upper()}] "
+            f"{self.source.value}: "
+            f"{self.message}"
+        )

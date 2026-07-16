@@ -63,6 +63,13 @@ class CoreInterface(ABC):
         Runtime coordinates execution.
 
         CKS Core defines the resulting semantic state.
+
+        Implementations should return the resulting
+        Knowledge Structure.
+
+        Runtime makes no assumptions about whether
+        evolution is performed in-place or by returning
+        a new object.
         """
 
     @abstractmethod

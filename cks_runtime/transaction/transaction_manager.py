@@ -1,22 +1,8 @@
 """
 Runtime Transaction Manager.
-
-Owns Transaction lifecycle.
-
-Responsibilities:
-
-- begin Transactions;
-- retrieve Transactions;
-- coordinate completion;
-- preserve Session ownership.
-
-Does not:
-
-- perform semantic validation;
-- create Versions;
-- persist Runtime state;
-- modify CKS Core behaviour.
 """
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -29,9 +15,10 @@ class TransactionManager:
     """
 
     def __init__(self) -> None:
+
         self._transactions: dict[
             str,
-            RuntimeTransaction
+            RuntimeTransaction,
         ] = {}
 
     def begin(
@@ -39,10 +26,10 @@ class TransactionManager:
         session: Any,
     ) -> RuntimeTransaction:
         """
-        Begin a Transaction for a Session.
+        Begin a Transaction.
 
-        Exactly one active Transaction may exist
-        per Session.
+        Exactly one active Transaction
+        may exist per Session.
         """
 
         if session.active_transaction is not None:
@@ -51,7 +38,7 @@ class TransactionManager:
             )
 
         transaction = RuntimeTransaction(
-            session=session
+            session=session,
         )
 
         self._transactions[
@@ -66,12 +53,9 @@ class TransactionManager:
         self,
         transaction_id: str,
     ) -> RuntimeTransaction | None:
-        """
-        Retrieve a Transaction by identity.
-        """
 
         return self._transactions.get(
-            transaction_id
+            transaction_id,
         )
 
     def commit(
@@ -79,46 +63,47 @@ class TransactionManager:
         transaction: RuntimeTransaction,
     ) -> None:
         """
-        Commit a Transaction.
+        Commit Transaction.
+
+        Session ownership is released only
+        after successful completion.
         """
 
         transaction.commit()
 
-        transaction.session.active_transaction = None
+        self._finish(transaction)
 
     def rollback(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
-        """
-        Roll back a Transaction.
-        """
 
         transaction.rollback()
 
-        transaction.session.active_transaction = None
+        self._finish(transaction)
 
     def abort(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
-        """
-        Abort a Transaction.
-        """
 
         transaction.abort()
+
+        self._finish(transaction)
+
+    def _finish(
+        self,
+        transaction: RuntimeTransaction,
+    ) -> None:
+        """
+        Finish Transaction lifecycle.
+        """
 
         transaction.session.active_transaction = None
 
     def list_transactions(
         self,
     ) -> list[RuntimeTransaction]:
-        """
-        Return known Transactions.
-
-        Primarily intended for Runtime
-        management and testing.
-        """
 
         return list(
             self._transactions.values()

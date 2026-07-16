@@ -1,7 +1,7 @@
 from cks_runtime.session.session import RuntimeSession
 
 
-def test_session_defaults() -> None:
+def test_session_defaults():
 
     session = RuntimeSession(
         knowledge_structure={}
@@ -22,7 +22,7 @@ def test_session_defaults() -> None:
     assert session.active_transaction is None
 
 
-def test_session_close() -> None:
+def test_session_close():
 
     session = RuntimeSession(
         knowledge_structure={}
@@ -35,7 +35,7 @@ def test_session_close() -> None:
     assert session.is_active is False
 
 
-def test_session_has_unique_identifier() -> None:
+def test_session_has_unique_identifier():
 
     session1 = RuntimeSession(
         knowledge_structure={}
@@ -48,13 +48,14 @@ def test_session_has_unique_identifier() -> None:
     assert session1.session_id != session2.session_id
 
 
-def test_close_is_idempotent() -> None:
+def test_close_is_idempotent():
 
     session = RuntimeSession(
         knowledge_structure={}
     )
 
     session.close()
+
     session.close()
 
     assert session.closed is True

@@ -5,10 +5,10 @@ Owns Runtime Session lifecycle.
 
 Responsibilities:
 
-- create Sessions;
-- retrieve Sessions;
-- enumerate active Sessions;
-- close Sessions.
+- create Runtime Sessions;
+- retrieve Runtime Sessions;
+- enumerate active Runtime Sessions;
+- close Runtime Sessions.
 
 Does not own:
 
@@ -17,6 +17,8 @@ Does not own:
 - transactions;
 - version history.
 """
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -36,7 +38,7 @@ class SessionManager:
         knowledge_structure: Any,
     ) -> RuntimeSession:
         """
-        Create and register a new Runtime Session.
+        Create and register a Runtime Session.
         """
 
         session = RuntimeSession(
@@ -54,9 +56,10 @@ class SessionManager:
         session_id: str,
     ) -> RuntimeSession | None:
         """
-        Return a Runtime Session by identifier.
+        Retrieve a Runtime Session.
 
-        Returns None if the Session does not exist.
+        Returns None when the Session
+        does not exist.
         """
 
         return self._sessions.get(
@@ -65,23 +68,32 @@ class SessionManager:
 
     def list_sessions(
         self,
-    ) -> list[RuntimeSession]:
+    ) -> tuple[RuntimeSession, ...]:
         """
-        Return all currently active Runtime Sessions.
+        Return active Runtime Sessions.
+
+        A tuple is returned to prevent
+        accidental external mutation.
         """
 
-        return list(
+        return tuple(
             self._sessions.values(),
         )
 
     def close_session(
         self,
         session_id: str,
-    ) -> None:
+    ) -> bool:
         """
         Close and unregister a Runtime Session.
 
-        Unknown Session identifiers are ignored.
+        Returns
+        -------
+        True
+            Session existed.
+
+        False
+            Session was unknown.
         """
 
         session = self._sessions.get(
@@ -89,10 +101,12 @@ class SessionManager:
         )
 
         if session is None:
-            return
+            return False
 
         session.close()
 
         del self._sessions[
             session_id
         ]
+
+        return True

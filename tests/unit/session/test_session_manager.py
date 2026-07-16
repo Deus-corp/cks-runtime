@@ -1,5 +1,3 @@
-import pytest
-
 from cks_runtime.session.session_manager import SessionManager
 
 
@@ -42,9 +40,9 @@ def test_close_session():
         knowledge_structure={}
     )
 
-    manager.close_session(
+    assert manager.close_session(
         session.session_id
-    )
+    ) is True
 
     assert manager.get_session(
         session.session_id
@@ -53,6 +51,15 @@ def test_close_session():
     assert len(
         manager.list_sessions()
     ) == 0
+
+
+def test_close_unknown_session():
+
+    manager = SessionManager()
+
+    assert manager.close_session(
+        "unknown"
+    ) is False
 
 
 def test_unknown_session_returns_none():
@@ -64,7 +71,7 @@ def test_unknown_session_returns_none():
     ) is None
 
 
-def test_list_sessions_returns_copy():
+def test_list_sessions_returns_tuple():
 
     manager = SessionManager()
 
@@ -72,8 +79,22 @@ def test_list_sessions_returns_copy():
 
     sessions = manager.list_sessions()
 
-    sessions.clear()
+    assert isinstance(
+        sessions,
+        tuple,
+    )
 
-    assert len(
-        manager.list_sessions()
-    ) == 1
+
+def test_list_sessions_returns_new_tuple():
+
+    manager = SessionManager()
+
+    manager.create_session({})
+
+    first = manager.list_sessions()
+
+    second = manager.list_sessions()
+
+    assert first == second
+
+    assert first is not second

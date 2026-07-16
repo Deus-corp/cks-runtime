@@ -27,9 +27,7 @@ while delegating all semantic behaviour to CKS Core.
 
 ---
 
-# Version 0.1 — Runtime Foundation ✅ (current)
-
-Completed:
+# Version 0.1 — Runtime Foundation ✅ (completed)
 
 * Runtime Standard (SPEC-001 … SPEC-008)
 * Runtime Architecture
@@ -46,40 +44,42 @@ Completed:
 
 ---
 
-# Version 0.2 — Core Integration
+# Version 0.2 — Core Integration ✅ (completed)
 
-Planned work:
-
-* Complete Core Integration Layer
+* Concrete Core Adapter (`cks_runtime_core`)
 * Official integration with `cks-core`
 * Runtime/Core compatibility validation
 * Canonical Runtime API stabilization
 * Runtime lifecycle orchestration
+* PyPI publication (`cks-runtime`)
+* Integration test suite (89 tests passing)
 
 ---
 
-# Version 0.3 — Adapter Infrastructure
+# Version 0.3 — Adapter Infrastructure (current)
 
 Planned work:
 
-* Adapter abstraction
+* Adapter abstraction formalization
 * Adapter registry
 * Runtime adapter contracts
 * Shared adapter utilities
+* Adapter development guide
 
-This release establishes Runtime as the bridge between CKS Core and external systems.
+This release establishes Runtime as the canonical bridge between CKS Core and external systems.
 
 ---
 
-# Version 0.4 — MCP Runtime
+# Version 0.4 — MCP Runtime (partially completed via `cks-mcp`)
 
 Planned work:
 
-* `cks-mcp`
-* Runtime-backed MCP server
+* Official `cks-mcp` integration via Runtime
 * Session-aware MCP execution
-* Runtime Transaction integration
+* Runtime Transaction integration into MCP tools
 * Version-aware MCP operations
+
+Note: `cks-mcp` already exists as a standalone server. This release focuses on integrating it with `cks-runtime`.
 
 ---
 
@@ -194,4 +194,3 @@ Every new capability must preserve:
 Runtime shall never become a second semantic engine.
 
 CKS Core remains the single source of semantic truth.
-

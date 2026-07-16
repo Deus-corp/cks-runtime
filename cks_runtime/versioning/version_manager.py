@@ -8,12 +8,13 @@ current Runtime Session state.
 from __future__ import annotations
 
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime.versioning.version import RuntimeVersion
+
+from .version import RuntimeVersion
 
 
 class VersionManager:
     """
-    Coordinates Runtime Version creation.
+    Coordinates Runtime Version lifecycle.
     """
 
     def create(
@@ -23,22 +24,31 @@ class VersionManager:
         """
         Create a new Runtime Version.
 
-        The Version is appended to the owning
-        Session Version History.
+        The Version becomes part of the owning
+        Runtime Session history.
         """
+
+        transaction_id = ""
+
+        if (
+            session.active_transaction
+            is not None
+        ):
+            transaction_id = (
+                session.active_transaction
+                .transaction_id
+            )
 
         version = RuntimeVersion(
             session_id=session.session_id,
-            transaction_id=(
-                session.active_transaction.transaction_id
-                if session.active_transaction is not None
-                else ""
-            ),
+            transaction_id=transaction_id,
             knowledge_structure=session.knowledge_structure,
-            metadata=dict(session.metadata),
+            metadata=session.metadata,
         )
 
-        session.version_history.append(version)
+        session.version_history.append(
+            version
+        )
 
         return version
 
@@ -61,11 +71,17 @@ class VersionManager:
         version_id: str,
     ) -> RuntimeVersion | None:
         """
-        Retrieve a Runtime Version by identifier.
+        Retrieve a Runtime Version
+        by identifier.
         """
 
-        for version in session.version_history:
-            if version.version_id == version_id:
+        for version in (
+            session.version_history
+        ):
+            if (
+                version.version_id
+                == version_id
+            ):
                 return version
 
         return None
@@ -73,9 +89,15 @@ class VersionManager:
     def list_versions(
         self,
         session: RuntimeSession,
-    ) -> tuple[RuntimeVersion, ...]:
+    ) -> tuple[
+        RuntimeVersion,
+        ...
+    ]:
         """
-        Return immutable Runtime Version history.
+        Return immutable Runtime
+        Version history.
         """
 
-        return tuple(session.version_history)
+        return tuple(
+            session.version_history
+        )

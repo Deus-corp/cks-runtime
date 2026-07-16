@@ -1,14 +1,15 @@
 """
 Runtime Diagnostic Aggregator.
 
-Aggregates Runtime and Core diagnostics.
+Aggregates Runtime and Core Diagnostics.
 
 Aggregation preserves ordering and ownership.
 """
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
+from collections.abc import Iterator
 
 from .diagnostic import (
     Diagnostic,
@@ -22,29 +23,32 @@ class DiagnosticAggregator:
 
     Diagnostics remain immutable.
 
-    Aggregation never modifies their meaning.
+    Aggregation never modifies
+    their semantic meaning.
     """
 
     def __init__(self) -> None:
-        self._diagnostics: list[Diagnostic] = []
-
+        self._diagnostics: list[
+            Diagnostic
+        ] = []
 
     def add(
         self,
         diagnostic: Diagnostic,
     ) -> None:
         """
-        Add a Diagnostic.
+        Add one Diagnostic.
         """
 
         self._diagnostics.append(
             diagnostic
         )
 
-
     def extend(
         self,
-        diagnostics: Iterable[Diagnostic],
+        diagnostics: Iterable[
+            Diagnostic
+        ],
     ) -> None:
         """
         Add multiple Diagnostics.
@@ -54,20 +58,21 @@ class DiagnosticAggregator:
             diagnostics
         )
 
-
     def clear(
         self,
     ) -> None:
         """
-        Remove all Diagnostics.
+        Remove every collected Diagnostic.
         """
 
         self._diagnostics.clear()
 
-
     def all(
         self,
-    ) -> tuple[Diagnostic, ...]:
+    ) -> tuple[
+        Diagnostic,
+        ...
+    ]:
         """
         Return an immutable snapshot.
         """
@@ -76,20 +81,33 @@ class DiagnosticAggregator:
             self._diagnostics
         )
 
+    @property
+    def empty(
+        self,
+    ) -> bool:
+        """
+        Whether no Diagnostics exist.
+        """
+
+        return not self._diagnostics
 
     def count(
         self,
     ) -> int:
+        """
+        Number of collected Diagnostics.
+        """
+
         return len(
             self._diagnostics
         )
-
 
     def has_errors(
         self,
     ) -> bool:
         """
-        True if any Runtime Diagnostic has ERROR severity.
+        True if at least one Diagnostic
+        has ERROR severity.
         """
 
         return any(
@@ -98,7 +116,6 @@ class DiagnosticAggregator:
             for diagnostic in self._diagnostics
         )
 
-
     def __len__(
         self,
     ) -> int:
@@ -106,10 +123,11 @@ class DiagnosticAggregator:
             self._diagnostics
         )
 
-
     def __iter__(
         self,
-    ):
+    ) -> Iterator[
+        Diagnostic
+    ]:
         return iter(
             self._diagnostics
         )

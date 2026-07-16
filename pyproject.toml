@@ -4,22 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cks-runtime"
-version = "0.1.2"
-
+version = "0.2.0"
 description = "Canonical Runtime for the Canonical Knowledge Structure ecosystem"
-
 readme = "README.md"
-
-authors = [
-    { name = "Vladyslav Hruznov" }
-]
-
+authors = [{ name = "Vladyslav Hruznov" }]
 license = { text = "MIT" }
-
-requires-python = ">=3.11"
-
-dependencies = []
-
+requires-python = ">=3.12"
+dependencies = [
+    "cks-core>=1.1.1",
+]
 keywords = [
     "canonical-knowledge-structure",
     "runtime",
@@ -28,12 +21,11 @@ keywords = [
     "sessions",
     "versioning",
 ]
-
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]

@@ -138,3 +138,21 @@ def test_list_transactions_returns_copy():
     assert len(
         manager.list_transactions()
     ) == 1
+
+
+def test_completed_transaction_is_retrievable():
+
+    sessions = SessionManager()
+    manager = TransactionManager()
+
+    session = sessions.create_session(
+        knowledge_structure={}
+    )
+
+    tx = manager.begin(session)
+
+    manager.commit(tx)
+
+    assert manager.retrieve(
+        tx.transaction_id
+    ) is tx

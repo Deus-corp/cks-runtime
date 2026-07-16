@@ -1,16 +1,18 @@
 """
 Runtime Session model.
 
-A Runtime Session is the fundamental operational
-boundary of CKS Runtime.
+Represents one Runtime execution context.
 
-A Session owns Runtime operational state.
+A Session owns operational Runtime state.
 
-A Session never owns semantic meaning, which remains
-the responsibility of CKS Core.
+Semantic meaning always belongs
+to the attached CKS Core.
 """
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
 from uuid import uuid4
 
@@ -18,15 +20,16 @@ from uuid import uuid4
 @dataclass
 class RuntimeSession:
     """
-    Represents an isolated Runtime execution context.
+    Runtime execution context.
 
-    A Runtime Session owns operational state only.
+    Owns:
 
-    Ownership rules:
+    - operational Runtime state;
+    - Version history;
+    - Diagnostics;
+    - currently active Transaction.
 
-    - exactly one Runtime owns a Session;
-    - exactly one Session owns its Runtime state;
-    - semantic meaning belongs exclusively to CKS Core.
+    Does not own semantic behaviour.
     """
 
     knowledge_structure: Any
@@ -54,7 +57,7 @@ class RuntimeSession:
     @property
     def is_active(self) -> bool:
         """
-        Returns True while the Session remains active.
+        Whether the Session is active.
         """
 
         return not self.closed
@@ -63,10 +66,11 @@ class RuntimeSession:
         """
         Close the Runtime Session.
 
-        Closing a Session ends its operational lifecycle.
+        Closing a Session changes only
+        its local lifecycle state.
 
-        Lifecycle ownership remains the responsibility of
-        SessionManager.
+        SessionManager remains responsible
+        for removing it from the Runtime.
         """
 
         self.closed = True

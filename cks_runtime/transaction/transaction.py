@@ -8,6 +8,8 @@ Transactions coordinate execution.
 They do not define semantic behaviour.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -27,16 +29,10 @@ class TransactionStatus(Enum):
     ABORTED = "aborted"
 
 
-@dataclass
+@dataclass(slots=True)
 class RuntimeTransaction:
     """
     Represents one Runtime Transaction.
-
-    Ownership:
-
-    - exactly one Runtime Session owns a Transaction;
-    - Transaction modifies operational state only;
-    - semantic validation belongs to CKS Core.
     """
 
     session: Any
@@ -59,8 +55,8 @@ class RuntimeTransaction:
 
     def _ensure_not_completed(self) -> bool:
         """
-        Return False when the Transaction has
-        already reached a terminal state.
+        Returns False once a terminal state
+        has been reached.
         """
 
         return not self.completed
@@ -69,9 +65,6 @@ class RuntimeTransaction:
         self,
         operation: Any,
     ) -> None:
-        """
-        Register a Runtime operation.
-        """
 
         self.operations.append(operation)
 
@@ -79,68 +72,46 @@ class RuntimeTransaction:
         self,
         diagnostic: Any,
     ) -> None:
-        """
-        Register a Runtime or Core diagnostic.
-        """
 
         self.diagnostics.append(diagnostic)
 
     def mark_executing(self) -> None:
-        """
-        Mark Transaction as executing.
-        """
 
-        if not self._ensure_not_completed():
-            return
-
-        self.status = TransactionStatus.EXECUTING
+        if self._ensure_not_completed():
+            self.status = (
+                TransactionStatus.EXECUTING
+            )
 
     def mark_validating(self) -> None:
-        """
-        Mark Transaction as validating.
-        """
 
-        if not self._ensure_not_completed():
-            return
-
-        self.status = TransactionStatus.VALIDATING
+        if self._ensure_not_completed():
+            self.status = (
+                TransactionStatus.VALIDATING
+            )
 
     def commit(self) -> None:
-        """
-        Complete Transaction successfully.
-        """
 
-        if not self._ensure_not_completed():
-            return
-
-        self.status = TransactionStatus.COMMITTED
+        if self._ensure_not_completed():
+            self.status = (
+                TransactionStatus.COMMITTED
+            )
 
     def rollback(self) -> None:
-        """
-        Roll back pending operational changes.
-        """
 
-        if not self._ensure_not_completed():
-            return
-
-        self.status = TransactionStatus.ROLLED_BACK
+        if self._ensure_not_completed():
+            self.status = (
+                TransactionStatus.ROLLED_BACK
+            )
 
     def abort(self) -> None:
-        """
-        Abort Transaction execution.
-        """
 
-        if not self._ensure_not_completed():
-            return
-
-        self.status = TransactionStatus.ABORTED
+        if self._ensure_not_completed():
+            self.status = (
+                TransactionStatus.ABORTED
+            )
 
     @property
     def completed(self) -> bool:
-        """
-        Whether the Transaction has reached
-        a terminal state.
-        """
 
         return self.status in {
             TransactionStatus.COMMITTED,

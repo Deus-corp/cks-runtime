@@ -115,3 +115,36 @@ def test_completed_transaction_cannot_change_state():
     tx.mark_executing()
 
     assert tx.status == TransactionStatus.COMMITTED
+
+
+def test_completed_transaction_cannot_change_state():
+
+    tx = create_transaction()
+
+    tx.commit()
+
+    tx.mark_executing()
+
+    assert tx.status == TransactionStatus.COMMITTED
+
+
+def test_completed_transaction_cannot_validate():
+
+    tx = create_transaction()
+
+    tx.rollback()
+
+    tx.mark_validating()
+
+    assert tx.status == TransactionStatus.ROLLED_BACK
+
+
+def test_commit_is_idempotent():
+
+    tx = create_transaction()
+
+    tx.commit()
+    tx.commit()
+
+    assert tx.status == TransactionStatus.COMMITTED
+    assert tx.completed is True

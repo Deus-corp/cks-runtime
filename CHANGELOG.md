@@ -19,6 +19,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.2.0] - 2026-07-16
+
+### Added
+
+- `CksCoreAdapter` — concrete implementation of `CoreInterface` using `cks-core`.
+- `cks-runtime-core` package for seamless Runtime/Core integration.
+- Integration test suite (89 tests passing).
+- PyPI publication (`cks-runtime`).
+
+### Changed
+
+- Project structure: `cks_runtime_core` is now a subpackage of `cks-runtime`.
+- `pyproject.toml` updated with `cks-core` dependency.
+- `ROADMAP.md` and `README.md` updated to reflect current status.
+
+---
+
 # [0.1.0] - 2026-07-15
 
 ## Added

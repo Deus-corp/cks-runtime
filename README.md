@@ -4,7 +4,8 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-alpha-orange)
+![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
+![Status](https://img.shields.io/badge/status-beta-blue)
 
 CKS Runtime is the canonical execution environment for
 Canonical Knowledge Structures (CKS).
@@ -15,6 +16,20 @@ Where **CKS Core** defines the semantics of knowledge,
 Runtime provides the infrastructure required to execute,
 manage, version, persist and expose Canonical Knowledge Structures
 without becoming a semantic authority itself.
+
+---
+
+# Ecosystem
+
+CKS Runtime is part of a family of interoperable projects built on the
+Canonical Knowledge Structure.
+
+| Project | Description | Repository |
+|---------|-------------|------------|
+| **cks-core** | Semantic engine – the single source of canonical truth. | [Deus-corp/CKS](https://github.com/Deus-corp/CKS) |
+| **cks-runtime** | Operational environment – sessions, transactions, persistence. | [Deus-corp/cks-runtime](https://github.com/Deus-corp/cks-runtime) |
+| **cks-mcp** | MCP server – exposes CKS to LLMs via the Model Context Protocol. | [Deus-corp/cks-mcp](https://github.com/Deus-corp/cks-mcp) |
+
 
 ---
 
@@ -144,6 +159,7 @@ The current Reference Runtime provides:
 - Canonical Runtime API
 - Reference Runtime Architecture
 - Runtime Conformance Model
+- **CKS Core Integration** (via `cks_runtime_core`)
 
 ---
 
@@ -189,7 +205,6 @@ Runtime communicates exclusively through the public CKS Core API.
 From PyPI:
 
 ```bash
-pip install cks-core
 pip install cks-runtime
 ```
 
@@ -209,8 +224,10 @@ pip install -e .
 
 ```python
 from cks_runtime import Runtime
+from cks_runtime_core import CksCoreAdapter
 
-runtime = Runtime()
+# Create Runtime with real CKS Core attached
+runtime = Runtime(core=CksCoreAdapter())
 
 session = runtime.sessions.create(
     knowledge_structure=my_structure
@@ -218,8 +235,7 @@ session = runtime.sessions.create(
 
 transaction = runtime.transactions.begin(session)
 
-# Runtime coordinates execution.
-# CKS Core defines semantics.
+# Runtime coordinates execution. CKS Core defines semantics.
 ```
 
 ---
@@ -262,8 +278,9 @@ Current implementation status:
 | Storage Abstraction | ✅ Complete |
 | Runtime API | ✅ Complete |
 | Runtime Documentation | ✅ Complete |
-| Reference Implementation | 🚧 In Progress |
-| Adapter Integration | ⏳ Planned |
+| Core Integration | ✅ Complete |
+| Reference Implementation | ✅ Complete |
+| Adapter Infrastructure | 🚧 In Progress |
 
 ---
 
