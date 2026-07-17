@@ -14,6 +14,9 @@ from __future__ import annotations
 from cks_runtime.core_api.validation_result import RuntimeValidationResult
 from cks_runtime.transaction.transaction import RuntimeTransaction
 from cks_runtime.versioning.version import RuntimeVersion
+from cks_runtime.execution.operation_executor import OperationStatus
+from cks_runtime.operations.operation_types import ValidateOperation
+from cks_runtime.execution.execution_context import ExecutionContext
 
 
 class ExecutionPipeline:
@@ -38,45 +41,17 @@ class ExecutionPipeline:
         self,
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
-        """
-        Execute the Runtime commit pipeline.
-
-        Execution order:
-
-            validate
-                ↓
-            collect diagnostics
-                ↓
-            quality gate
-                ↓
-            create version
-                ↓
-            persist version
-                ↓
-            persist session
-                ↓
-            finalize transaction
-        """
-
-        validation = self._validate(transaction)
-
-        self._collect_diagnostics(validation)
-
-        self._quality_gate(validation, transaction)
+        if transaction.operations:
+            self._execute_operations(transaction)
+        else:
+            # обратная совместимость: старый путь валидации
+            validation = self._validate(transaction)
+            self._collect_diagnostics(validation)
+            self._quality_gate(validation, transaction)
 
         version = self._create_version(transaction)
-
         self._persist(version, transaction)
-
         self._finalize(transaction)
-
-        #
-        # Future:
-        #
-        # self._runtime.events.publish(...)
-        # self._runtime.explainability.record(...)
-        #
-
         return version
 
     #
@@ -206,3 +181,28 @@ class ExecutionPipeline:
         self._runtime.transactions.commit(
             transaction,
         )
+    
+
+    def _execute_operations(self, transaction) -> None:
+        executor = self._runtime.executor
+        dispatcher = getattr(self._runtime, 'dispatcher', None)
+        session = transaction.session
+
+        # 1. Готовые операции (старый путь)
+        for op in transaction.operations:
+            result = executor.execute(op, session)
+            self._handle_result(result, op.operation_id, transaction)
+
+        # 2. DispatchRequest (новый путь)
+        if dispatcher is not None and transaction.requests:
+            for req in transaction.requests:
+                context = ExecutionContext(session=session, executor=executor)
+                result = dispatcher.dispatch(req, context)
+                self._handle_result(result, req.operation_id, transaction)
+
+    def _handle_result(self, result, operation_id, transaction):
+        if result.status == OperationStatus.FAILED:
+            self.rollback(transaction)
+            raise RuntimeError(f"Operation {operation_id} failed: {result.error}")
+        if result.diagnostics:
+            self._runtime.diagnostics.extend(result.diagnostics)

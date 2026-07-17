@@ -1,41 +1,138 @@
 # CKS Runtime Roadmap
 
-> **Vision:** Build the canonical operational platform for Canonical Knowledge Structures.
+**Status:** Living Document
 
-CKS Runtime is responsible for execution, orchestration, persistence, lifecycle management, observability and integration.
+**Project:** CKS Runtime
 
-CKS Runtime is **not** a semantic engine.
+**Current Target:** Runtime 1.0
 
-All semantic behaviour is delegated to CKS Core through a stable semantic boundary.
+**Roadmap Version:** 1.0
+
+---
+
+# Purpose
+
+This roadmap defines the long-term evolution of CKS Runtime from an
+operational execution library into the canonical operational platform
+for Canonical Knowledge Structures.
+
+The roadmap serves as the primary strategic planning document for
+Runtime development.
+
+---
+
+# Document Relationships
+
+```
+CHARTER
+    ↓
+ARCHITECTURE
+    ↓
+ADR
+    ↓
+SPECIFICATIONS
+    ↓
+ROADMAP
+    ↓
+IMPLEMENTATION
+```
+
+| Document | Purpose |
+|-----------|----------|
+| CHARTER | Vision & philosophy |
+| ARCH | Runtime architecture |
+| ADR | Architectural decisions |
+| SPEC | Runtime standards |
+| ROADMAP | Evolution strategy |
 
 ---
 
 # Vision
 
-CKS Runtime provides the canonical execution environment for Canonical Knowledge Structures.
+CKS Runtime provides the canonical operational platform for Canonical
+Knowledge Structures.
 
-Runtime manages:
+Runtime owns execution.
 
-* Runtime Sessions
-* Transactions
-* Runtime State
-* Version History
-* Storage
-* Diagnostics
-* Event Lifecycle
-* Execution Pipelines
-* Runtime Adapters
-* Plugin Infrastructure
+CKS Core owns semantics.
 
-Semantic behaviour always belongs to CKS Core.
+Runtime coordinates:
+
+- Sessions
+- Transactions
+- Execution
+- Persistence
+- Versioning
+- Diagnostics
+- Events
+- Explainability
+- Storage
+- Adapters
+- Plugins
+
+Runtime is intentionally **not** a semantic engine.
+
+---
+
+# Architecture Evolution
+
+```
+Runtime Library
+
+        ↓
+
+Execution Runtime
+
+        ↓
+
+Operational Runtime
+
+        ↓
+
+Production Runtime
+
+        ↓
+
+Runtime Platform
+
+        ↓
+
+Cloud Runtime
+
+        ↓
+
+Autonomous Runtime
+
+        ↓
+
+Semantic Operating Environment
+```
+
+---
+
+# Runtime Maturity
+
+| Version | Runtime maturity |
+|----------|------------------|
+| 0.2 | Foundation |
+| 0.3 | Execution Runtime |
+| 0.4 | Event Runtime |
+| 0.5 | Adapter Runtime |
+| 0.6 | Plugin Runtime |
+| 0.8 | Production Runtime |
+| 1.0 | Stable Platform |
+| 2.0 | Runtime Platform |
+| 3.x | Cloud Runtime |
+| 4.x | Autonomous Runtime |
+| 5.x | Semantic Operating Environment |
 
 ---
 
 # Architectural Principles
 
-The following principles are considered architectural invariants.
+The following principles are architectural invariants.
 
-They should remain valid across every major release.
+These principles should remain valid across all future major releases.
 
 ## Runtime owns operations
 
@@ -55,18 +152,20 @@ Serialization.
 
 Explanation.
 
+Reasoning.
+
 Semantic correctness.
 
 These responsibilities always belong to CKS Core.
 
 ---
 
-## Stable boundaries
+## Stable semantic boundary
 
-Communication with semantic engines occurs exclusively through:
+Communication with semantic engines occurs exclusively through
 
-* CoreInterface
-* CoreBridge
+- CoreInterface
+- CoreBridge
 
 Runtime never imports implementation-specific Core objects.
 
@@ -74,40 +173,47 @@ Runtime never imports implementation-specific Core objects.
 
 ## Pluggable architecture
 
-Every replaceable subsystem should depend on abstractions.
+Every replaceable subsystem depends only on abstractions.
 
-Examples:
+Examples
 
-* Storage
-* Core
-* Adapter
-* Operation
-* Plugin
+- Storage
+- Core
+- Adapter
+- Operation
+- Plugin
 
 ---
 
 ## Deterministic execution
 
-The same Runtime state and the same sequence of operations must always produce the same operational result.
+The same Runtime state and the same sequence of operations must always
+produce the same operational result.
 
 ---
 
 ## Immutable public models
 
-Public Runtime models should be immutable whenever practical.
+Whenever practical Runtime public models remain immutable.
 
-Examples:
+Examples
 
-* RuntimeVersion
-* RuntimeValidationResult
-* RuntimeEvent
-* Diagnostic
+- RuntimeVersion
+- RuntimeValidationResult
+- RuntimeEvent
+- Diagnostic
 
 ---
 
 ## Transport independence
 
-Runtime never depends on MCP, HTTP, CLI or any transport.
+Runtime never depends on
+
+- MCP
+- HTTP
+- CLI
+- WebSocket
+- gRPC
 
 Adapters depend on Runtime.
 
@@ -117,29 +223,28 @@ Never the opposite.
 
 ## Storage independence
 
-Runtime must operate independently of any storage implementation.
+Runtime operates independently of storage implementations.
 
-InMemoryStorage remains the reference implementation.
+Reference implementation:
 
-Persistent backends are plugins.
+- InMemoryStorage
+
+Production implementations:
+
+- Plugins
 
 ---
 
 ## Observable by design
 
-Every important Runtime action should be observable.
+Every significant Runtime action is observable.
 
-Sessions.
-
-Transactions.
-
-Versions.
-
-Operations.
-
-Events.
-
-Diagnostics.
+- Sessions
+- Transactions
+- Operations
+- Versions
+- Events
+- Diagnostics
 
 ---
 
@@ -153,17 +258,15 @@ Dependency injection is preferred over global state.
 
 # Non Goals
 
-The following responsibilities intentionally do not belong to Runtime.
+Runtime intentionally is not
 
-Runtime is not:
-
-* a semantic engine
-* an ontology framework
-* an inference engine
-* a graph database
-* a knowledge validator
-* a query language
-* a reasoning framework
+- a semantic engine
+- an ontology framework
+- a reasoning engine
+- a graph database
+- an inference engine
+- a knowledge validator
+- a query language
 
 These responsibilities belong to CKS Core or external plugins.
 
@@ -171,62 +274,95 @@ These responsibilities belong to CKS Core or external plugins.
 
 # Development Roadmap
 
+```
+Foundation
+
+    ↓
+
+Execution
+
+    ↓
+
+Events
+
+    ↓
+
+Adapters
+
+    ↓
+
+Plugins
+
+    ↓
+
+Production
+
+    ↓
+
+Specification Freeze
+
+    ↓
+
+Runtime 1.0
+```
+
 ---
 
-# Phase 1 — Runtime Foundation
+# Phase 1 — Runtime Foundation (0.2.x)
 
-**Goal**
+## Goal
 
 Complete the operational architecture.
 
-Deliverables
+## Deliverables
 
-* Stable Runtime facade
-* CoreBridge
-* CoreInterface
-* RuntimeValidationResult
-* Session subsystem
-* Transaction subsystem
-* Version subsystem
-* Storage abstraction
-* Diagnostics subsystem
-* Execution Pipeline
+- Runtime façade
+- CoreBridge
+- CoreInterface
+- RuntimeValidationResult
+- Sessions
+- Transactions
+- Versions
+- Storage abstraction
+- Diagnostics
+- Execution Pipeline
 
-Exit criteria
+## Exit Criteria
 
-Runtime contains no semantic logic.
-
-All semantic behaviour passes through CoreBridge.
+- Runtime contains no semantic logic
+- Runtime depends only on CoreInterface
+- CoreBridge is the exclusive semantic gateway
+- Unit tests passing
 
 ---
 
-# Phase 2 — Runtime Execution
+# Phase 2 — Runtime Execution (0.3.x)
 
-**Goal**
+## Goal
 
 Introduce canonical Runtime execution.
 
-Deliverables
+## Deliverables
 
-* Dispatcher
-* OperationRegistry
-* OperationExecutor
-* ExecutionContext
-* ExecutionResult
-* Built-in Runtime Operations
+- Dispatcher
+- OperationRegistry
+- OperationExecutor
+- ExecutionContext
+- ExecutionResult
+- Built-in Runtime Operations
 
-Examples
+Operations
 
-* Validate
-* Serialize
-* Explain
-* Evolve
-* Query
-* Transform
+- Validate
+- Serialize
+- Explain
+- Evolve
+- Query
+- Transform
 
-Exit criteria
+## Exit Criteria
 
-All Runtime execution flows through:
+Execution always follows
 
 Dispatcher
 
@@ -242,285 +378,204 @@ Executor
 
 CoreBridge
 
+↓
+
+ExecutionResult
+
 ---
 
-# Phase 3 — Runtime Events
+# Phase 3 — Runtime Events (0.4.x)
 
-**Goal**
+## Goal
 
 Complete Runtime lifecycle events.
 
-Deliverables
+## Deliverables
 
-Session lifecycle
+- Session lifecycle
+- Transaction lifecycle
+- Version lifecycle
+- Operation lifecycle
+- Diagnostic lifecycle
+- EventBus
+- Subscriber API
+- Event history
 
-Transaction lifecycle
+## Exit Criteria
 
-Version lifecycle
-
-Operation lifecycle
-
-Diagnostic lifecycle
-
-Complete EventBus
-
-Subscriber API
-
-Event history
-
-Exit criteria
-
-Every Runtime state transition emits RuntimeEvents.
+Every Runtime lifecycle transition emits RuntimeEvents.
 
 ---
 
-# Phase 4 — Adapter Layer
+# Phase 4 — Adapter Layer (0.5.x)
 
-**Goal**
+## Goal
 
 Formalize Runtime integrations.
 
-Deliverables
+## Deliverables
 
-Adapter API
+- Adapter API
+- MCP Adapter
+- HTTP Adapter
+- CLI Adapter
+- Python Adapter
 
-MCP Adapter
+Future
 
-HTTP Adapter
+- gRPC
+- WebSocket
 
-CLI Adapter
-
-Python Adapter
-
-Future adapters
-
-* gRPC
-* WebSocket
-* Language bindings
-
-Exit criteria
+## Exit Criteria
 
 Runtime remains completely transport independent.
 
 ---
 
-# Phase 5 — Plugin Platform
+# Phase 5 — Plugin Platform (0.6.x)
 
-**Goal**
+## Goal
 
 Completely decouple Runtime from implementations.
 
-Deliverables
+## Deliverables
 
-Plugin Manager
+- Plugin Manager
+- Plugin Discovery
+- Plugin Metadata
+- Plugin Lifecycle
 
-Plugin Discovery
+Plugin Interfaces
 
-Plugin Metadata
-
-Plugin Lifecycle
-
-Official plugin interfaces
-
-Core Plugin
-
-Storage Plugin
-
-Operation Plugin
-
-Adapter Plugin
-
-Explainability Plugin
+- Core
+- Storage
+- Adapter
+- Operation
+- Explainability
 
 Official plugins
 
-cks-runtime-plugin-cks-core
+- cks-runtime-plugin-cks-core
 
-Future plugins
+Future
 
-* RDF
-* OWL
-* NetworkX
-* OpenAI
-* Neo4j
+- RDF
+- OWL
+- Neo4j
+- NetworkX
+- OpenAI
 
-Exit criteria
+## Exit Criteria
 
 Runtime depends only on abstract interfaces.
 
 ---
 
-# Phase 6 — Production Runtime
+# Phase 6 — Production Runtime (0.8.x)
 
-**Goal**
+## Goal
 
 Production-grade operational platform.
 
-## Reliability
+### Reliability
 
-Recovery API
+- Recovery API
+- Crash recovery
+- Session recovery
+- Transaction recovery
+- Pipeline recovery
+- Snapshots
 
-Crash recovery
+### Storage
 
-Session recovery
+- SQLite
+- PostgreSQL
+- Redis
+- File
+- Object Storage
 
-Transaction recovery
+### Transactions
 
-Pipeline recovery
+- Nested
+- Optimistic locking
+- Conflict detection
+- Compensation
 
-Snapshot support
+### Versioning
 
-## Storage
+- Diff
+- Checkout
+- Restore
+- Branching
+- Merge
 
-SQLite
+### Diagnostics
 
-PostgreSQL
+- Structured codes
+- Categories
+- Correlation IDs
+- Trace IDs
 
-Redis
+### Observability
 
-File Storage
+- Logging
+- Metrics
+- Tracing
+- Profiling
+- Telemetry
 
-Object Storage
-
-S3 snapshots
-
-## Transactions
-
-Nested transactions
-
-Optimistic locking
-
-Conflict detection
-
-Rollback strategies
-
-Compensation
-
-## Versioning
-
-Restore
-
-Checkout
-
-Diff
-
-Branching
-
-Merge support
-
-## Diagnostics
-
-Structured codes
-
-Categories
-
-Correlation IDs
-
-Trace IDs
-
-Filtering
-
-Aggregation
-
-## Performance
-
-Zero-copy models
-
-Lazy loading
-
-Immutable caches
-
-Operation batching
-
-Memory optimisation
-
-## Observability
-
-Structured logging
-
-Metrics
-
-Tracing
-
-Profiling
-
-Execution timeline
-
-Telemetry
-
-Exit criteria
+## Exit Criteria
 
 Runtime is suitable for production deployments.
 
 ---
 
-# Phase 7 — Specification Freeze
+# Phase 7 — Specification Freeze (0.9.x)
 
-**Goal**
+## Goal
 
-Prepare Runtime for stable release.
+Freeze public architecture.
 
 Review
 
-Public API
+- Public API
+- Plugin API
+- Adapter API
+- Storage API
+- Documentation
+- Conformance
 
-Architecture
-
-Naming
-
-Documentation
-
-Compatibility
-
-Plugin contracts
-
-Adapter contracts
-
-Exit criteria
+## Exit Criteria
 
 No unresolved architectural questions remain.
 
 ---
 
-# Phase 8 — Stable Runtime
+# Phase 8 — Stable Runtime (1.0.0)
 
-## Version 1.0.0
+## Goal
 
-Runtime becomes stable.
+First stable Runtime platform.
 
 Requirements
 
-Stable public API
+- Stable Runtime API
+- Stable Plugin API
+- Stable Adapter API
+- Stable Storage API
+- Complete documentation
+- >95% automated tests
+- Compatibility guarantees
 
-Stable Core API
-
-Stable Plugin API
-
-Stable Adapter API
-
-Complete documentation
-
-Comprehensive testing
-
-High integration coverage
-
-Compatibility guarantees
-
-Breaking changes require major versions.
+Breaking changes require a major version.
 
 ---
 
 # Runtime Platform Evolution
 
----
+## Version 1.x — Production Runtime
 
-# Version 1.x
-
-Goal
-
-Production maturity.
-
-## 1.1 — Reliability
+### 1.1 Reliability
 
 Recovery
 
@@ -530,11 +585,9 @@ Crash-safe execution
 
 Lease management
 
-Session recovery
-
 ---
 
-## 1.2 — Observability
+### 1.2 Observability
 
 Metrics
 
@@ -544,13 +597,11 @@ Execution timeline
 
 Profiling
 
-Structured logs
-
 ---
 
-## 1.3 — Storage
+### 1.3 Storage
 
-Production storage implementations
+Production storage
 
 Migration framework
 
@@ -558,7 +609,7 @@ Backup API
 
 ---
 
-## 1.4 — Distributed Runtime
+### 1.4 Distributed Runtime
 
 Distributed Sessions
 
@@ -566,37 +617,35 @@ Distributed Transactions
 
 Replication
 
-Leader Election
-
-Synchronization
+Leader election
 
 ---
 
-## 1.5 — Plugin Platform
+### 1.5 Plugin Platform
 
-Official SDK
+Plugin SDK
 
-Plugin registry
+Registry
 
 Dynamic loading
 
-Version compatibility
+Compatibility management
 
 ---
 
-## 1.6 — Performance
+### 1.6 Performance
 
 Pipeline optimisation
 
-Cache optimisation
-
 Parallel execution
 
-Lock optimisation
+Caching
+
+Memory optimisation
 
 ---
 
-## 1.7 — Security
+### 1.7 Security
 
 Authentication
 
@@ -610,7 +659,7 @@ Audit trail
 
 ---
 
-## 1.8 — Deployment
+### 1.8 Deployment
 
 Docker
 
@@ -618,31 +667,25 @@ Kubernetes
 
 Helm
 
-systemd
-
 Runtime Service
 
 ---
 
-## 1.9 — Long Term Support
+### 1.9 Long Term Support
 
-LTS release
-
-Long-term compatibility
+LTS
 
 Operational hardening
+
+API stability
 
 ---
 
 # Version 2.0 — Runtime Platform
 
-Goal
+## Goal
 
 Runtime becomes self-describing.
-
-Instead of only executing operations, Runtime understands its own execution model.
-
----
 
 ## Runtime Graph
 
@@ -650,43 +693,45 @@ Sessions
 
 Transactions
 
-Operations
-
 Versions
+
+Operations
 
 Diagnostics
 
 Events
 
-become nodes inside one Runtime graph.
+become one operational graph.
 
-Supports:
+Supports
 
-Execution graph
-
-Dependency graph
-
-Version graph
-
-Diagnostic graph
-
-Event graph
+- Dependency graph
+- Execution graph
+- Version graph
+- Diagnostic graph
+- Event graph
 
 ---
 
 ## Runtime Introspection
 
-Runtime answers questions about itself.
+Runtime explains itself.
 
 Examples
 
-Why did this transaction fail?
+- Why did this transaction fail?
+- Which operation created this version?
+- Which diagnostics were produced?
 
-Which operation produced this version?
+---
 
-Where did this diagnostic originate?
+## Execution Engine
 
-Which sessions depend on this version?
+- Dependency resolution
+- Parallel execution
+- Retry
+- Compensation
+- Pipeline optimisation
 
 ---
 
@@ -694,41 +739,14 @@ Which sessions depend on this version?
 
 Declarative execution pipelines.
 
-Example
-
-Validate
-
-↓
-
-Normalize
-
-↓
-
-Optimize
-
-↓
-
-Commit
-
-↓
-
-Version
-
-↓
-
-Publish
-
 ---
 
-## Scheduler
+## Runtime Scheduler
 
-Background execution
-
-Scheduled execution
-
-Deferred execution
-
-Periodic execution
+- Scheduled execution
+- Deferred execution
+- Background execution
+- Periodic execution
 
 ---
 
@@ -736,129 +754,72 @@ Periodic execution
 
 Everything becomes event-driven.
 
-Adapters subscribe to Runtime rather than polling Runtime.
-
----
-
-## Execution Engine
-
-Dependency resolution
-
-Parallel execution
-
-Retries
-
-Compensation
-
-Pipeline optimisation
-
-Execution planning
-
 ---
 
 ## Runtime DSL
 
 Declarative Runtime workflows.
 
-Example
-
-session
-
-begin
-
-validate
-
-evolve
-
-commit
-
-publish
-
 ---
 
 ## Distributed Runtime
 
-Runtime Cluster
-
-Shared Storage
-
-Distributed Event Bus
-
-Replication
-
-Synchronization
+- Runtime Cluster
+- Shared Storage
+- Distributed Event Bus
+- Replication
 
 ---
 
 ## Observability Platform
 
-Execution replay
-
-Timeline
-
-Heatmap
-
-Graph explorer
-
-Profiler
+- Timeline
+- Replay
+- Heatmap
+- Graph Explorer
+- Profiler
 
 ---
 
 ## Runtime Studio
 
-Visual Runtime interface.
+Visual Runtime environment.
 
-Manage:
+Manage
 
-Sessions
-
-Transactions
-
-Versions
-
-Operations
-
-Events
-
-Diagnostics
-
-Execution graphs
+- Sessions
+- Transactions
+- Versions
+- Operations
+- Events
+- Diagnostics
+- Execution Graphs
 
 ---
 
-# Future Vision
+# Platform Evolution
 
-## Version 3.x
+## Version 3.x — Cloud Runtime
 
-Cloud Runtime
-
-Multi-tenant Runtime
-
-Horizontal scaling
-
-Cloud-native deployment
-
-Managed Runtime services
+- Multi-tenancy
+- Horizontal scaling
+- Federation
+- Cloud-native deployment
+- Managed Runtime
 
 ---
 
-## Version 4.x
+## Version 4.x — Autonomous Runtime
 
-Autonomous Runtime
-
-Self-optimisation
-
-Auto-healing
-
-Intelligent scheduling
-
-Adaptive execution
+- Adaptive scheduling
+- Self-healing
+- Intelligent optimisation
+- Policy engine
+- Runtime recommendations
 
 ---
 
-## Version 5.x
-
-Semantic Operating Environment
+## Version 5.x — Semantic Operating Environment
 
 Runtime becomes the operational kernel of the complete CKS ecosystem.
 
@@ -866,15 +827,30 @@ Runtime becomes the operational kernel of the complete CKS ecosystem.
 
 # Compatibility Policy
 
-Before Version 1.0
+Before Runtime 1.0
 
-Public APIs may evolve when architecture requires.
+Architecture may evolve when necessary.
 
-After Version 1.0
+After Runtime 1.0
 
-* Patch releases fix defects only.
-* Minor releases add backward-compatible functionality.
-* Major releases introduce breaking architectural changes.
+- Patch releases fix defects only.
+- Minor releases add backward-compatible functionality.
+- Major releases introduce architectural changes.
+
+---
+
+# Roadmap Governance
+
+This roadmap evolves together with
+
+- Runtime Charter
+- Runtime Architecture
+- ADRs
+- Runtime Specifications
+- Conformance Suite
+
+Every completed phase should update the corresponding
+architecture and specification documents.
 
 ---
 
@@ -882,15 +858,15 @@ After Version 1.0
 
 CKS Runtime favours architectural stability over implementation complexity.
 
-Every capability must preserve:
+Every capability must preserve
 
-* Runtime/Core separation
-* Operational determinism
-* Storage independence
-* Transport independence
-* Adapter independence
-* Plugin independence
-* Semantic authority of CKS Core
+- Runtime/Core separation
+- Operational determinism
+- Storage independence
+- Transport independence
+- Adapter independence
+- Plugin independence
+- Semantic authority of CKS Core
 
 CKS Runtime shall never become a second semantic engine.
 

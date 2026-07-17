@@ -56,6 +56,9 @@ from cks_runtime.versioning.version import (
 from cks_runtime.versioning.version_manager import (
     VersionManager,
 )
+from cks_runtime.execution.operation_executor import OperationExecutor
+from cks_runtime.dispatcher.dispatcher import Dispatcher
+from cks_runtime.operations.operation_registry import OperationRegistry
 
 
 class Runtime:
@@ -88,6 +91,9 @@ class Runtime:
         "_versions",
         "_diagnostics",
         "_pipeline",
+        "_executor",
+        "_registry",
+        "_dispatcher",
     )
 
     def __init__(
@@ -138,6 +144,15 @@ class Runtime:
             self,
         )
 
+        # Сначала создаём executor, потому что dispatcher зависит от него
+        self._executor = OperationExecutor(core_adapter=self._core_bridge)
+
+        self._registry = OperationRegistry()
+        self._dispatcher = Dispatcher(
+            registry=self._registry,
+            executor=self._executor,
+        )
+
     #
     # ------------------------------------------------------------------
     # Public subsystem access
@@ -186,6 +201,29 @@ class Runtime:
         """
 
         return self._pipeline
+    
+
+    @property
+    def dispatcher(self) -> Dispatcher:
+        """
+        Runtime operation dispatcher.
+        """
+        return self._dispatcher
+
+    @property
+    def operation_registry(self) -> OperationRegistry:
+        """
+        Runtime operation registry.
+        """
+        return self._registry
+    
+
+    @property
+    def executor(self) -> OperationExecutor:
+        """
+        Runtime operation executor.
+        """
+        return self._executor
     
 
     @property

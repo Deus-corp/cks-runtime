@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-147%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-beta-blue)
 
 CKS Runtime is the canonical execution environment for
@@ -159,7 +159,10 @@ The current Reference Runtime provides:
 - Canonical Runtime API
 - Reference Runtime Architecture
 - Runtime Conformance Model
-- **CKS Core Integration** (via `cks_runtime_core`)
+- **CKS Core Integration** (via `CksCoreAdapter`)
+- **Execution Engine** – canonical operations (Validate, Serialize, Explain, Evolve) via `CoreBridge`
+- **Operation Dispatcher** – registry-based operation resolution
+- **DispatchRequest** support – decoupled operation execution
 
 ---
 
@@ -224,16 +227,18 @@ pip install -e .
 
 ```python
 from cks_runtime import Runtime
-from cks_runtime_core import CksCoreAdapter
+from cks_runtime_plugins.cks_core import CksCoreAdapter
+from cks_runtime.operations.operation_types import ValidateOperation
 
-# Create Runtime with real CKS Core attached
+# Create Runtime with real CKS Core
 runtime = Runtime(core=CksCoreAdapter())
 
-session = runtime.sessions.create(
-    knowledge_structure=my_structure
-)
+session = runtime.create_session({"example": True})
+tx = runtime.begin_transaction(session)
+tx.add_operation(ValidateOperation("v1", knowledge_structure=session.knowledge_structure))
 
-transaction = runtime.transactions.begin(session)
+version = runtime.commit_transaction(tx)
+print(version)
 
 # Runtime coordinates execution. CKS Core defines semantics.
 ```
@@ -266,7 +271,7 @@ Supporting documents include:
 
 ## Project Status
 
-Current implementation status:
+Current implementation status (v0.4.0):
 
 | Component | Status |
 |----------|--------|
@@ -278,14 +283,15 @@ Current implementation status:
 | Storage Abstraction | ✅ Complete |
 | Runtime API | ✅ Complete |
 | Core Integration (CoreBridge) | ✅ Complete |
-| Test Suite | ✅ 141 tests passing |
+| Execution Engine (Operations + Dispatcher) | ✅ Complete |
+| Test Suite | ✅ 147 tests passing |
 | CLI / MCP Adapters | ✅ Experimental |
-| Execution / Operations / Events | 🚧 In Progress |
+| Event System | 🚧 Planned (Phase 3) |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
 
-Future work focuses on Phase 2 (Runtime Execution) as outlined in the
+Future work focuses on Phase 3 (Event System) as outlined in the
 [Roadmap](ROADMAP.md).
 
 ---

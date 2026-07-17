@@ -19,6 +19,31 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.4.0] - 2026-07-17
+
+### Added
+- **Execution Engine** – `ValidateOperation`, `EvolveOperation`, `SerializeOperation`, `ExplainOperation` with implemented `execute` that delegates calls through `CoreBridge`.
+- **Dispatcher** and **OperationRegistry** – operation routing by `operation_id`, support for `DispatchRequest`.
+- `Runtime` now exposes public properties `sessions`, `transactions`, `versions`, `executor`, `dispatcher`, `operation_registry`.
+- `RuntimeTransaction` supports a `requests` list (`DispatchRequest`) and an `add_request` method.
+- `ExecutionPipeline` separates ready-made operation objects from dispatcher requests, using `_execute_operations` / `_handle_result`.
+- New integration tests for execution flow with a fake Core.
+
+### Changed
+- All operations now contain a class-level `operation_id` attribute compatible with `OperationRegistry`.
+- `RuntimeSession.metadata` is no longer wrapped in `MappingProxyType` (resolved deep‑copy issue).
+- Improved error handling in `ValidateOperation` – a `RuntimeError` is placed in `ExecutionResult` on validation failure.
+
+### Fixed
+- The `requests` field in `RuntimeTransaction` is now correctly initialized as a list (`default_factory=list`).
+- Eliminated `cannot pickle 'mappingproxy'` and `'Field' object has no attribute 'operation_id'` errors.
+- All 147 tests pass consistently.
+
+### Removed
+- Outdated references to the old `CoreAdapter` and `MCPTool`.
+
+---
+
 ## [0.3.0] - 2026-07-17
 
 ### Added
