@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-beta-blue)
 
 CKS Runtime is the canonical execution environment for
@@ -26,7 +26,7 @@ Canonical Knowledge Structure.
 
 | Project | Description | Repository |
 |---------|-------------|------------|
-| **cks-core** | Semantic engine – the single source of canonical truth. | [Deus-corp/CKS](https://github.com/Deus-corp/CKS) |
+| **cks-core** | Semantic engine – the single source of canonical truth. | [Deus-corp/CKS](https://github.com/Deus-corp/cks-core) |
 | **cks-runtime** | Operational environment – sessions, transactions, persistence. | [Deus-corp/cks-runtime](https://github.com/Deus-corp/cks-runtime) |
 | **cks-mcp** | MCP server – exposes CKS to LLMs via the Model Context Protocol. | [Deus-corp/cks-mcp](https://github.com/Deus-corp/cks-mcp) |
 
