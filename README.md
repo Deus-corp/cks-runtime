@@ -264,7 +264,7 @@ Supporting documents include:
 
 ---
 
-# Project Status
+## Project Status
 
 Current implementation status:
 
@@ -277,10 +277,16 @@ Current implementation status:
 | Diagnostics | ✅ Complete |
 | Storage Abstraction | ✅ Complete |
 | Runtime API | ✅ Complete |
-| Runtime Documentation | ✅ Complete |
-| Core Integration | ✅ Complete |
-| Reference Implementation | ✅ Complete |
-| Adapter Infrastructure | 🚧 In Progress |
+| Core Integration (CoreBridge) | ✅ Complete |
+| Test Suite | ✅ 141 tests passing |
+| CLI / MCP Adapters | ✅ Experimental |
+| Execution / Operations / Events | 🚧 In Progress |
+
+The current implementation serves as the reference implementation of the
+CKS Runtime Standard (SPEC-001 … SPEC-008).
+
+Future work focuses on Phase 2 (Runtime Execution) as outlined in the
+[Roadmap](ROADMAP.md).
 
 ---
 

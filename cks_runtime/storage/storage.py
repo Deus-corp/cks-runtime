@@ -1,7 +1,10 @@
 """
-Abstract Runtime Storage.
+Runtime Storage Interface.
 
-SPEC-006 Storage.
+Defines the persistence boundary for Runtime operational state.
+
+Storage implementations persist Runtime objects but never
+own Runtime behaviour or semantic interpretation.
 """
 
 from __future__ import annotations
@@ -15,16 +18,23 @@ from cks_runtime.versioning.version import RuntimeVersion
 
 class RuntimeStorage(ABC):
     """
-    Abstract Runtime Storage.
+    Abstract Runtime storage.
 
-    Storage persists Runtime operational state.
+    Storage is responsible only for persistence.
 
     Storage never:
 
-    - owns Sessions;
-    - owns Transactions;
-    - interprets semantics.
+    - owns RuntimeSessions;
+    - owns RuntimeTransactions;
+    - owns RuntimeVersions;
+    - performs semantic validation.
     """
+
+    #
+    # ------------------------------------------------------------------
+    # Sessions
+    # ------------------------------------------------------------------
+    #
 
     @abstractmethod
     def save_session(
@@ -32,16 +42,18 @@ class RuntimeStorage(ABC):
         session: RuntimeSession,
     ) -> None:
         """
-        Persist a Runtime Session.
+        Persist a RuntimeSession.
         """
 
     @abstractmethod
     def load_session(
         self,
         session_id: str,
-    ) -> RuntimeSession:
+    ) -> RuntimeSession | None:
         """
-        Restore a Runtime Session.
+        Restore a RuntimeSession.
+
+        Returns None when the session does not exist.
         """
 
     @abstractmethod
@@ -50,8 +62,22 @@ class RuntimeStorage(ABC):
         session_id: str,
     ) -> bool:
         """
-        Check whether a Runtime Session exists.
+        Whether a RuntimeSession exists.
         """
+
+    @abstractmethod
+    def list_sessions(
+        self,
+    ) -> tuple[RuntimeSession, ...]:
+        """
+        Return every persisted RuntimeSession.
+        """
+
+    #
+    # ------------------------------------------------------------------
+    # Versions
+    # ------------------------------------------------------------------
+    #
 
     @abstractmethod
     def save_version(
@@ -59,16 +85,18 @@ class RuntimeStorage(ABC):
         version: RuntimeVersion,
     ) -> None:
         """
-        Persist a Runtime Version.
+        Persist a RuntimeVersion.
         """
 
     @abstractmethod
     def load_version(
         self,
         version_id: str,
-    ) -> RuntimeVersion:
+    ) -> RuntimeVersion | None:
         """
-        Restore a Runtime Version.
+        Restore a RuntimeVersion.
+
+        Returns None when the version does not exist.
         """
 
     @abstractmethod
@@ -77,14 +105,28 @@ class RuntimeStorage(ABC):
         version_id: str,
     ) -> bool:
         """
-        Check whether a Runtime Version exists.
+        Whether a RuntimeVersion exists.
         """
+
+    @abstractmethod
+    def list_versions(
+        self,
+    ) -> tuple[RuntimeVersion, ...]:
+        """
+        Return every persisted RuntimeVersion.
+        """
+
+    #
+    # ------------------------------------------------------------------
+    # Maintenance
+    # ------------------------------------------------------------------
+    #
 
     @abstractmethod
     def clear(self) -> None:
         """
         Remove every persisted object.
 
-        Intended primarily for testing and
-        deterministic reference implementations.
+        Primarily intended for testing and
+        reference implementations.
         """

@@ -1,26 +1,27 @@
 """
-Runtime Diagnostic model.
+Runtime Diagnostic.
 
-Runtime Diagnostics describe operational observations.
+Represents an immutable operational observation.
 
-Diagnostics are immutable.
-
-They never modify Runtime state and never redefine
+Diagnostics never modify Runtime state and never redefine
 CKS Core semantics.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import UTC
+from datetime import datetime
 from enum import Enum
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
+from uuid import uuid4
 
 
 class DiagnosticSource(str, Enum):
     """
-    Origin of a Diagnostic.
+    Origin of a Runtime Diagnostic.
     """
 
     CORE = "core"
@@ -44,10 +45,9 @@ class Diagnostic:
 
     Ownership:
 
-    - Core Diagnostics belong to CKS Core;
-    - Runtime Diagnostics belong to Runtime;
-    - Runtime preserves Diagnostics without
-      modifying them.
+    - Core Diagnostics originate from CKS Core;
+    - Runtime Diagnostics originate from Runtime;
+    - Runtime preserves Diagnostics without modifying them.
     """
 
     message: str
@@ -59,26 +59,81 @@ class Diagnostic:
     code: str | None = None
 
     metadata: dict[str, Any] = field(
-        default_factory=dict
+        default_factory=dict,
     )
 
     diagnostic_id: UUID = field(
-        default_factory=uuid4
+        default_factory=uuid4,
     )
 
     created_at: datetime = field(
         default_factory=lambda: datetime.now(
-            UTC
-        )
+            UTC,
+        ),
     )
+
+    #
+    # ------------------------------------------------------------------
+    # Metadata
+    # ------------------------------------------------------------------
+    #
+
+    @property
+    def has_code(self) -> bool:
+        """
+        Whether this Diagnostic has a diagnostic code.
+        """
+
+        return self.code is not None
+
+    @property
+    def has_metadata(self) -> bool:
+        """
+        Whether this Diagnostic contains metadata.
+        """
+
+        return bool(self.metadata)
+
+    @property
+    def is_error(self) -> bool:
+        return self.severity is DiagnosticSeverity.ERROR
+
+    @property
+    def is_warning(self) -> bool:
+        return self.severity is DiagnosticSeverity.WARNING
+
+    @property
+    def is_info(self) -> bool:
+        return self.severity is DiagnosticSeverity.INFO
+
+    #
+    # ------------------------------------------------------------------
+    # Formatting
+    # ------------------------------------------------------------------
+    #
 
     def __str__(self) -> str:
         """
         Human-readable representation.
         """
 
+        prefix = (
+            f"[{self.code}] "
+            if self.code is not None
+            else ""
+        )
+
         return (
+            f"{prefix}"
             f"[{self.severity.value.upper()}] "
             f"{self.source.value}: "
             f"{self.message}"
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.diagnostic_id}, "
+            f"severity={self.severity.value!r}, "
+            f"source={self.source.value!r})"
         )

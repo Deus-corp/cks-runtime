@@ -19,6 +19,33 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.3.0] - 2026-07-17
+
+### Added
+- Public properties `Runtime.sessions`, `Runtime.transactions`, `Runtime.versions`.
+- Property `RuntimeSession.has_versions`.
+- Module `cks_runtime.storage.exceptions` removed; storage load methods return `None` for missing items.
+
+### Changed
+- `CoreBridge.validate` now requires `RuntimeValidationResult` from Core plugin (strict contract).
+- `DiagnosticAggregator` accepts any diagnostic objects (Core diagnostics preserved unchanged).
+- `ExecutionResult` uses `payload` attribute instead of `data`.
+- `RuntimeEvent.timestamp` renamed to `created_at`.
+- MCP adapter `__init__` imports `ToolRegistry` directly instead of `MCPToolRegistry`.
+
+### Fixed
+- All 141 unit tests pass.
+- `InMemoryStorage` deepcopy isolation.
+- `ExecutionPipeline` now correctly accesses `runtime.versions` and `runtime.transactions`.
+- Various import errors and attribute mismatches resolved.
+
+### Removed
+- `MappingProxyType` wrapping of `RuntimeSession.metadata` (caused `deepcopy` issues).
+- `MCPTool` class – tests use `FakeTool` dataclass.
+- `storage.exceptions` module – removed entirely.
+
+---
+
 ## [0.2.0] - 2026-07-16
 
 ### Added

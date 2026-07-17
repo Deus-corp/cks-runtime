@@ -1,12 +1,13 @@
 """
-Core boundary interfaces.
+Runtime ↔ Core semantic contract.
 
-This module defines the exclusive semantic boundary
-between CKS Runtime and CKS Core.
+Runtime depends exclusively on this interface.
 
-Runtime depends only on these abstractions.
+Concrete semantic engines are supplied through
+Runtime plugins.
 
-Concrete Core implementations are supplied externally.
+This interface defines the complete semantic boundary
+between Runtime and any Core implementation.
 """
 
 from __future__ import annotations
@@ -15,41 +16,53 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Any
 
+from cks_runtime.core_api.validation_result import (
+    RuntimeValidationResult,
+)
+
 
 class CoreInterface(ABC):
     """
-    Semantic boundary between Runtime and CKS Core.
+    Runtime semantic interface.
 
-    Runtime owns operational behaviour.
+    Runtime owns:
 
-    CKS Core owns semantic behaviour.
+        • execution
+        • orchestration
+        • transactions
+        • sessions
+        • versions
 
-    Runtime shall never implement semantic rules itself.
+    Core implementations own:
+
+        • semantic validation
+        • semantic evolution
+        • serialization
+        • semantic explanation
     """
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def validate(
         self,
         knowledge_structure: Any,
-    ) -> Any:
+    ) -> RuntimeValidationResult:
         """
-        Execute canonical Core validation.
+        Validate a Knowledge Structure.
 
-        Validation semantics belong exclusively
-        to CKS Core.
+        Returns
+        -------
+        RuntimeValidationResult
+            Canonical Runtime validation model.
         """
+        raise NotImplementedError
 
-    @abstractmethod
-    def serialize(
-        self,
-        knowledge_structure: Any,
-    ) -> Any:
-        """
-        Produce canonical serialization.
-
-        Serialization semantics belong exclusively
-        to CKS Core.
-        """
+    # ------------------------------------------------------------------
+    # Evolution
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def evolve(
@@ -58,28 +71,57 @@ class CoreInterface(ABC):
         operation: Any,
     ) -> Any:
         """
-        Execute canonical semantic evolution.
+        Apply one semantic evolution.
 
-        Runtime coordinates execution.
+        Parameters
+        ----------
+        knowledge_structure
+            Current Knowledge Structure.
 
-        CKS Core defines the resulting semantic state.
+        operation
+            Canonical evolution description.
 
-        Implementations should return the resulting
-        Knowledge Structure.
-
-        Runtime makes no assumptions about whether
-        evolution is performed in-place or by returning
-        a new object.
+        Returns
+        -------
+        Any
+            Resulting Knowledge Structure.
         """
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def serialize(
+        self,
+        knowledge_structure: Any,
+    ) -> str:
+        """
+        Produce canonical serialization.
+
+        Returns
+        -------
+        str
+            Canonical serialized representation.
+        """
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Explainability
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def explain(
         self,
         knowledge_structure: Any,
-    ) -> Any:
+    ) -> dict[str, Any]:
         """
-        Produce semantic explanation.
+        Produce a semantic explanation.
 
-        Runtime may expose explanations but never
-        generates semantic explanations itself.
+        Returns
+        -------
+        dict[str, Any]
+            Structured semantic explanation.
         """
+        raise NotImplementedError

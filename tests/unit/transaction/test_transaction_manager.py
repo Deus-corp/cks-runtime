@@ -121,23 +121,14 @@ def test_list_transactions():
 
 
 def test_list_transactions_returns_copy():
-
     sessions = SessionManager()
     manager = TransactionManager()
-
-    session = sessions.create_session(
-        knowledge_structure={}
-    )
-
+    session = sessions.create_session(knowledge_structure={})
     manager.begin(session)
-
-    transactions = manager.list_transactions()
-
-    transactions.clear()
-
-    assert len(
-        manager.list_transactions()
-    ) == 1
+    first = manager.list_transactions()
+    second = manager.list_transactions()
+    assert first == second
+    assert first is not second
 
 
 def test_completed_transaction_is_retrievable():

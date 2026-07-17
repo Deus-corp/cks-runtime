@@ -1,11 +1,21 @@
 """
 CKS Runtime.
+
+Canonical Runtime for the Canonical Knowledge Structure ecosystem.
+
+The public package API intentionally exposes only the
+high-level Runtime façade and its configuration object.
 """
 
-from .runtime import Runtime
-from .config import RuntimeConfig
+from __future__ import annotations
 
-__all__ = [
+from .config import RuntimeConfig
+from .runtime import Runtime
+
+__version__ = RuntimeConfig().runtime_version
+
+__all__ = (
     "Runtime",
     "RuntimeConfig",
-]
+    "__version__",
+)

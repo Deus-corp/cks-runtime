@@ -13,37 +13,48 @@ from __future__ import annotations
 from typing import Any
 
 from cks_runtime.config import RuntimeConfig
-from cks_runtime.core_api.interfaces import CoreInterface
+
+from cks_runtime.core_api.bridge import (
+    CoreBridge,
+)
+from cks_runtime.core_api.interfaces import (
+    CoreInterface,
+)
+
 from cks_runtime.diagnostics.aggregator import (
     DiagnosticAggregator,
 )
-from cks_runtime.session.session import RuntimeSession
+
+from cks_runtime.pipeline.execution_pipeline import (
+    ExecutionPipeline,
+)
+
+from cks_runtime.session.session import (
+    RuntimeSession,
+)
 from cks_runtime.session.session_manager import (
     SessionManager,
 )
+
 from cks_runtime.storage.memory_storage import (
     InMemoryStorage,
 )
 from cks_runtime.storage.storage import (
     RuntimeStorage,
 )
+
 from cks_runtime.transaction.transaction import (
     RuntimeTransaction,
 )
 from cks_runtime.transaction.transaction_manager import (
     TransactionManager,
 )
+
 from cks_runtime.versioning.version import (
     RuntimeVersion,
 )
 from cks_runtime.versioning.version_manager import (
     VersionManager,
-)
-from cks_runtime.pipeline.execution_pipeline import (
-    ExecutionPipeline,
-)
-from cks_runtime.core_api.adapter import (
-    CoreAdapter,
 )
 
 
@@ -51,13 +62,33 @@ class Runtime:
     """
     Canonical Runtime façade.
 
-    Runtime owns orchestration.
+    Runtime owns:
 
-    Subsystems own implementation.
+        - orchestration;
+        - lifecycle;
+        - transactions;
+        - persistence;
+        - execution flow.
 
-    Runtime is the single public entry point
-    into Runtime behaviour.
+    Runtime does not own:
+
+        - semantic rules;
+        - validation logic;
+        - knowledge interpretation.
+
+    Semantic behaviour belongs to Core plugins.
     """
+
+    __slots__ = (
+        "config",
+        "_core_bridge",
+        "_storage",
+        "_sessions",
+        "_transactions",
+        "_versions",
+        "_diagnostics",
+        "_pipeline",
+    )
 
     def __init__(
         self,
@@ -73,40 +104,121 @@ class Runtime:
             else RuntimeConfig()
         )
 
-        self.core = core
+        #
+        # Semantic boundary
+        #
 
-        self.core_adapter = CoreAdapter(
-            self.core,
+        self._core_bridge = CoreBridge(
+            core,
         )
 
-        self.storage = (
+        #
+        # Infrastructure
+        #
+
+        self._storage = (
             storage
             if storage is not None
             else InMemoryStorage()
         )
 
-        self.sessions = SessionManager()
+        #
+        # Runtime subsystems
+        #
 
-        self.transactions = TransactionManager()
+        self._sessions = SessionManager()
 
-        self.versions = VersionManager()
+        self._transactions = TransactionManager()
 
-        self.diagnostics = DiagnosticAggregator()
+        self._versions = VersionManager()
 
-        self.pipeline = ExecutionPipeline(
+        self._diagnostics = DiagnosticAggregator()
+
+        self._pipeline = ExecutionPipeline(
             self,
         )
 
+    #
+    # ------------------------------------------------------------------
+    # Public subsystem access
+    # ------------------------------------------------------------------
+    #
+
     @property
-    def has_core(self) -> bool:
+    def core_bridge(
+        self,
+    ) -> CoreBridge:
+        """
+        Runtime ↔ Core boundary.
+        """
+
+        return self._core_bridge
+
+
+    @property
+    def storage(
+        self,
+    ) -> RuntimeStorage:
+        """
+        Runtime storage backend.
+        """
+
+        return self._storage
+
+
+    @property
+    def diagnostics(
+        self,
+    ) -> DiagnosticAggregator:
+        """
+        Runtime diagnostic collector.
+        """
+
+        return self._diagnostics
+
+
+    @property
+    def pipeline(
+        self,
+    ) -> ExecutionPipeline:
+        """
+        Runtime execution pipeline.
+        """
+
+        return self._pipeline
+    
+
+    @property
+    def transactions(self) -> TransactionManager:
+        """Runtime transaction manager."""
+        return self._transactions
+
+    @property
+    def versions(self) -> VersionManager:
+        """Runtime version manager."""
+        return self._versions
+
+    @property
+    def sessions(self) -> SessionManager:
+        """Runtime session manager."""
+        return self._sessions
+
+
+    @property
+    def has_core(
+        self,
+    ) -> bool:
         """
         Whether a semantic Core is attached.
         """
 
-        return self.core_adapter.attached
+        return self._core_bridge.available
+
 
     #
+    # ------------------------------------------------------------------
     # Session façade
+    # ------------------------------------------------------------------
     #
 
     def create_session(
@@ -117,51 +229,57 @@ class Runtime:
         Create and persist a Runtime Session.
         """
 
-        session = self.sessions.create_session(
-            knowledge_structure
+        session = self._sessions.create_session(
+            knowledge_structure,
         )
 
-        self.storage.save_session(
-            session
+        self._storage.save_session(
+            session,
         )
 
         return session
+
 
     def get_session(
         self,
         session_id: str,
     ) -> RuntimeSession | None:
         """
-        Retrieve an active Runtime Session.
+        Retrieve Runtime Session.
         """
 
-        return self.sessions.get_session(
-            session_id
+        return self._sessions.get_session(
+            session_id,
         )
+
 
     def list_sessions(
         self,
-    ) -> list[RuntimeSession]:
+    ) -> tuple[RuntimeSession, ...]:
         """
         Return active Runtime Sessions.
         """
 
-        return self.sessions.list_sessions()
+        return self._sessions.list_sessions()
+
 
     def close_session(
         self,
         session_id: str,
     ) -> None:
         """
-        Close a Runtime Session.
+        Close Runtime Session.
         """
 
-        self.sessions.close_session(
-            session_id
+        self._sessions.close_session(
+            session_id,
         )
 
+
     #
+    # ------------------------------------------------------------------
     # Transaction façade
+    # ------------------------------------------------------------------
     #
 
     def begin_transaction(
@@ -169,51 +287,57 @@ class Runtime:
         session: RuntimeSession,
     ) -> RuntimeTransaction:
         """
-        Begin a Runtime Transaction.
+        Begin Runtime Transaction.
         """
 
-        return self.transactions.begin(
-            session
+        return self._transactions.begin(
+            session,
         )
+
 
     def commit_transaction(
         self,
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
         """
-        Commit a Runtime Transaction.
+        Commit Runtime Transaction.
         """
 
-        return self.pipeline.commit(
+        return self._pipeline.commit(
             transaction,
         )
+
 
     def rollback_transaction(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
         """
-       Roll back a Runtime Transaction.
+        Rollback Runtime Transaction.
         """
 
-        self.pipeline.rollback(
+        self._pipeline.rollback(
             transaction,
         )
+
 
     def abort_transaction(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
         """
-        Abort a Runtime Transaction.
+        Abort Runtime Transaction.
         """
 
-        self.pipeline.abort(
+        self._pipeline.abort(
             transaction,
         )
 
+
     #
+    # ------------------------------------------------------------------
     # Version façade
+    # ------------------------------------------------------------------
     #
 
     def latest_version(
@@ -221,9 +345,9 @@ class Runtime:
         session: RuntimeSession,
     ) -> RuntimeVersion | None:
         """
-        Return the latest Runtime Version.
+        Return latest Runtime Version.
         """
 
-        return self.versions.latest(
-            session
+        return self._versions.latest(
+            session,
         )

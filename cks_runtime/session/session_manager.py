@@ -1,14 +1,14 @@
 """
 Runtime Session Manager.
 
-Owns Runtime Session lifecycle.
+Owns RuntimeSession lifecycle.
 
 Responsibilities:
 
-- create Runtime Sessions;
-- retrieve Runtime Sessions;
-- enumerate active Runtime Sessions;
-- close Runtime Sessions.
+- create RuntimeSessions;
+- retrieve RuntimeSessions;
+- enumerate active RuntimeSessions;
+- close RuntimeSessions.
 
 Does not own:
 
@@ -27,86 +27,128 @@ from .session import RuntimeSession
 
 class SessionManager:
     """
-    Owns Runtime Session lifecycle.
+    Owns RuntimeSession lifecycle.
     """
 
     def __init__(self) -> None:
         self._sessions: dict[str, RuntimeSession] = {}
+
+    #
+    # ------------------------------------------------------------------
+    # Creation
+    # ------------------------------------------------------------------
+    #
 
     def create_session(
         self,
         knowledge_structure: Any,
     ) -> RuntimeSession:
         """
-        Create and register a Runtime Session.
+        Create and register a RuntimeSession.
         """
 
         session = RuntimeSession(
             knowledge_structure=knowledge_structure,
         )
 
-        self._sessions[
-            session.session_id
-        ] = session
+        self._sessions[session.session_id] = session
 
         return session
+
+    #
+    # ------------------------------------------------------------------
+    # Lookup
+    # ------------------------------------------------------------------
+    #
 
     def get_session(
         self,
         session_id: str,
     ) -> RuntimeSession | None:
         """
-        Retrieve a Runtime Session.
+        Retrieve a RuntimeSession.
 
-        Returns None when the Session
-        does not exist.
+        Returns
+        -------
+        RuntimeSession
+            Existing session.
+
+        None
+            Session does not exist.
         """
 
-        return self._sessions.get(
-            session_id,
-        )
+        return self._sessions.get(session_id)
+
+    def has_session(
+        self,
+        session_id: str,
+    ) -> bool:
+        """
+        Whether a RuntimeSession exists.
+        """
+
+        return session_id in self._sessions
 
     def list_sessions(
         self,
     ) -> tuple[RuntimeSession, ...]:
         """
-        Return active Runtime Sessions.
+        Return all active RuntimeSessions.
 
-        A tuple is returned to prevent
+        An immutable tuple is returned to prevent
         accidental external mutation.
         """
 
-        return tuple(
-            self._sessions.values(),
-        )
+        return tuple(self._sessions.values())
+
+    @property
+    def session_count(self) -> int:
+        """
+        Number of active RuntimeSessions.
+        """
+
+        return len(self._sessions)
+
+    #
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    #
 
     def close_session(
         self,
         session_id: str,
     ) -> bool:
         """
-        Close and unregister a Runtime Session.
+        Close and unregister a RuntimeSession.
 
         Returns
         -------
-        True
-            Session existed.
-
-        False
-            Session was unknown.
+        bool
+            True if the session existed,
+            otherwise False.
         """
 
-        session = self._sessions.get(
-            session_id,
-        )
+        session = self._sessions.get(session_id)
 
         if session is None:
             return False
 
         session.close()
 
-        del self._sessions[
-            session_id
-        ]
+        del self._sessions[session_id]
 
         return True
+
+    def clear(self) -> None:
+        """
+        Remove every RuntimeSession.
+
+        Primarily intended for testing.
+        """
+
+        for session in self._sessions.values():
+            if session.is_active:
+                session.close()
+
+        self._sessions.clear()

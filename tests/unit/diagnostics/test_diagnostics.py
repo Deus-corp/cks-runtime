@@ -96,25 +96,15 @@ def test_clear():
 
 
 def test_has_errors():
-
     agg = DiagnosticAggregator()
-
-    agg.add(
-        create_runtime_error()
-    )
-
-    assert agg.has_errors()
+    agg.add(create_runtime_error())
+    assert agg.has_errors
 
 
 def test_has_errors_false():
-
     agg = DiagnosticAggregator()
-
-    agg.add(
-        create_runtime_info()
-    )
-
-    assert not agg.has_errors()
+    agg.add(create_runtime_info())
+    assert not agg.has_errors
 
 
 def test_diagnostics_are_returned_as_tuple():

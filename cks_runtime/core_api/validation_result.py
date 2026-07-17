@@ -1,29 +1,41 @@
 """
 Runtime Validation Result.
 
-Represents the Runtime view of semantic validation.
+Represents the Runtime-native view of semantic validation.
 
-This object is intentionally independent from the
-internal ValidationResult implementation of CKS Core.
+Runtime never depends on Core-native validation objects.
 
-The Core Adapter is responsible for translating
-Core-specific validation objects into this Runtime model.
+Core plugins translate their validation models into
+this stable Runtime representation.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
+from types import MappingProxyType
 from typing import Any
+from typing import Mapping
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class RuntimeValidationResult:
     """
-    Runtime representation of semantic validation.
+    Immutable Runtime validation result.
 
-    Runtime consumes only this abstraction.
+    Ownership:
 
-    CKS Core may evolve independently.
+    Runtime owns this representation.
+
+    Core plugins own:
+        - validation rules;
+        - semantic diagnostics;
+        - validation algorithms.
+
+    Runtime only consumes the result.
     """
 
     valid: bool
@@ -32,22 +44,114 @@ class RuntimeValidationResult:
         default_factory=tuple,
     )
 
-    metadata: dict[str, Any] = field(
-        default_factory=dict,
+    metadata: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType({}),
     )
 
+    def __post_init__(
+        self,
+    ) -> None:
+        """
+        Normalize mutable inputs into immutable structures.
+        """
+
+        object.__setattr__(
+            self,
+            "diagnostics",
+            tuple(
+                self.diagnostics,
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "metadata",
+            MappingProxyType(
+                dict(
+                    self.metadata,
+                ),
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
     @property
-    def has_diagnostics(self) -> bool:
+    def has_diagnostics(
+        self,
+    ) -> bool:
         """
         Whether validation produced diagnostics.
         """
 
-        return bool(self.diagnostics)
+        return bool(
+            self.diagnostics,
+        )
 
     @property
-    def diagnostic_count(self) -> int:
+    def diagnostic_count(
+        self,
+    ) -> int:
         """
         Number of diagnostics.
         """
 
-        return len(self.diagnostics)
+        return len(
+            self.diagnostics,
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def __bool__(
+        self,
+    ) -> bool:
+        """
+        Validation truth value.
+
+        True means validation succeeded.
+        """
+
+        return self.valid
+
+    @classmethod
+    def success(
+        cls,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> RuntimeValidationResult:
+        """
+        Construct successful validation result.
+        """
+
+        return cls(
+            valid=True,
+            metadata=(
+                metadata
+                if metadata is not None
+                else {}
+            ),
+        )
+
+    @classmethod
+    def failure(
+        cls,
+        diagnostics: tuple[Any, ...],
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> RuntimeValidationResult:
+        """
+        Construct failed validation result.
+        """
+
+        return cls(
+            valid=False,
+            diagnostics=diagnostics,
+            metadata=(
+                metadata
+                if metadata is not None
+                else {}
+            ),
+        )

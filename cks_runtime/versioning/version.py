@@ -1,17 +1,21 @@
 """
-Immutable Runtime Version.
+Runtime Version.
 
-A Runtime Version records the operational state of a
-Runtime Session immediately following a committed Transaction.
+Represents an immutable Runtime snapshot.
 
-Versions are immutable snapshots.
+A RuntimeVersion records the operational state of a
+RuntimeSession immediately after a committed RuntimeTransaction.
+
+RuntimeVersions are immutable snapshots.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import UTC
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -19,13 +23,15 @@ from uuid import uuid4
 @dataclass(frozen=True, slots=True)
 class RuntimeVersion:
     """
-    Immutable Runtime Version.
+    Immutable Runtime snapshot.
 
     Ownership:
 
-    - owned by exactly one Runtime Session;
-    - created from exactly one committed Transaction;
-    - records operational state only.
+    - belongs to exactly one RuntimeSession;
+    - originates from exactly one committed RuntimeTransaction;
+    - stores operational state only.
+
+    RuntimeVersion never owns semantic behaviour.
     """
 
     session_id: str
@@ -37,37 +43,68 @@ class RuntimeVersion:
     metadata: dict[str, Any]
 
     version_id: str = field(
-        default_factory=lambda: str(uuid4())
+        default_factory=lambda: str(uuid4()),
     )
 
     created_at: datetime = field(
         default_factory=lambda: datetime.now(
-            UTC
-        )
+            UTC,
+        ),
     )
 
-    def __post_init__(
-        self,
-    ) -> None:
+    def __post_init__(self) -> None:
         """
-        Store immutable snapshots.
+        Deep-copy mutable state.
 
-        Runtime Versions must never share mutable
-        objects with a live Runtime Session.
+        RuntimeVersion must never share mutable objects
+        with a live RuntimeSession.
         """
 
         object.__setattr__(
             self,
             "knowledge_structure",
-            deepcopy(
-                self.knowledge_structure
-            ),
+            deepcopy(self.knowledge_structure),
         )
 
         object.__setattr__(
             self,
             "metadata",
-            deepcopy(
-                self.metadata
-            ),
+            deepcopy(self.metadata),
+        )
+
+    #
+    # ------------------------------------------------------------------
+    # Metadata
+    # ------------------------------------------------------------------
+    #
+
+    @property
+    def has_metadata(self) -> bool:
+        """
+        Whether this RuntimeVersion contains metadata.
+        """
+
+        return bool(self.metadata)
+
+    @property
+    def age(self):
+        """
+        Time elapsed since this RuntimeVersion was created.
+        """
+
+        return datetime.now(
+            UTC,
+        ) - self.created_at
+
+    #
+    # ------------------------------------------------------------------
+    # Debugging
+    # ------------------------------------------------------------------
+    #
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.version_id!r}, "
+            f"session={self.session_id!r})"
         )

@@ -11,4 +11,6 @@ with semantic validation.
 
 from .adapter import CksCoreAdapter
 
-__all__ = ["CksCoreAdapter"]
+__all__ = (
+    "CksCoreAdapter",
+)
