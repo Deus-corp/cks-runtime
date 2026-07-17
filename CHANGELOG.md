@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.4.1] - 2026-07-17
+
+### Fixed
+- `RuntimeValidationResult.metadata` is no longer wrapped in `MappingProxyType` (resolved `cannot pickle 'mappingproxy' object` error during deep copy).
+- All `test_validation_result.py` tests have been updated to match the new behaviour.
+- Integration with `cks-mcp` now works without serialization errors.
+
+---
+
 ## [0.4.0] - 2026-07-17
 
 ### Added
