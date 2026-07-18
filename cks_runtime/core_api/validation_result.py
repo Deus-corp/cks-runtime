@@ -5,6 +5,7 @@ Runtime Validation Result.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Mapping
 
 
@@ -19,8 +20,9 @@ class RuntimeValidationResult:
     def __post_init__(self) -> None:
         # diagnostics всегда должен быть кортежем
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
-        # metadata оставляем как есть, он уже Mapping (может быть dict)
-        # больше не оборачиваем в MappingProxyType
+        # metadata замораживаем через MappingProxyType – теперь это безопасно,
+        # так как cks-core >=1.2.0 поддерживает deepcopy для иммутабельных объектов.
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
     @property
     def has_diagnostics(self) -> bool:

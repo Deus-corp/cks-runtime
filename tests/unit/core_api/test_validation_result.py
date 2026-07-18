@@ -35,14 +35,11 @@ def test_validation_result_is_frozen():
         result.valid = False
 
 
-def test_metadata_is_mutable_dict():
-    """metadata is now a plain dict and can be mutated (but should not be)."""
+def test_metadata_is_immutable():
+    """metadata is wrapped in MappingProxyType and cannot be mutated."""
     result = RuntimeValidationResult.success()
-    # It is a dict, not a mappingproxy
-    assert isinstance(result.metadata, dict)
-    # Mutation is technically possible
-    result.metadata["x"] = 1
-    assert result.metadata["x"] == 1
+    with pytest.raises(TypeError):
+        result.metadata["x"] = 1
 
 
 def test_has_diagnostics_property():
