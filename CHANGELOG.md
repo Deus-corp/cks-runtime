@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.4.3] - 2026-07-18
+
+### Fixed
+- Added `__copy__`/`__deepcopy__` to `RuntimeValidationResult` to prevent `cannot pickle 'mappingproxy' object` when sessions containing validation results are persisted.
+
+---
+
 ## [0.4.1] - 2026-07-17
 
 ### Fixed

@@ -18,11 +18,20 @@ class RuntimeValidationResult:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # diagnostics всегда должен быть кортежем
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
-        # metadata замораживаем через MappingProxyType – теперь это безопасно,
-        # так как cks-core >=1.2.0 поддерживает deepcopy для иммутабельных объектов.
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+    # ------------------------------------------------------------------
+    # Copy semantics
+    # ------------------------------------------------------------------
+    # RuntimeValidationResult is immutable, so it can safely return self
+    # on copy/deepcopy, avoiding issues with MappingProxyType.
+    def __copy__(self) -> "RuntimeValidationResult":
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "RuntimeValidationResult":
+        memo[id(self)] = self
+        return self
 
     @property
     def has_diagnostics(self) -> bool:
