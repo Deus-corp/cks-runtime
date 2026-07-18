@@ -2,105 +2,98 @@
 Runtime Version.
 
 Represents an immutable Runtime snapshot.
-
-A RuntimeVersion records the operational state of a
-RuntimeSession immediately after a committed RuntimeTransaction.
-
-RuntimeVersions are immutable snapshots.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
-from dataclasses import field
-from datetime import UTC
-from datetime import datetime
-from typing import Any
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from types import MappingProxyType
+from typing import Any, Mapping
 from uuid import uuid4
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeVersion:
-    """
-    Immutable Runtime snapshot.
-
-    Ownership:
-
-    - belongs to exactly one RuntimeSession;
-    - originates from exactly one committed RuntimeTransaction;
-    - stores operational state only.
-
-    RuntimeVersion never owns semantic behaviour.
-    """
+    """Immutable Runtime snapshot."""
 
     session_id: str
-
     transaction_id: str
-
     knowledge_structure: Any
+    metadata: Mapping[str, Any]
 
-    metadata: dict[str, Any]
-
-    version_id: str = field(
-        default_factory=lambda: str(uuid4()),
-    )
-
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(
-            UTC,
-        ),
-    )
+    version_id: str = field(default_factory=lambda: str(uuid4()))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
-        """
-        Deep-copy mutable state.
-
-        RuntimeVersion must never share mutable objects
-        with a live RuntimeSession.
-        """
-
+        """Deep-copy mutable state and freeze metadata."""
         object.__setattr__(
             self,
             "knowledge_structure",
             deepcopy(self.knowledge_structure),
         )
-
         object.__setattr__(
             self,
             "metadata",
-            deepcopy(self.metadata),
+            MappingProxyType(deepcopy(dict(self.metadata))),
         )
+
+    #
+    # ------------------------------------------------------------------
+    # Copy semantics
+    # ------------------------------------------------------------------
+    #
+    # RuntimeVersion.knowledge_structure is `Any`: Runtime is
+    # storage-independent and must not assume a plugged-in Core's
+    # structure type is immutable, so a blanket `return self` here
+    # would silently break the isolation InMemoryStorage relies on
+    # for non-cks-core adapters with mutable structures.
+    #
+    # The only thing the stdlib `copy` module actually can't handle is
+    # `metadata`, which we wrap in MappingProxyType (immutable by our
+    # own contract) — so we deep-copy every field explicitly instead of
+    # deferring to the default pickle-based reduction.
+
+    def __copy__(self) -> "RuntimeVersion":
+        return type(self)(
+            session_id=self.session_id,
+            transaction_id=self.transaction_id,
+            knowledge_structure=self.knowledge_structure,
+            metadata=dict(self.metadata),
+            version_id=self.version_id,
+            created_at=self.created_at,
+        )
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "RuntimeVersion":
+        new = type(self)(
+            session_id=self.session_id,
+            transaction_id=self.transaction_id,
+            knowledge_structure=deepcopy(self.knowledge_structure, memo),
+            metadata=dict(self.metadata),
+            version_id=self.version_id,
+            created_at=self.created_at,
+        )
+        memo[id(self)] = new
+        return new
 
     #
     # ------------------------------------------------------------------
     # Metadata
     # ------------------------------------------------------------------
-    #
 
     @property
     def has_metadata(self) -> bool:
-        """
-        Whether this RuntimeVersion contains metadata.
-        """
-
         return bool(self.metadata)
 
     @property
     def age(self):
-        """
-        Time elapsed since this RuntimeVersion was created.
-        """
-
-        return datetime.now(
-            UTC,
-        ) - self.created_at
+        return datetime.now(UTC) - self.created_at
 
     #
     # ------------------------------------------------------------------
     # Debugging
     # ------------------------------------------------------------------
-    #
 
     def __repr__(self) -> str:
         return (

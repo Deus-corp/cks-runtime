@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.4.6] - 2026-07-18
+
+### Fixed
+- `RuntimeVersion.metadata` is now properly immutable (wrapped in `MappingProxyType`). Added explicit `__copy__`/`__deepcopy__` to preserve storage isolation for arbitrary `knowledge_structure` types.
+
+---
+
 ## [0.4.5] - 2026-07-18
 
 ### Fixed
