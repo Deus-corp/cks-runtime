@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.4.4] - 2026-07-18
+
+### Fixed
+- `ExecutionPipeline` now writes the result of `EvolveOperation` back to the session's `knowledge_structure` before creating a version. This fixes a bug where committed versions silently captured the pre‑evolution structure instead of the evolved result.
+- Added regression tests for evolve persistence.
+
+---
+
 ## [0.4.3] - 2026-07-18
 
 ### Fixed
