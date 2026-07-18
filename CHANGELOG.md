@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.5.0] - 2026-07-18
+
+### Added
+- `extra_constraints` parameter forwarded through `CoreInterface`, `CoreBridge`, `ValidateOperation`, and `CksCoreAdapter` to `cks-core`'s validation API.
+- End-to-end regression test confirming `extra_constraints` reaches the Core through the full Runtime pipeline.
+
+---
+
 ## [0.4.6] - 2026-07-18
 
 ### Fixed

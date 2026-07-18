@@ -49,9 +49,21 @@ class CoreInterface(ABC):
     def validate(
         self,
         knowledge_structure: Any,
+        *,
+        extra_constraints: Any = None,
     ) -> RuntimeValidationResult:
         """
         Validate a Knowledge Structure.
+
+        Parameters
+        ----------
+        extra_constraints
+            Optional, Core-implementation-defined extra validation
+            rules to apply for this call only (e.g. an opt-in
+            extension constraint). A Core implementation that has no
+            notion of scoped/extra constraints may ignore this
+            parameter; Runtime never inspects or interprets it, it is
+            passed through verbatim.
 
         Returns
         -------

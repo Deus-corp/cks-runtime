@@ -72,14 +72,30 @@ class CoreBridge:
     def validate(
         self,
         knowledge_structure: Any,
+        *,
+        extra_constraints: Any = None,
     ) -> RuntimeValidationResult:
         """
         Validate a Knowledge Structure.
+
+        ``extra_constraints`` is opaque to Runtime: it is passed
+        through verbatim to whatever Core implementation is attached.
+        Only forwarded as a keyword argument when actually supplied,
+        so Core implementations written against the pre-existing
+        ``validate(knowledge_structure)`` signature keep working
+        unchanged as long as callers don't request extra constraints
+        from them.
         """
         if not self.available:
             return RuntimeValidationResult(valid=True)
 
-        result = self._implementation.validate(knowledge_structure)
+        if extra_constraints:
+            result = self._implementation.validate(
+                knowledge_structure,
+                extra_constraints=extra_constraints,
+            )
+        else:
+            result = self._implementation.validate(knowledge_structure)
 
         if not isinstance(result, RuntimeValidationResult):
             raise TypeError(

@@ -21,22 +21,22 @@ class ValidateOperation(Operation):
         operation_id: str = "validate",
         *,
         knowledge_structure: Any = None,
+        extra_constraints: Any = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(operation_id, metadata=metadata)
         self.knowledge_structure = knowledge_structure
+        self.extra_constraints = extra_constraints
 
     def execute(
         self,
         session: RuntimeSession,
         executor,
     ) -> ExecutionResult:
-        result = executor.core.validate(self.knowledge_structure)
-        # Determining that a Knowledge Structure is invalid is a
-        # successful outcome of *running* validation, not an
-        # operation failure -- it must be reported as diagnostics,
-        # never as a raised exception. Only unexpected execution
-        # errors (caught by OperationExecutor) are OperationStatus.FAILED.
+        result = executor.core.validate(
+            self.knowledge_structure,
+            extra_constraints=self.extra_constraints,
+        )
         return ExecutionResult(
             operation_id=self.operation_id,
             status=OperationStatus.COMPLETED,

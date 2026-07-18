@@ -34,7 +34,7 @@ def test_validate(monkeypatch, adapter):
 
     monkeypatch.setattr(
         "cks.validate",
-        lambda ks: FakeValidationResult(),
+        lambda ks, extra_constraints=None: FakeValidationResult(),
     )
 
     result = adapter.validate(object())
@@ -143,7 +143,28 @@ def test_validate_calls_core(monkeypatch, adapter):
     knowledge_structure = object()
     adapter.validate(knowledge_structure)
 
-    validate.assert_called_once_with(knowledge_structure)
+    validate.assert_called_once_with(knowledge_structure, extra_constraints=None)
+
+
+def test_validate_forwards_extra_constraints(monkeypatch, adapter):
+    """extra_constraints passed to the adapter must reach cks.validate() unchanged."""
+    validate = Mock()
+
+    class FakeValidationResult:
+        is_valid = True
+        diagnostics = ()
+        metadata = {}
+
+    validate.return_value = FakeValidationResult()
+    monkeypatch.setattr("cks.validate", validate)
+
+    knowledge_structure = object()
+    sentinel_constraints = [object()]
+    adapter.validate(knowledge_structure, extra_constraints=sentinel_constraints)
+
+    validate.assert_called_once_with(
+        knowledge_structure, extra_constraints=sentinel_constraints
+    )
 
 
 def test_serialize_calls_core(monkeypatch, adapter):

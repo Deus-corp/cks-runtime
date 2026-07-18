@@ -71,6 +71,8 @@ class CksCoreAdapter(CoreInterface):
     def validate(
         self,
         knowledge_structure: Any,
+        *,
+        extra_constraints: Any = None,
     ) -> RuntimeValidationResult:
         """
         Validate a Knowledge Structure using CKS Core.
@@ -78,6 +80,7 @@ class CksCoreAdapter(CoreInterface):
 
         result = cks.validate(
             knowledge_structure,
+            extra_constraints=extra_constraints,
         )
 
         return RuntimeValidationResult(
