@@ -20,37 +20,35 @@ def adapter() -> CksCoreAdapter:
 
 
 def test_validate(monkeypatch, adapter):
-    class FakeValidationResult:
+    class FakeDiagnostic:
+        identity = "TEST-001"
+        severity = "error"
+        message = "something is wrong"
+        location = "obj-1"
+        metadata = {"source": "core"}
 
+    class FakeValidationResult:
         is_valid = True
-        diagnostics = ("diag-1",)
-        metadata = {
-            "source": "core",
-        }
+        diagnostics = (FakeDiagnostic(),)
+        metadata = {"source": "core"}
 
     monkeypatch.setattr(
         "cks.validate",
         lambda ks: FakeValidationResult(),
     )
 
-    result = adapter.validate(
-        object(),
-    )
+    result = adapter.validate(object())
 
-    assert isinstance(
-        result,
-        RuntimeValidationResult,
-    )
-
+    assert isinstance(result, RuntimeValidationResult)
     assert result.valid is True
 
-    assert result.diagnostics == (
-        "diag-1",
-    )
-
-    assert result.metadata == {
-        "source": "core",
-    }
+    translated = result.diagnostics[0]
+    assert translated.code == "TEST-001"
+    assert translated.severity.value == "error"
+    assert translated.message == "something is wrong"
+    assert translated.source.value == "core"
+    assert dict(translated.metadata)["source"] == "core"
+    assert dict(translated.metadata).get("location") == "obj-1"
 
 
 def test_serialize(monkeypatch, adapter):
@@ -132,31 +130,20 @@ def test_explain(monkeypatch, adapter):
 
 
 def test_validate_calls_core(monkeypatch, adapter):
-
     validate = Mock()
 
     class FakeValidationResult:
-
         is_valid = True
         diagnostics = ()
         metadata = {}
 
     validate.return_value = FakeValidationResult()
-
-    monkeypatch.setattr(
-        "cks.validate",
-        validate,
-    )
+    monkeypatch.setattr("cks.validate", validate)
 
     knowledge_structure = object()
+    adapter.validate(knowledge_structure)
 
-    adapter.validate(
-        knowledge_structure,
-    )
-
-    validate.assert_called_once_with(
-        knowledge_structure,
-    )
+    validate.assert_called_once_with(knowledge_structure)
 
 
 def test_serialize_calls_core(monkeypatch, adapter):

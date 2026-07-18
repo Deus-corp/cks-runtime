@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cks-runtime"
-version = "0.4.4"
+version = "0.4.5"
 
 description = "Canonical Runtime for the Canonical Knowledge Structure ecosystem"
 
@@ -19,7 +19,7 @@ license = { text = "MIT" }
 requires-python = ">=3.12"
 
 dependencies = [
-    "cks-core>=1.2.1",
+    "cks-core>=1.3.0",
 ]
 
 keywords = [

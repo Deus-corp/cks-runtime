@@ -32,13 +32,17 @@ class ValidateOperation(Operation):
         executor,
     ) -> ExecutionResult:
         result = executor.core.validate(self.knowledge_structure)
-        error = None if result.valid else RuntimeError("Validation failed")
+        # Determining that a Knowledge Structure is invalid is a
+        # successful outcome of *running* validation, not an
+        # operation failure -- it must be reported as diagnostics,
+        # never as a raised exception. Only unexpected execution
+        # errors (caught by OperationExecutor) are OperationStatus.FAILED.
         return ExecutionResult(
             operation_id=self.operation_id,
-            status=OperationStatus.COMPLETED if result.valid else OperationStatus.FAILED,
+            status=OperationStatus.COMPLETED,
             payload=result,
             diagnostics=result.diagnostics,
-            error=error,
+            error=None,
         )
 
 

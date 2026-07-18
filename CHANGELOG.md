@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.4.5] - 2026-07-18
+
+### Fixed
+- **ValidateOperation** no longer treats an invalid structure as an operation failure. The validation result is now correctly recorded as diagnostics, and the transaction commits successfully (bug #1).
+- **CksCoreAdapter** now translates cks-core Diagnostic objects into cks-runtime-native Diagnostic instances, which use plain dicts for metadata instead of MappingProxyType. This prevents `TypeError: cannot pickle 'mappingproxy' object` when persisting sessions with diagnostics (bug #2).
+- Updated integration tests to reflect the corrected contract (invalid structure → committed version with diagnostics, not a raised exception).
+
+---
+
 ## [0.4.4] - 2026-07-18
 
 ### Fixed

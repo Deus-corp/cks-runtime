@@ -198,19 +198,23 @@ def test_commit_with_validate_operation_success():
 
 
 def test_commit_with_validate_operation_failure():
-    """Невалидная структура должна вызывать ошибку при коммите."""
+    """
+    Невалидная структура — это не сбой операции, а её результат:
+    коммит должен пройти успешно, диагностики должны быть собраны,
+    а не потеряны в необработанном исключении.
+    """
     core = FakeCore(valid=False)
     runtime = Runtime(core=core)
     session = runtime.create_session({"invalid": True})
     tx = runtime.begin_transaction(session)
     tx.add_operation(ValidateOperation("op1", knowledge_structure=session.knowledge_structure))
 
-    with pytest.raises(RuntimeError, match="Operation op1 failed"):
-        runtime.commit_transaction(tx)
+    version = runtime.commit_transaction(tx)
 
-    # Сессия не должна быть изменена
+    assert isinstance(version, RuntimeVersion)
     assert session.active_transaction is None
-    assert runtime.latest_version(session) is None
+    assert runtime.latest_version(session) is version
+    assert len(session.diagnostics) > 0
 
 
 def test_commit_with_serialize_operation():

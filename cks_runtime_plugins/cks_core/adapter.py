@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import cks
+from cks.diagnostics import DiagnosticSeverity as CoreSeverity
 from cks.evolution import compose
 from cks.interface import inspect as cks_inspect
 
@@ -20,6 +21,42 @@ from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
 )
+from cks_runtime.diagnostics.diagnostic import (
+    Diagnostic as RuntimeDiagnostic,
+    DiagnosticSeverity as RuntimeSeverity,
+    DiagnosticSource,
+)
+
+_SEVERITY_MAP = {
+    CoreSeverity.INFORMATION: RuntimeSeverity.INFO,
+    CoreSeverity.WARNING: RuntimeSeverity.WARNING,
+    CoreSeverity.ERROR: RuntimeSeverity.ERROR,
+}
+
+
+def _translate_diagnostic(diagnostic: Any) -> RuntimeDiagnostic:
+    """
+    Translate a cks-core Diagnostic into a Runtime-native Diagnostic.
+
+    cks-core diagnostics freeze ``metadata`` into a MappingProxyType,
+    which the stdlib ``copy`` module cannot deepcopy. Runtime persists
+    Diagnostics via deepcopy (see InMemoryStorage), so foreign
+    cks-core Diagnostic instances must never be stored as-is -- they
+    are always translated into the Runtime's own, deepcopy-safe
+    Diagnostic type at this boundary.
+    """
+
+    metadata = dict(diagnostic.metadata)
+    if diagnostic.location is not None:
+        metadata.setdefault("location", diagnostic.location)
+
+    return RuntimeDiagnostic(
+        message=diagnostic.message,
+        source=DiagnosticSource.CORE,
+        severity=_SEVERITY_MAP[diagnostic.severity],
+        code=diagnostic.identity,
+        metadata=metadata,
+    )
 
 
 class CksCoreAdapter(CoreInterface):
@@ -46,7 +83,7 @@ class CksCoreAdapter(CoreInterface):
         return RuntimeValidationResult(
             valid=result.is_valid,
             diagnostics=tuple(
-                result.diagnostics,
+                _translate_diagnostic(d) for d in result.diagnostics
             ),
             metadata=dict(
                 result.metadata,
