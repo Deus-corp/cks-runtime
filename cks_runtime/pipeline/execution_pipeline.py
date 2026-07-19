@@ -17,6 +17,14 @@ from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import ValidateOperation, EvolveOperation
 from cks_runtime.execution.execution_context import ExecutionContext
+from cks_runtime.events.runtime_event import (
+    SessionCreated,
+    TransactionCommitted,
+    TransactionRolledBack,
+    TransactionAborted,
+    VersionCreated,
+    ValidationFailed,
+)
 
 
 class ExecutionPipeline:
@@ -52,6 +60,15 @@ class ExecutionPipeline:
         version = self._create_version(transaction)
         self._persist(version, transaction)
         self._finalize(transaction)
+
+        # Публикуем событие успешного коммита
+        self._runtime.events.publish(
+            TransactionCommitted(
+                transaction_id=transaction.transaction_id,
+                session_id=transaction.session.session_id,
+            )
+        )
+
         return version
 
     #
@@ -74,6 +91,13 @@ class ExecutionPipeline:
             transaction.session,
         )
 
+        self._runtime.events.publish(
+            TransactionRolledBack(
+                transaction_id=transaction.transaction_id,
+                session_id=transaction.session.session_id,
+            )
+        )
+
     #
     # ------------------------------------------------------------------
     # Abort
@@ -92,6 +116,13 @@ class ExecutionPipeline:
 
         self._runtime.storage.save_session(
             transaction.session,
+        )
+
+        self._runtime.events.publish(
+            TransactionAborted(
+                transaction_id=transaction.transaction_id,
+                session_id=transaction.session.session_id,
+            )
         )
 
     #
@@ -139,6 +170,14 @@ class ExecutionPipeline:
 
         self.rollback(transaction)
 
+        self._runtime.events.publish(
+            ValidationFailed(
+                transaction_id=transaction.transaction_id,
+                session_id=transaction.session.session_id,
+                message="Validation failed",
+            )
+        )
+
         raise RuntimeError(
             "Runtime commit aborted because semantic validation failed."
         )
@@ -151,9 +190,19 @@ class ExecutionPipeline:
         Create a Runtime version.
         """
 
-        return self._runtime.versions.create(
+        version = self._runtime.versions.create(
             transaction.session,
         )
+
+        self._runtime.events.publish(
+            VersionCreated(
+                version_id=version.version_id,
+                session_id=transaction.session.session_id,
+                transaction_id=transaction.transaction_id,
+            )
+        )
+
+        return version
 
     def _persist(
         self,

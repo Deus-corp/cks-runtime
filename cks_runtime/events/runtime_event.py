@@ -133,3 +133,14 @@ class VersionCreated(RuntimeEvent):
     session_id: str = ""
 
     transaction_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationFailed(RuntimeEvent):
+    """
+    Runtime validation failed.
+    """
+
+    transaction_id: str = ""
+    session_id: str = ""
+    message: str = ""

@@ -14,6 +14,10 @@ from cks_runtime.pipeline.execution_pipeline import (
 from cks_runtime.versioning.version import (
     RuntimeVersion,
 )
+from cks_runtime.events.runtime_event import (
+    TransactionCommitted,
+    VersionCreated,
+)
 from cks_runtime.operations.operation_types import EvolveOperation
 
 
@@ -213,3 +217,16 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
     )
     version3 = runtime.commit_transaction(tx3)
     assert version3 is not None  # commit succeeded (invalid != operation failure)
+
+
+def test_commit_publishes_transaction_committed_event():
+    runtime = create_runtime(ValidCore())
+    session = runtime.create_session({})
+    transaction = runtime.begin_transaction(session)
+    pipeline = ExecutionPipeline(runtime)
+
+    pipeline.commit(transaction)
+
+    history = runtime.events.history()
+    assert any(isinstance(e, TransactionCommitted) for e in history)
+    assert any(isinstance(e, VersionCreated) for e in history)

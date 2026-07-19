@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.6.0] - 2026-07-19
+
+### Added
+- Event publishing in ExecutionPipeline: `TransactionCommitted`, `TransactionRolledBack`, `TransactionAborted`, `VersionCreated`, `ValidationFailed`.
+- Runtime now exposes `events` property for subscribing to internal events.
+
+---
+
 ## [0.5.0] - 2026-07-18
 
 ### Added

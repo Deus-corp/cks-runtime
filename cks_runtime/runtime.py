@@ -59,6 +59,7 @@ from cks_runtime.versioning.version_manager import (
 from cks_runtime.execution.operation_executor import OperationExecutor
 from cks_runtime.dispatcher.dispatcher import Dispatcher
 from cks_runtime.operations.operation_registry import OperationRegistry
+from cks_runtime.events.event_bus import EventBus
 
 
 class Runtime:
@@ -94,6 +95,7 @@ class Runtime:
         "_executor",
         "_registry",
         "_dispatcher",
+        "_events",
     )
 
     def __init__(
@@ -152,6 +154,7 @@ class Runtime:
             registry=self._registry,
             executor=self._executor,
         )
+        self._events = EventBus()
 
     #
     # ------------------------------------------------------------------
@@ -251,6 +254,12 @@ class Runtime:
         """
 
         return self._core_bridge.available
+    
+
+    @property
+    def events(self) -> EventBus:
+        """Runtime event bus."""
+        return self._events
 
 
     #

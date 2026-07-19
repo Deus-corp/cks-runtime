@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-160%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-beta-blue)
 
 CKS Runtime is the canonical execution environment for
