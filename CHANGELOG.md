@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.6.1] - 2026-07-19
+
+### Changed
+- **Diagnostics consolidation.** `OperationExecutor` no longer writes diagnostics directly into the session. The `ExecutionPipeline` now centralises all diagnostic collection via `_handle_result()`, which updates both the global `DiagnosticAggregator` and the session's own diagnostic list. This eliminates the risk of desynchronisation between the two parallel tracking mechanisms.
+
+---
+
 ## [0.6.0] - 2026-07-19
 
 ### Added

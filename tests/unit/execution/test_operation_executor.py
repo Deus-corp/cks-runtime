@@ -197,36 +197,25 @@ def test_execute_failure(
     assert diagnostic.message == "simulated failure"
 
 
-def test_executor_appends_diagnostics_to_session(
+def test_executor_does_not_append_diagnostics_to_session(
     executor,
     session,
 ):
+    """Executor returns diagnostics in ExecutionResult, but no longer
+    writes them directly into the session (that is now the pipeline's job)."""
+    operation = _DiagnosticOperation("op-3")
 
-    operation = _DiagnosticOperation(
-        "op-3",
-    )
+    before = len(session.diagnostics)
 
-    before = len(
-        session.diagnostics,
-    )
+    result = executor.execute(operation, session)
 
-    result = executor.execute(
-        operation,
-        session,
-    )
-
-    after = len(
-        session.diagnostics,
-    )
-
+    # Диагностики должны быть в результате операции
     assert result.succeeded
+    assert len(result.diagnostics) == 1
 
-    assert after == before + 1
-
-    assert (
-        session.diagnostics[-1].message
-        == "operation warning"
-    )
+    # Но в сессию они больше не попадают напрямую
+    after = len(session.diagnostics)
+    assert after == before
 
 
 def test_success_without_diagnostics_does_not_modify_session(

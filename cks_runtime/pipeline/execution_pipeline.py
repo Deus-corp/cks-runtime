@@ -256,6 +256,8 @@ class ExecutionPipeline:
             raise RuntimeError(f"Operation {operation_id} failed: {result.error}")
         if result.diagnostics:
             self._runtime.diagnostics.extend(result.diagnostics)
+            for diagnostic in result.diagnostics:
+                transaction.session.add_diagnostic(diagnostic)
 
     def _apply_state_mutation(self, operation, result, session) -> None:
         """

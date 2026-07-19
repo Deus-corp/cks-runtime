@@ -205,10 +205,4 @@ class OperationExecutor:
                 ),
             )
 
-        for diagnostic in result.diagnostics:
-
-            session.diagnostics.append(
-                diagnostic,
-            )
-
         return result
