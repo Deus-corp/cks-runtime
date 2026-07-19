@@ -15,7 +15,7 @@ from cks_runtime.core_api.validation_result import RuntimeValidationResult
 from cks_runtime.transaction.transaction import RuntimeTransaction
 from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime.execution.operation_executor import OperationStatus
-from cks_runtime.operations.operation_types import ValidateOperation, EvolveOperation
+from cks_runtime.operations.operation_types import ValidateOperation, EvolveOperation, RevertVersionOperation
 from cks_runtime.execution.execution_context import ExecutionContext
 from cks_runtime.events.runtime_event import (
     SessionCreated,
@@ -264,19 +264,12 @@ class ExecutionPipeline:
         """
         Write operation results that change the canonical Knowledge
         Structure back onto the owning session.
-
-        Most operations (Validate, Serialize, Explain) are read-only
-        with respect to session state. EvolveOperation is the
-        exception: it produces a *new* KnowledgeStructure via
-        CKS Core's Genesis/Decay operators, and that result must
-        become the session's tracked state before a RuntimeVersion
-        snapshot is taken — otherwise the committed version silently
-        reflects the pre-evolution structure instead of the outcome
-        of the transaction.
         """
+        if result.status != OperationStatus.COMPLETED:
+            return
 
-        if (
-            isinstance(operation, EvolveOperation)
-            and result.status == OperationStatus.COMPLETED
-        ):
+        if isinstance(operation, EvolveOperation):
+            session.knowledge_structure = result.payload
+
+        elif isinstance(operation, RevertVersionOperation):
             session.knowledge_structure = result.payload

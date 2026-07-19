@@ -127,3 +127,64 @@ class ExplainOperation(Operation):
             status=OperationStatus.COMPLETED,
             payload=explanation,
         )
+
+
+class ListVersionsOperation(Operation):
+    """List all versions in the current session history."""
+    operation_id: str = "list_versions"
+
+    def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        versions_data = [
+            {
+                "version_id": v.version_id,
+                "created_at": v.created_at.isoformat(),
+                "transaction_id": v.transaction_id,
+                "metadata": dict(v.metadata),
+            }
+            for v in session.version_history
+        ]
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=versions_data,
+        )
+
+
+class RevertVersionOperation(Operation):
+    """Revert the Knowledge Structure to a specific previous version."""
+    operation_id: str = "revert_version"
+
+    def __init__(
+        self,
+        operation_id: str = "revert_version",
+        *,
+        target_version_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(operation_id, metadata=metadata)
+        self.target_version_id = target_version_id
+
+    def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        target_version = next(
+            (v for v in session.version_history if v.version_id == self.target_version_id),
+            None,
+        )
+        if not target_version:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=ValueError(f"Version {self.target_version_id} not found."),
+            )
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=target_version.knowledge_structure,
+        )

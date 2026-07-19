@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.7.0] - 2026-07-19
+
+### Added
+- `ListVersionsOperation` – returns a lightweight history of all versions in the current session, making the audit trail accessible to tools and LLMs.
+- `RevertVersionOperation` – restores the Knowledge Structure to any previous version, enabling time‑travel debugging and safe rollbacks.
+- `ExecutionPipeline._apply_state_mutation` now handles `RevertVersionOperation` payloads.
+
+---
+
 ## [0.6.2] - 2026-07-19
 
 ### Added
