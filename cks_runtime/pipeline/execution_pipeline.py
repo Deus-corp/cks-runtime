@@ -242,6 +242,7 @@ class ExecutionPipeline:
             result = executor.execute(op, session)
             self._handle_result(result, op.operation_id, transaction)
             self._apply_state_mutation(op, result, session)
+            transaction.add_result(result)
 
         # 2. DispatchRequest (новый путь)
         if dispatcher is not None and transaction.requests:

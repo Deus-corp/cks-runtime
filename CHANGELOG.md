@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [0.6.2] - 2026-07-19
+
+### Added
+- `RuntimeTransaction.results` field and `add_result()` method, storing `ExecutionResult` objects produced by each operation in the transaction.
+- `ExecutionPipeline` now populates transaction results during execution, enabling downstream tools to retrieve operation payloads directly from the transaction.
+
+### Changed
+- `serialize_knowledge` and `explain_knowledge` tools in `cks-mcp` now read operation results from the transaction instead of calling `CoreBridge` a second time. This eliminates redundant computation and improves architectural separation.
+
+---
+
 ## [0.6.1] - 2026-07-19
 
 ### Changed

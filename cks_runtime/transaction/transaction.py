@@ -25,6 +25,7 @@ class RuntimeTransaction:
     transaction_id: str = field(default_factory=lambda: str(uuid4()))
     operations: list[Any] = field(default_factory=list)
     requests: list[Any] = field(default_factory=list)   # <-- список, не tuple
+    results: list[Any] = field(default_factory=list)
     diagnostics: list[Any] = field(default_factory=list)
     status: TransactionStatus = TransactionStatus.CREATED
 
@@ -52,6 +53,10 @@ class RuntimeTransaction:
 
     def add_request(self, request: Any) -> None:
         self.requests.append(request)
+    
+    def add_result(self, result: Any) -> None:
+        """Attach an ExecutionResult."""
+        self.results.append(result)
 
     def add_diagnostic(self, diagnostic: Any) -> None:
         self.diagnostics.append(diagnostic)
