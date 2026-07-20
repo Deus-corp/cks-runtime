@@ -41,6 +41,9 @@ class DummyCore(CoreInterface):
         return {
             "summary": "dummy",
         }
+    
+    def diff(self, source, target):
+        return []
 
 
 def test_interface_can_be_implemented():

@@ -165,3 +165,9 @@ class CoreBridge:
         return self._implementation.explain(
             knowledge_structure,
         )
+    
+
+    def diff(self, source: Any, target: Any) -> list[Any]:
+        if not self.available:
+            return []
+        return self._implementation.diff(source, target)

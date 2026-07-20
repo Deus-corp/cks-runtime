@@ -137,3 +137,9 @@ class CoreInterface(ABC):
             Structured semantic explanation.
         """
         raise NotImplementedError
+    
+
+    @abstractmethod
+    def diff(self, source: Any, target: Any) -> list[Any]:
+        """Compute structural diff between two Core-native structures."""
+        raise NotImplementedError

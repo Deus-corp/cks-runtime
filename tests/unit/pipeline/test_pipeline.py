@@ -49,6 +49,9 @@ class ValidCore(CoreInterface):
         knowledge_structure,
     ):
         return {}
+    
+    def diff(self, source, target):
+        return []
 
 
 class InvalidCore(CoreInterface):
@@ -80,6 +83,8 @@ class InvalidCore(CoreInterface):
     ):
         return {}
 
+    def diff(self, source, target):
+        return []
 
 def create_runtime(
     core=None,
@@ -126,6 +131,9 @@ class EvolvingCore(CoreInterface):
         return {"evolved": True, "original": knowledge_structure}
     def explain(self, knowledge_structure):
         return {}
+
+    def diff(self, source, target):
+        return []
 
 def test_commit_persists_evolve_result_into_version():
     runtime = create_runtime(EvolvingCore())
@@ -181,6 +189,9 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
 
         def explain(self, knowledge_structure):
             return {}
+        
+        def diff(self, source, target):
+            return []
 
     runtime = create_runtime(ExtraConstraintsAwareCore())
     session = runtime.create_session({"objects": []})

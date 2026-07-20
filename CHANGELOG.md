@@ -19,6 +19,30 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.0.0] - 2026-07-20
+
+### Added
+- **DiffOperation** – computes structural delta between current session and a target version or structure, producing a compact list of changes.
+- `diff` method on `CoreInterface`, `CoreBridge`, and `CksCoreAdapter` – delegates to `KnowledgeStructure.diff()`.
+- `ListVersionsOperation` and `RevertVersionOperation` – time‑travel debugging and safe rollbacks.
+- `EventBus` integration – `Runtime.events` publishes `TransactionCommitted`, `VersionCreated`, `ValidationFailed`, etc.
+- `extra_constraints` passthrough from `CoreInterface` through `ValidateOperation` to `cks-core`.
+
+### Changed
+- `ExecutionPipeline` now writes `EvolveOperation` and `RevertVersionOperation` results back to `session.knowledge_structure`.
+- Diagnostics are now consolidated through `ExecutionPipeline._handle_result`, eliminating dual tracking.
+- `RuntimeTransaction.results` field stores `ExecutionResult` objects, enabling tools to retrieve operation payloads without redundant calls.
+
+### Fixed
+- Removed `MappingProxyType` from `RuntimeSession.metadata` to avoid deep‑copy issues.
+- `ValidateOperation` no longer treats invalid structure as an operation failure (diagnostics are returned instead of an exception).
+- All 161 tests pass.
+
+### Removed
+- Legacy `CoreAdapter` references and dead test code.
+
+---
+
 ## [0.7.0] - 2026-07-19
 
 ### Added

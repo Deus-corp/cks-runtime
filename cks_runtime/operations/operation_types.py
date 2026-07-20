@@ -188,3 +188,66 @@ class RevertVersionOperation(Operation):
             status=OperationStatus.COMPLETED,
             payload=target_version.knowledge_structure,
         )
+
+
+class DiffOperation(Operation):
+    """Compute structural delta between current session and a target state/version."""
+    operation_id: str = "diff"
+
+    def __init__(
+        self,
+        operation_id: str = "diff",
+        *,
+        target_version_id: str | None = None,
+        target_structure: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(operation_id, metadata=metadata)
+        self.target_version_id = target_version_id
+        self.target_structure = target_structure
+
+    def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        # Determine the target structure
+        target = self.target_structure
+        if self.target_version_id:
+            target_version = next(
+                (v for v in session.version_history if v.version_id == self.target_version_id),
+                None,
+            )
+            if not target_version:
+                return ExecutionResult(
+                    operation_id=self.operation_id,
+                    status=OperationStatus.FAILED,
+                    error=ValueError(f"Target version {self.target_version_id} not found."),
+                )
+            target = target_version.knowledge_structure
+
+        if not target:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=ValueError("Target structure could not be resolved."),
+            )
+
+        # Compute the diff via the core bridge
+        try:
+            diff_patch = executor.core.diff(
+                source=session.knowledge_structure,
+                target=target,
+            )
+        except Exception as e:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=e,
+            )
+
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=diff_patch,
+        )

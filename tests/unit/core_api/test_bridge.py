@@ -35,6 +35,9 @@ class _FakeCore(CoreInterface):
         return {
             "summary": "fake explanation",
         }
+    
+    def diff(self, source, target):
+        return []
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)
-![Status](https://img.shields.io/badge/status-beta-blue)
+[![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
 CKS Runtime is the canonical execution environment for
 Canonical Knowledge Structures (CKS).
@@ -146,8 +146,6 @@ Responsibilities are strictly separated.
 
 ---
 
-# Features
-
 The current Reference Runtime provides:
 
 - Runtime Sessions
@@ -160,9 +158,11 @@ The current Reference Runtime provides:
 - Reference Runtime Architecture
 - Runtime Conformance Model
 - **CKS Core Integration** (via `CksCoreAdapter`)
-- **Execution Engine** – canonical operations (Validate, Serialize, Explain, Evolve) via `CoreBridge`
+- **Execution Engine** – canonical operations (Validate, Serialize, Explain, Evolve, Diff) via `CoreBridge`
 - **Operation Dispatcher** – registry-based operation resolution
-- **DispatchRequest** support – decoupled operation execution
+- **Event System** – lifecycle events published via `EventBus`
+- **Time-Travel Operations** – `ListVersionsOperation`, `RevertVersionOperation`
+- **Structural Diff** – compact change computation between versions
 
 ---
 
@@ -228,19 +228,35 @@ pip install -e .
 ```python
 from cks_runtime import Runtime
 from cks_runtime_plugins.cks_core import CksCoreAdapter
-from cks_runtime.operations.operation_types import ValidateOperation
+from cks_runtime.operations.operation_types import (
+    ValidateOperation,
+    EvolveOperation,
+    ListVersionsOperation,
+    RevertVersionOperation,
+)
 
 # Create Runtime with real CKS Core
 runtime = Runtime(core=CksCoreAdapter())
 
+# Create a session and validate a knowledge structure
 session = runtime.create_session({"example": True})
 tx = runtime.begin_transaction(session)
 tx.add_operation(ValidateOperation("v1", knowledge_structure=session.knowledge_structure))
-
 version = runtime.commit_transaction(tx)
-print(version)
 
-# Runtime coordinates execution. CKS Core defines semantics.
+# Evolve the structure
+tx2 = runtime.begin_transaction(session)
+tx2.add_operation(EvolveOperation("evolve", knowledge_structure=session.knowledge_structure, evolution=[]))
+version2 = runtime.commit_transaction(tx2)
+
+# List versions
+versions = runtime.executor.execute(ListVersionsOperation(), session)
+print(versions.payload)
+
+# Revert to the first version
+tx3 = runtime.begin_transaction(session)
+tx3.add_operation(RevertVersionOperation("revert", target_version_id=version.version_id))
+runtime.commit_transaction(tx3)
 ```
 
 ---
@@ -271,7 +287,7 @@ Supporting documents include:
 
 ## Project Status
 
-Current implementation status (v0.4.0):
+Current implementation status (v1.0.0):
 
 | Component | Status |
 |----------|--------|
@@ -284,12 +300,15 @@ Current implementation status (v0.4.0):
 | Runtime API | ✅ Complete |
 | Core Integration (CoreBridge) | ✅ Complete |
 | Execution Engine (Operations + Dispatcher) | ✅ Complete |
-| Test Suite | ✅ 147 tests passing |
-| CLI / MCP Adapters | ✅ Experimental |
-| Event System | 🚧 Planned (Phase 3) |
+| Event System | ✅ Complete |
+| Time-Travel Operations | ✅ Complete |
+| Structural Diff | ✅ Complete |
+| Test Suite | ✅ 161 tests passing |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
+
+Future work focuses on persistent storage and distributed sessions.
 
 Future work focuses on Phase 3 (Event System) as outlined in the
 [Roadmap](ROADMAP.md).

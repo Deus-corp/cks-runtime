@@ -148,3 +148,7 @@ class CksCoreAdapter(CoreInterface):
             ),
             "summary": summary,
         }
+    
+
+    def diff(self, source: Any, target: Any) -> list[Any]:
+        return source.diff(target)

@@ -180,6 +180,9 @@ class FakeCore(CoreInterface):
 
     def explain(self, knowledge_structure):
         return {"summary": "fake explanation"}
+    
+    def diff(self, source, target):
+        return []
 
 
 # Новые тесты
