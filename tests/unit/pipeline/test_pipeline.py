@@ -215,8 +215,8 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
         True for _ in session2.diagnostics
     )  # no crash; COMPLETED regardless of validity
 
-    # With extra_constraints: the fake Core reports invalid, and
-    # ValidateOperation must surface that as diagnostics, not raise.
+    # With extra_constraints: the fake Core reports invalid, so
+    # ValidateOperation returns FAILED, and commit must raise.
     session3 = runtime.create_session({"objects": []})
     tx3 = runtime.begin_transaction(session3)
     tx3.add_operation(
@@ -226,8 +226,10 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
             extra_constraints=["sentinel"],
         )
     )
-    version3 = runtime.commit_transaction(tx3)
-    assert version3 is not None  # commit succeeded (invalid != operation failure)
+    with pytest.raises(RuntimeError, match="Operation validate failed"):
+        runtime.commit_transaction(tx3)
+    # The session must not be modified after a failed commit
+    assert session3.diagnostics == []
 
 
 def test_commit_publishes_transaction_committed_event():

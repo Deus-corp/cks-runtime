@@ -19,6 +19,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.0.1] - 2026-07-20
+
+### Fixed
+- `CoreBridge.validate` now passes `extra_constraints` even when empty (`is not None` check).
+- `TransactionManager._finish` now removes completed transactions from the registry, preventing memory leaks.
+- `TransactionManager.get` raises a descriptive `KeyError` when a transaction is not found.
+- `Dispatcher.dispatch` no longer writes to the non-existent `context.diagnostics`.
+- `ValidateOperation` now correctly returns `FAILED` status when the structure is invalid, preventing invalid structures from being committed as versions.
+
+### Removed
+- Deprecated `cks_runtime/adapters/mcp` and the entire `adapters/` package. The canonical MCP server is now `cks-mcp`.
+
+---
+
 ## [1.0.0] - 2026-07-20
 
 ### Added

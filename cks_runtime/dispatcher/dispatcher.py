@@ -129,7 +129,4 @@ class Dispatcher:
         # Preserve diagnostics inside execution context.
         #
 
-        if result.diagnostics:
-            context.diagnostics.extend(result.diagnostics)
-
         return result

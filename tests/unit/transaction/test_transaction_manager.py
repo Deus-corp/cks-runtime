@@ -131,19 +131,11 @@ def test_list_transactions_returns_copy():
     assert first is not second
 
 
-def test_completed_transaction_is_retrievable():
-
+def test_completed_transaction_is_not_retrievable():
     sessions = SessionManager()
     manager = TransactionManager()
-
-    session = sessions.create_session(
-        knowledge_structure={}
-    )
-
+    session = sessions.create_session(knowledge_structure={})
     tx = manager.begin(session)
-
     manager.commit(tx)
-
-    assert manager.retrieve(
-        tx.transaction_id
-    ) is tx
+    # После завершения транзакция удаляется из реестра
+    assert manager.retrieve(tx.transaction_id) is None

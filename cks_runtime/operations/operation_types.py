@@ -39,10 +39,10 @@ class ValidateOperation(Operation):
         )
         return ExecutionResult(
             operation_id=self.operation_id,
-            status=OperationStatus.COMPLETED,
+            status=OperationStatus.COMPLETED if result.valid else OperationStatus.FAILED,
             payload=result,
             diagnostics=result.diagnostics,
-            error=None,
+            error=None if result.valid else RuntimeError("Validation failed"),
         )
 
 

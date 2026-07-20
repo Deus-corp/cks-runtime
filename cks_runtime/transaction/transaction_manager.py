@@ -176,11 +176,9 @@ class TransactionManager:
         self,
         transaction: RuntimeTransaction,
     ) -> None:
-        """
-        Finish RuntimeTransaction lifecycle.
-        """
-
+        """Finish RuntimeTransaction lifecycle."""
         transaction.session.detach_transaction()
+        self._transactions.pop(transaction.transaction_id, None)
 
     def clear(self) -> None:
         """
@@ -193,3 +191,13 @@ class TransactionManager:
             transaction.session.detach_transaction()
 
         self._transactions.clear()
+    
+    def get(self, transaction_id: str) -> RuntimeTransaction:
+        """Return the transaction with the given id.
+        
+        Raises KeyError if not found.
+        """
+        transaction = self._transactions.get(transaction_id)
+        if transaction is None:
+            raise KeyError(f"Transaction '{transaction_id}' not found.")
+        return transaction

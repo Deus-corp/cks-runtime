@@ -89,7 +89,7 @@ class CoreBridge:
         if not self.available:
             return RuntimeValidationResult(valid=True)
 
-        if extra_constraints:
+        if extra_constraints is not None:
             result = self._implementation.validate(
                 knowledge_structure,
                 extra_constraints=extra_constraints,
