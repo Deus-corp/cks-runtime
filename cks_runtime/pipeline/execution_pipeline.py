@@ -49,7 +49,7 @@ class ExecutionPipeline:
         self,
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
-        if transaction.operations:
+        if transaction.operations or transaction.requests:
             self._execute_operations(transaction)
         else:
             # обратная совместимость: старый путь валидации

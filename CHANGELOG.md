@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.0.2] - 2026-07-20
+
+### Fixed
+- `ExecutionPipeline.commit()` now correctly processes `DispatchRequest`-only transactions (those without legacy `operations`). Previously, transactions built solely with `add_request()` were silently ignored.
+
+---
+
 ## [1.0.1] - 2026-07-20
 
 ### Fixed

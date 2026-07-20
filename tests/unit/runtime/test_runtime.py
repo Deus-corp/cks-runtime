@@ -9,6 +9,8 @@ from cks_runtime.operations.operation_types import (
     SerializeOperation,
     ExplainOperation,
 )
+from cks_runtime.execution.operation_executor import ExecutionResult, OperationStatus
+import pytest
 
 
 def test_runtime_create_session():
@@ -269,5 +271,14 @@ def test_commit_with_dispatcher_request():
         parameters={"knowledge_structure": {"x": 1}},
     )
     tx.add_request(req)
+    # Патч: диспетчер должен выполнить операцию, поэтому мокаем метод,
+    # чтобы он возвращал успешный результат
+    def fake_dispatch(req, context):
+        return ExecutionResult(
+            operation_id=req.operation_id,
+            status=OperationStatus.COMPLETED,
+        )
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(runtime.dispatcher, "dispatch", fake_dispatch)
     version = runtime.commit_transaction(tx)
     assert version is not None
