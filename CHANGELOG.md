@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.2.0] - 2026-07-21
+
+### Added
+- **Delta version storage:** non-snapshot versions now store only a `patch` (list of structural operators) instead of a full `knowledge_structure`, dramatically reducing memory usage for long version histories.
+- `RuntimeVersion.is_snapshot` property and `patch` field.
+- `RuntimeSession.get_version_state()` reconstructs any version from the nearest snapshot + patches.
+- `VersionManager.create()` accepts `previous_state` and decides snapshot/delta at commit time.
+- `ExecutionPipeline` passes `initial_state` to `VersionManager` for correct patch computation.
+- Tests for delta version storage and reconstruction.
+
+---
+
 ## [1.1.0] - 2026-07-21
 
 ### Added

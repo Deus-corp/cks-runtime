@@ -173,20 +173,22 @@ class RevertVersionOperation(Operation):
         session: RuntimeSession,
         executor,
     ) -> ExecutionResult:
-        target_version = next(
-            (v for v in session.version_history if v.version_id == self.target_version_id),
-            None,
-        )
-        if not target_version:
+        try:
+            target_structure = session.get_version_state(
+                self.target_version_id,
+                executor.core,
+            )
+        except ValueError as exc:
             return ExecutionResult(
                 operation_id=self.operation_id,
                 status=OperationStatus.FAILED,
-                error=ValueError(f"Version {self.target_version_id} not found."),
+                error=exc,
             )
+
         return ExecutionResult(
             operation_id=self.operation_id,
             status=OperationStatus.COMPLETED,
-            payload=target_version.knowledge_structure,
+            payload=target_structure,
         )
 
 
@@ -211,29 +213,18 @@ class DiffOperation(Operation):
         session: RuntimeSession,
         executor,
     ) -> ExecutionResult:
-        # Determine the target structure
-        target = self.target_structure
-        if self.target_version_id:
-            target_version = next(
-                (v for v in session.version_history if v.version_id == self.target_version_id),
-                None,
+        try:
+            target = session.get_version_state(
+                self.target_version_id,
+                executor.core,
             )
-            if not target_version:
-                return ExecutionResult(
-                    operation_id=self.operation_id,
-                    status=OperationStatus.FAILED,
-                    error=ValueError(f"Target version {self.target_version_id} not found."),
-                )
-            target = target_version.knowledge_structure
-
-        if not target:
+        except ValueError as exc:
             return ExecutionResult(
                 operation_id=self.operation_id,
                 status=OperationStatus.FAILED,
-                error=ValueError("Target structure could not be resolved."),
+                error=exc,
             )
 
-        # Compute the diff via the core bridge
         try:
             diff_patch = executor.core.diff(
                 source=session.knowledge_structure,

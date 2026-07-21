@@ -34,21 +34,16 @@ def bridge() -> CoreBridge:
 
 @pytest.fixture
 def session_with_history(bridge: CoreBridge) -> RuntimeSession:
-    """
-    A session with 6 committed versions, each adding one object,
-    built through the real VersionManager (mirrors what
-    ExecutionPipeline._create_version does).
-    """
     session = RuntimeSession(knowledge_structure=make_structure(["x0"]))
     versions = VersionManager()
 
-    # v0: initial state already set above, record it as version 0.
-    versions.create(session, core_bridge=bridge)
+    versions.create(session, core_bridge=bridge)  # v0 snapshot
 
     for step in range(1, 6):
+        previous_state = session.knowledge_structure  # фиксируем до изменения
         ids = [f"x{i}" for i in range(step + 1)]
         session.knowledge_structure = make_structure(ids)
-        versions.create(session, core_bridge=bridge)
+        versions.create(session, core_bridge=bridge, previous_state=previous_state)
 
     return session
 
@@ -135,20 +130,16 @@ def test_version_manager_leaves_state_hash_none_without_bridge():
 def test_get_version_state_reconstructs_via_diff_and_evolve(
     session_with_history: RuntimeSession, bridge: CoreBridge
 ):
-    """
-    With the default snapshot_every=10 and only 6 versions, every
-    lookup after the first forces a full replay from version 0
-    through core_bridge.diff()/evolve() -- there is no "cheat" path
-    that just returns the stored structure directly.
-    """
-    target_version = session_with_history.version_history[4]
+    target_version = session_with_history.version_history[4]  # delta version
 
     reconstructed = session_with_history.get_version_state(
         target_version.version_id,
         bridge,
     )
 
-    assert reconstructed.root_hash == target_version.knowledge_structure.root_hash
+    # The target version's knowledge_structure is None, so we verify
+    # against the state_hash instead.
+    assert target_version.state_hash is not None
     assert reconstructed.root_hash == target_version.state_hash
 
 
@@ -159,9 +150,9 @@ def test_get_version_state_matches_directly_stored_state_for_every_version(
         reconstructed = session_with_history.get_version_state(
             version.version_id,
             bridge,
-            snapshot_every=2,  # forces at least one replay hop for most versions
         )
-        assert reconstructed.root_hash == version.knowledge_structure.root_hash
+        assert version.state_hash is not None
+        assert reconstructed.root_hash == version.state_hash
 
 
 def test_get_version_state_unknown_version_raises(
@@ -169,16 +160,6 @@ def test_get_version_state_unknown_version_raises(
 ):
     with pytest.raises(ValueError, match="not found"):
         session_with_history.get_version_state("does-not-exist", bridge)
-
-
-def test_get_version_state_rejects_non_positive_snapshot_every(
-    session_with_history: RuntimeSession, bridge: CoreBridge
-):
-    target = session_with_history.version_history[0]
-    with pytest.raises(ValueError, match="snapshot_every"):
-        session_with_history.get_version_state(
-            target.version_id, bridge, snapshot_every=0
-        )
 
 
 def test_get_version_state_detects_tampered_history(

@@ -18,7 +18,7 @@ Does not own:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from cks_runtime.session.session import RuntimeSession
 
@@ -43,6 +43,7 @@ class VersionManager:
         self,
         session: RuntimeSession,
         core_bridge: "CoreBridge | None" = None,
+        previous_state: Any | None = None,
     ) -> RuntimeVersion:
         """
         Create a new RuntimeVersion.
@@ -50,15 +51,53 @@ class VersionManager:
         The created version is automatically attached
         to the owning RuntimeSession.
 
+        Whether the resulting version stores its Knowledge Structure
+        directly ("snapshot") or only a ``patch`` to be replayed from
+        the nearest earlier snapshot is decided *here, once, at
+        creation time* -- not later on read. A version is a snapshot
+        when any of the following holds:
+
+        - no ``core_bridge`` was given (nothing capable of computing
+          or replaying a patch is available, so a full copy is the
+          only option);
+        - this is the session's first version (index 0 -- there is no
+          earlier snapshot to replay from);
+        - ``len(session.version_history)`` is a multiple of
+          ``session.snapshot_interval``.
+
+        Otherwise a delta version is recorded: ``knowledge_structure``
+        is left ``None`` and ``patch`` holds
+        ``core_bridge.diff(previous_state, session.knowledge_structure)``.
+        Callers must reconstruct such versions via
+        :meth:`RuntimeSession.get_version_state`, not by reading
+        ``knowledge_structure`` directly.
+
         Parameters
         ----------
         core_bridge
             Optional. When supplied and the attached Core
             implementation supports content hashing, the resulting
-            version's ``state_hash`` is populated. Left as ``None``
-            when no bridge is given, no Core is attached, or the
-            Core does not implement ``hash()`` — this is treated as
-            "no integrity hash available", not an error.
+            version's ``state_hash`` is populated regardless of
+            whether it ends up a snapshot or a delta. Left as
+            ``None`` when no bridge is given, no Core is attached, or
+            the Core does not implement ``hash()`` — this is treated
+            as "no integrity hash available", not an error.
+        previous_state
+            Required (and must not be ``None``) whenever this call
+            produces a delta version, i.e. whenever a ``core_bridge``
+            is given and this is *not* the first version and not a
+            snapshot-interval boundary: the session's Knowledge
+            Structure as it was immediately before the transaction
+            being recorded, used to compute ``patch``. Ignored for
+            snapshot versions, so callers that always pass it (e.g.
+            "state of the session at the start of every commit") do
+            not need to special-case anything.
+
+        Raises
+        ------
+        ValueError
+            A delta version is being recorded but ``previous_state``
+            was not supplied.
         """
 
         transaction_id = ""
@@ -75,13 +114,38 @@ class VersionManager:
             except (NotImplementedError, RuntimeError):
                 state_hash = None
 
-        version = RuntimeVersion(
-            session_id=session.session_id,
-            transaction_id=transaction_id,
-            knowledge_structure=session.knowledge_structure,
-            metadata=session.metadata,
-            state_hash=state_hash,
+        index = len(session.version_history)
+        is_snapshot = (
+            core_bridge is None
+            or index == 0
+            or index % session.snapshot_interval == 0
         )
+
+        if is_snapshot:
+            version = RuntimeVersion(
+                session_id=session.session_id,
+                transaction_id=transaction_id,
+                knowledge_structure=session.knowledge_structure,
+                metadata=session.metadata,
+                state_hash=state_hash,
+            )
+        else:
+            if previous_state is None:
+                raise ValueError(
+                    "previous_state is required to record a delta "
+                    "(non-snapshot) version: pass the session's "
+                    "Knowledge Structure as it was immediately before "
+                    "this transaction's mutations."
+                )
+            patch = core_bridge.diff(previous_state, session.knowledge_structure)
+            version = RuntimeVersion(
+                session_id=session.session_id,
+                transaction_id=transaction_id,
+                knowledge_structure=None,
+                metadata=session.metadata,
+                state_hash=state_hash,
+                patch=patch,
+            )
 
         session.add_version(
             version,

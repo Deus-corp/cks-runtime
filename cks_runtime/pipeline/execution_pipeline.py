@@ -25,6 +25,7 @@ from cks_runtime.events.runtime_event import (
     VersionCreated,
     ValidationFailed,
 )
+from typing import Any
 
 
 class ExecutionPipeline:
@@ -49,19 +50,19 @@ class ExecutionPipeline:
         self,
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
+        initial_state = transaction.session.knowledge_structure
+
         if transaction.operations or transaction.requests:
             self._execute_operations(transaction)
         else:
-            # обратная совместимость: старый путь валидации
             validation = self._validate(transaction)
             self._collect_diagnostics(validation)
             self._quality_gate(validation, transaction)
 
-        version = self._create_version(transaction)
+        version = self._create_version(transaction, initial_state)
         self._persist(version, transaction)
         self._finalize(transaction)
 
-        # Публикуем событие успешного коммита
         self._runtime.events.publish(
             TransactionCommitted(
                 transaction_id=transaction.transaction_id,
@@ -70,7 +71,7 @@ class ExecutionPipeline:
         )
 
         return version
-
+    
     #
     # ------------------------------------------------------------------
     # Rollback
@@ -185,14 +186,14 @@ class ExecutionPipeline:
     def _create_version(
         self,
         transaction: RuntimeTransaction,
+        initial_state: Any,
     ) -> RuntimeVersion:
-        """
-        Create a Runtime version.
-        """
+        """Create a Runtime version, passing the pre-transaction state for delta computation."""
 
         version = self._runtime.versions.create(
             transaction.session,
             core_bridge=self._runtime.core_bridge,
+            previous_state=initial_state,
         )
 
         self._runtime.events.publish(

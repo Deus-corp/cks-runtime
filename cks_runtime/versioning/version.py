@@ -26,13 +26,26 @@ class RuntimeVersion:
     version_id: str = field(default_factory=lambda: str(uuid4()))
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     state_hash: str | None = None
+    patch: list[Any] | None = None
 
     def __post_init__(self) -> None:
-        """Deep-copy mutable state and freeze metadata."""
+        """Deep-copy mutable state and freeze metadata.
+
+        ``knowledge_structure`` is ``None`` for delta (non-snapshot)
+        versions -- ``deepcopy(None)`` is a safe no-op, so this needs
+        no special-casing. ``patch`` (the list of operators recorded
+        for a delta version) gets the same deep-copy treatment as
+        ``knowledge_structure``, for the same isolation reason.
+        """
         object.__setattr__(
             self,
             "knowledge_structure",
             deepcopy(self.knowledge_structure),
+        )
+        object.__setattr__(
+            self,
+            "patch",
+            deepcopy(self.patch),
         )
         object.__setattr__(
             self,
@@ -65,6 +78,7 @@ class RuntimeVersion:
             version_id=self.version_id,
             created_at=self.created_at,
             state_hash=self.state_hash,
+            patch=self.patch,
         )
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "RuntimeVersion":
@@ -76,9 +90,25 @@ class RuntimeVersion:
             version_id=self.version_id,
             created_at=self.created_at,
             state_hash=self.state_hash,
+            patch=deepcopy(self.patch, memo),
         )
         memo[id(self)] = new
         return new
+
+    #
+    # ------------------------------------------------------------------
+    # Storage shape
+    # ------------------------------------------------------------------
+
+    @property
+    def is_snapshot(self) -> bool:
+        """
+        Whether this version stores its full Knowledge Structure
+        directly, as opposed to a ``patch`` to be replayed from the
+        nearest earlier snapshot via
+        :meth:`~cks_runtime.session.session.RuntimeSession.get_version_state`.
+        """
+        return self.knowledge_structure is not None
 
     #
     # ------------------------------------------------------------------

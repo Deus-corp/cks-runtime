@@ -14,6 +14,7 @@ class RuntimeSession:
     knowledge_structure: Any
     session_id: str = field(default_factory=lambda: str(uuid4()))
     metadata: dict[str, Any] = field(default_factory=dict)
+    snapshot_interval: int = 10
     diagnostics: list[Any] = field(default_factory=list)
     version_history: list[Any] = field(default_factory=list)
     active_transaction: Any | None = None
@@ -53,76 +54,40 @@ class RuntimeSession:
     def get_version_state(
         self,
         version_id: str,
-        core_bridge: Any,
-        *,
-        snapshot_every: int = 10,
+        core_bridge: Any = None,
     ) -> Any:
         """
         Reconstruct the Knowledge Structure for a specific version.
 
-        Rather than trusting whichever full structure happens to be
-        stored on the target ``RuntimeVersion`` directly, every
-        version whose index is not a multiple of ``snapshot_every``
-        (nor the very first one) is recomputed by replaying
-        incremental diffs forward from the nearest earlier
-        "snapshot" version: ``core_bridge.diff()`` is used to compute
-        the patch between each pair of consecutive stored states, and
-        ``core_bridge.evolve()`` is used to replay it. This is the
-        reconstruction path a future patch-only version history would
-        rely on instead of storing a full copy per version; it is
-        exercised here against today's fully-materialized storage so
-        it can be verified correct (via ``state_hash``, when the
-        attached Core supports hashing) before anything stops storing
-        full copies.
+        Snapshot versions (``version.is_snapshot``) have their full
+        Knowledge Structure returned directly. Delta versions have
+        no stored structure at all: this method walks backward to
+        the nearest earlier snapshot, then replays each intervening
+        version's stored ``patch`` forward via
+        ``core_bridge.evolve()`` to reconstruct the target state.
 
         Parameters
         ----------
         version_id
             Identifier of the version to reconstruct.
         core_bridge
-            Anything exposing ``diff(source, target)`` and
-            ``evolve(structure, patch)`` — typically a
-            :class:`~cks_runtime.core_api.bridge.CoreBridge`. Its
-            optional ``hash()`` is used for an integrity check when
-            the target version has a recorded ``state_hash``.
-        snapshot_every
-            How many versions apart a stored state is trusted
-            directly instead of being replayed. Must be >= 1.
+            Anything exposing ``evolve(structure, patch)`` —
+            typically a CoreBridge. Only required when the target
+            version (or an intermediate one) is a delta version.
 
         Raises
         ------
         ValueError
-            ``version_id`` does not exist in this session; a stored
-            checkpoint's own recorded hash doesn't match its own
-            stored structure (storage-level tampering/corruption); or
-            the final reconstructed state's hash doesn't match the
-            target version's recorded hash (a reconstruction-level
-            divergence).
-
-        Notes
-        -----
-        Each traversed version's stored full structure is checked
-        against *its own* recorded ``state_hash`` as it is visited,
-        not only the final target. Patches are computed directly
-        between consecutive *stored* states (``core_bridge.diff()``
-        between ``version_history[i - 1]`` and ``version_history[i]``
-        rather than between the running reconstruction and the next
-        stored state) — this means an isolated corrupted checkpoint
-        would otherwise "self-heal" one hop later purely because the
-        next patch is computed relative to the (corrupted) stored
-        endpoint rather than the true prior state. Verifying every
-        checkpoint as it is visited closes that gap.
+            ``version_id`` does not exist; a delta version was
+            reached but no ``core_bridge`` was supplied; session
+            history is inconsistent; or a checkpoint's hash
+            doesn't match its recorded ``state_hash``.
         """
-        if snapshot_every < 1:
-            raise ValueError("snapshot_every must be >= 1")
-
         index = self._version_index(version_id)
         target_version = self.version_history[index]
 
-        snapshot_index = (index // snapshot_every) * snapshot_every
-
         def verify_checkpoint(version: Any, structure: Any) -> None:
-            if version.state_hash is None:
+            if version.state_hash is None or core_bridge is None or structure is None:
                 return
             try:
                 actual_hash = core_bridge.hash(structure)
@@ -130,10 +95,33 @@ class RuntimeSession:
                 return
             if actual_hash != version.state_hash:
                 raise ValueError(
-                    f"Stored state for version {version.version_id!r} does "
-                    f"not match its recorded hash (expected "
-                    f"{version.state_hash!r}, got {actual_hash!r}). "
-                    f"History may be corrupted or tampered with."
+                    f"Reconstructed state for version "
+                    f"{version.version_id!r} does not match its "
+                    f"recorded hash (expected {version.state_hash!r}, "
+                    f"got {actual_hash!r})."
+                )
+
+        if target_version.is_snapshot:
+            verify_checkpoint(target_version, target_version.knowledge_structure)
+            return target_version.knowledge_structure
+
+        if core_bridge is None:
+            raise ValueError(
+                f"Version {version_id!r} was recorded as a delta (no "
+                f"stored snapshot) and reconstructing it requires a "
+                f"core_bridge capable of evolve() to replay its patch "
+                f"chain."
+            )
+
+        snapshot_index = index
+        while not self.version_history[snapshot_index].is_snapshot:
+            snapshot_index -= 1
+            if snapshot_index < 0:
+                raise ValueError(
+                    f"No snapshot found at or before version "
+                    f"{version_id!r}; session history is inconsistent "
+                    f"(the first version of a session must always be "
+                    f"a snapshot)."
                 )
 
         snapshot_version = self.version_history[snapshot_index]
@@ -141,27 +129,15 @@ class RuntimeSession:
         verify_checkpoint(snapshot_version, state)
 
         for i in range(snapshot_index + 1, index + 1):
-            previous_version = self.version_history[i - 1]
-            current_version = self.version_history[i]
-            verify_checkpoint(current_version, current_version.knowledge_structure)
-
-            patch = core_bridge.diff(
-                previous_version.knowledge_structure,
-                current_version.knowledge_structure,
-            )
-            state = core_bridge.evolve(state, patch)
-
-        if target_version.state_hash is not None:
-            try:
-                actual_hash = core_bridge.hash(state)
-            except NotImplementedError:
-                actual_hash = None
-            if actual_hash is not None and actual_hash != target_version.state_hash:
+            version = self.version_history[i]
+            if version.patch is None:
                 raise ValueError(
-                    f"Reconstructed state for version {version_id!r} does "
-                    f"not match its recorded hash (expected "
-                    f"{target_version.state_hash!r}, got {actual_hash!r})."
+                    f"Version {version.version_id!r} has neither a "
+                    f"stored snapshot nor a recorded patch; cannot "
+                    f"reconstruct the chain past it."
                 )
+            state = core_bridge.evolve(state, version.patch)
+            verify_checkpoint(version, state)
 
         return state
 
