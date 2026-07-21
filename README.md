@@ -163,6 +163,7 @@ The current Reference Runtime provides:
 - **Event System** – lifecycle events published via `EventBus`
 - **Time-Travel Operations** – `ListVersionsOperation`, `RevertVersionOperation`
 - **Structural Diff** – compact change computation between versions
+- Three‑way merge of knowledge structures via `cks-core`'s `merge()` function
 
 ---
 
