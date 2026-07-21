@@ -25,6 +25,7 @@ class RuntimeVersion:
 
     version_id: str = field(default_factory=lambda: str(uuid4()))
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    state_hash: str | None = None
 
     def __post_init__(self) -> None:
         """Deep-copy mutable state and freeze metadata."""
@@ -63,6 +64,7 @@ class RuntimeVersion:
             metadata=dict(self.metadata),
             version_id=self.version_id,
             created_at=self.created_at,
+            state_hash=self.state_hash,
         )
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "RuntimeVersion":
@@ -73,6 +75,7 @@ class RuntimeVersion:
             metadata=dict(self.metadata),
             version_id=self.version_id,
             created_at=self.created_at,
+            state_hash=self.state_hash,
         )
         memo[id(self)] = new
         return new

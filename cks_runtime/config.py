@@ -28,7 +28,7 @@ def _runtime_version() -> str:
     try:
         return version("cks-runtime")
     except PackageNotFoundError:
-        return "1.0.2"
+        return "1.1.0"
 
 
 @dataclass(slots=True)

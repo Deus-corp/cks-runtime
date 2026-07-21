@@ -165,9 +165,48 @@ class CoreBridge:
         return self._implementation.explain(
             knowledge_structure,
         )
-    
+
+    # ------------------------------------------------------------------
+    # Structural Diff
+    # ------------------------------------------------------------------
 
     def diff(self, source: Any, target: Any) -> list[Any]:
         if not self.available:
             return []
         return self._implementation.diff(source, target)
+
+    # ------------------------------------------------------------------
+    # Content hashing (optional capability)
+    # ------------------------------------------------------------------
+
+    def hash(self, knowledge_structure: Any) -> str:
+        """
+        Delegate content hashing.
+
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached at all.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            hashing. Propagated as-is (not swallowed) so callers can
+            distinguish "no Core" from "Core doesn't support this".
+        """
+        if not self.available:
+            raise RuntimeError(
+                "No Runtime Core implementation is attached."
+            )
+        return self._implementation.hash(knowledge_structure)
+
+    @property
+    def supports_hash(self) -> bool:
+        """
+        Whether the attached Core implementation overrides ``hash()``.
+
+        Lets callers check capability without a try/except when they
+        want to skip integrity verification entirely instead of
+        catching ``NotImplementedError``.
+        """
+        if not self.available:
+            return False
+        return type(self._implementation).hash is not CoreInterface.hash

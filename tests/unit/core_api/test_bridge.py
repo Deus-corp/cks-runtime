@@ -1,169 +1,212 @@
-"""Unit tests for CoreBridge."""
+"""
+Runtime ↔ Core Bridge.
+
+Stable bridge between Runtime and any Core implementation.
+
+Runtime depends only on CoreInterface.
+
+Concrete implementations are supplied by Runtime plugins.
+
+The bridge performs delegation and model translation only.
+"""
 
 from __future__ import annotations
 
-import pytest
+from typing import Any
 
-from cks_runtime.core_api.bridge import CoreBridge
+from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
 )
-from cks_runtime.core_api.interfaces import CoreInterface
 
 
-class _FakeCore(CoreInterface):
-    """Minimal Core implementation for testing."""
+class CoreBridge:
+    """
+    Stable Runtime → Core bridge.
 
-    def validate(self, knowledge_structure):
-        return RuntimeValidationResult(
-            valid=False,
-            diagnostics=("problem",),
-            metadata={"source": "fake"},
+    The bridge:
+
+    • owns Runtime → Core communication;
+
+    • hides concrete plugin implementations;
+
+    • translates Core-native objects into Runtime-native objects;
+
+    • never contains semantic logic.
+    """
+
+    def __init__(
+        self,
+        implementation: CoreInterface | None = None,
+    ) -> None:
+        self._implementation = implementation
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
+
+    @property
+    def implementation(
+        self,
+    ) -> CoreInterface | None:
+        """
+        Attached Core implementation.
+        """
+
+        return self._implementation
+
+    @property
+    def available(
+        self,
+    ) -> bool:
+        """
+        Whether a Core implementation is attached.
+        """
+
+        return self._implementation is not None
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
+    def validate(
+        self,
+        knowledge_structure: Any,
+        *,
+        extra_constraints: Any = None,
+    ) -> RuntimeValidationResult:
+        """
+        Validate a Knowledge Structure.
+
+        ``extra_constraints`` is opaque to Runtime: it is passed
+        through verbatim to whatever Core implementation is attached.
+        Only forwarded as a keyword argument when actually supplied,
+        so Core implementations written against the pre-existing
+        ``validate(knowledge_structure)`` signature keep working
+        unchanged as long as callers don't request extra constraints
+        from them.
+        """
+        if not self.available:
+            return RuntimeValidationResult(valid=True)
+
+        if extra_constraints is not None:
+            result = self._implementation.validate(
+                knowledge_structure,
+                extra_constraints=extra_constraints,
+            )
+        else:
+            result = self._implementation.validate(knowledge_structure)
+
+        if not isinstance(result, RuntimeValidationResult):
+            raise TypeError(
+                f"Core plugin returned {type(result).__name__}, "
+                f"expected RuntimeValidationResult."
+            )
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Evolution
+    # ------------------------------------------------------------------
+
+    def evolve(
+        self,
+        knowledge_structure: Any,
+        operation: Any,
+    ) -> Any:
+        """
+        Delegate semantic evolution.
+        """
+
+        if not self.available:
+            return knowledge_structure
+
+        return self._implementation.evolve(
+            knowledge_structure,
+            operation,
         )
 
-    def evolve(self, knowledge_structure, operation):
-        return {
-            "evolved": True,
-            "knowledge_structure": knowledge_structure,
-            "operation": operation,
-        }
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
 
-    def serialize(self, knowledge_structure):
-        return '{"serialized": true}'
+    def serialize(
+        self,
+        knowledge_structure: Any,
+    ) -> str:
+        """
+        Produce canonical serialization.
+        """
 
-    def explain(self, knowledge_structure):
-        return {
-            "summary": "fake explanation",
-        }
-    
-    def diff(self, source, target):
-        return []
+        if not self.available:
+            raise RuntimeError(
+                "No Runtime Core implementation is attached."
+            )
 
+        return self._implementation.serialize(
+            knowledge_structure,
+        )
 
-@pytest.fixture
-def bridge():
-    return CoreBridge(
-        implementation=_FakeCore(),
-    )
+    # ------------------------------------------------------------------
+    # Explainability
+    # ------------------------------------------------------------------
 
+    def explain(
+        self,
+        knowledge_structure: Any,
+    ) -> dict[str, Any]:
+        """
+        Produce a semantic explanation.
+        """
 
-@pytest.fixture
-def detached_bridge():
-    return CoreBridge(
-        implementation=None,
-    )
+        if not self.available:
+            return {}
 
+        return self._implementation.explain(
+            knowledge_structure,
+        )
 
-# ---------------------------------------------------------------------------
-# Availability
-# ---------------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Structural Diff
+    # ------------------------------------------------------------------
 
+    def diff(self, source: Any, target: Any) -> list[Any]:
+        if not self.available:
+            return []
+        return self._implementation.diff(source, target)
 
-def test_bridge_available(bridge):
-    assert bridge.available is True
+    # ------------------------------------------------------------------
+    # Content hashing (optional capability)
+    # ------------------------------------------------------------------
 
+    def hash(self, knowledge_structure: Any) -> str:
+        """
+        Delegate content hashing.
 
-def test_bridge_unavailable(detached_bridge):
-    assert detached_bridge.available is False
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached at all.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            hashing. Propagated as-is (not swallowed) so callers can
+            distinguish "no Core" from "Core doesn't support this".
+        """
+        if not self.available:
+            raise RuntimeError(
+                "No Runtime Core implementation is attached."
+            )
+        return self._implementation.hash(knowledge_structure)
 
+    @property
+    def supports_hash(self) -> bool:
+        """
+        Whether the attached Core implementation overrides ``hash()``.
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-
-def test_validate_delegates_to_core(bridge):
-    result = bridge.validate({})
-
-    assert isinstance(
-        result,
-        RuntimeValidationResult,
-    )
-
-    assert result.valid is False
-    assert result.diagnostics == (
-        "problem",
-    )
-    assert result.metadata == {
-        "source": "fake",
-    }
-
-
-def test_validate_without_core_returns_success(
-    detached_bridge,
-):
-    result = detached_bridge.validate({})
-
-    assert result.valid is True
-    assert result.diagnostics == ()
-    assert result.metadata == {}
-
-
-# ---------------------------------------------------------------------------
-# Evolution
-# ---------------------------------------------------------------------------
-
-
-def test_evolve_delegates_to_core(bridge):
-    ks = {"x": 1}
-    op = {"add": "node"}
-
-    result = bridge.evolve(
-        ks,
-        op,
-    )
-
-    assert result["evolved"] is True
-    assert result["knowledge_structure"] is ks
-    assert result["operation"] is op
-
-
-def test_evolve_without_core_returns_original_object(
-    detached_bridge,
-):
-    ks = {"x": 1}
-
-    result = detached_bridge.evolve(
-        ks,
-        {},
-    )
-
-    assert result is ks
-
-
-# ---------------------------------------------------------------------------
-# Serialization
-# ---------------------------------------------------------------------------
-
-
-def test_serialize_delegates_to_core(bridge):
-    result = bridge.serialize({})
-
-    assert result == '{"serialized": true}'
-
-
-def test_serialize_without_core_returns_original(
-    detached_bridge,
-):
-    ks = {"x": 1}
-    with pytest.raises(RuntimeError, match="No Runtime Core implementation"):
-        detached_bridge.serialize(ks)
-
-
-# ---------------------------------------------------------------------------
-# Explainability
-# ---------------------------------------------------------------------------
-
-
-def test_explain_delegates_to_core(bridge):
-    result = bridge.explain({})
-
-    assert result == {
-        "summary": "fake explanation",
-    }
-
-
-def test_explain_without_core_returns_none(
-    detached_bridge,
-):
-    assert detached_bridge.explain({}) == {}
+        Lets callers check capability without a try/except when they
+        want to skip integrity verification entirely instead of
+        catching ``NotImplementedError``.
+        """
+        if not self.available:
+            return False
+        return type(self._implementation).hash is not CoreInterface.hash

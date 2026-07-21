@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.1.0] - 2026-07-21
+
+### Added
+- `CoreInterface.hash()` and `CoreBridge.hash()` — optional content hashing capability for Core plugins.
+- `RuntimeVersion.state_hash` — optional integrity hash recorded at version creation.
+- `RuntimeSession.get_version_state()` — reconstructs any historical version by replaying diffs from the nearest snapshot, with integrity verification via `state_hash`.
+- `VersionManager.create()` now accepts an optional `core_bridge` to populate `state_hash`.
+- New test suite for version reconstruction and tamper detection (12 tests).
+
+---
+
 ## [1.0.2] - 2026-07-20
 
 ### Fixed

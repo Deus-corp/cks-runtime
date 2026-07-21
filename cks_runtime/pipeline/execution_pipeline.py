@@ -192,6 +192,7 @@ class ExecutionPipeline:
 
         version = self._runtime.versions.create(
             transaction.session,
+            core_bridge=self._runtime.core_bridge,
         )
 
         self._runtime.events.publish(

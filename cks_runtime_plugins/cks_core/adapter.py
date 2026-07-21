@@ -148,7 +148,9 @@ class CksCoreAdapter(CoreInterface):
             ),
             "summary": summary,
         }
-    
 
     def diff(self, source: Any, target: Any) -> list[Any]:
         return source.diff(target)
+
+    def hash(self, knowledge_structure: Any) -> str:
+        return knowledge_structure._root_hash.hex()
