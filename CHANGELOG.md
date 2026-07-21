@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.3.1] - 2026-07-21
+
+### Fixed
+- `Runtime.create_branch` now correctly reconstructs the Knowledge Structure from the specified historical version (via `get_version_state`), instead of always branching from the parent's current state.
+
+---
+
 ## [1.3.0] - 2026-07-21
 
 ### Added
@@ -28,7 +35,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `RuntimeMergeConflict` and `RuntimeMergeConflictError` – Runtime-native conflict representation.
 - `RuntimeSession.parent_session_id`, `parent_version_id`, `is_branch` – branch lineage metadata.
 - `CksCoreAdapter.merge()` – translates `cks.MergeConflictError` into Runtime-native conflict error.
-- 21 new tests covering branching, merging, conflict translation, and bridge contracts (total 176 passed).
+- 21 new tests covering branching, merging, conflict translation, and bridge contracts (total 197 passed).
 
 ---
 
