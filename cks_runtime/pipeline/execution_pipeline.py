@@ -15,7 +15,7 @@ from cks_runtime.core_api.validation_result import RuntimeValidationResult
 from cks_runtime.transaction.transaction import RuntimeTransaction
 from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime.execution.operation_executor import OperationStatus
-from cks_runtime.operations.operation_types import ValidateOperation, EvolveOperation, RevertVersionOperation
+from cks_runtime.operations.operation_types import ValidateOperation, EvolveOperation, RevertVersionOperation, MergeOperation
 from cks_runtime.execution.execution_context import ExecutionContext
 from cks_runtime.events.runtime_event import (
     SessionCreated,
@@ -274,4 +274,7 @@ class ExecutionPipeline:
             session.knowledge_structure = result.payload
 
         elif isinstance(operation, RevertVersionOperation):
+            session.knowledge_structure = result.payload
+
+        elif isinstance(operation, MergeOperation):
             session.knowledge_structure = result.payload

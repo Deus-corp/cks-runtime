@@ -20,6 +20,19 @@ class RuntimeSession:
     active_transaction: Any | None = None
     closed: bool = False
 
+    #: Identifier of the RuntimeSession this session branched from, or
+    #: ``None`` for a root session created directly from a Knowledge
+    #: Structure (not via ``SessionManager.create_branch``).
+    parent_session_id: str | None = None
+
+    #: Identifier of the specific version of the parent session this
+    #: branch forked from. ``None`` means the branch started from the
+    #: parent's live (uncommitted or latest) state at branch time
+    #: rather than a recorded historical version -- callers that need
+    #: an exact fork point for a later merge should pass an explicit
+    #: version when branching.
+    parent_version_id: str | None = None
+
     @property
     def is_active(self) -> bool:
         return not self.closed
@@ -35,6 +48,11 @@ class RuntimeSession:
     @property
     def has_versions(self) -> bool:
         return bool(self.version_history)
+
+    @property
+    def is_branch(self) -> bool:
+        """Whether this session was created as a branch of another session."""
+        return self.parent_session_id is not None
 
     def close(self) -> None:
         self.closed = True

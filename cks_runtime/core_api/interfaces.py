@@ -148,6 +148,47 @@ class CoreInterface(ABC):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
+    # Three-way merge (optional capability)
+    # ------------------------------------------------------------------
+
+    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
+        """
+        Three-way merge two independently evolved structures against
+        their common ancestor.
+
+        This is an *optional* capability, like ``hash()``: Runtime
+        must not assume every plugged-in Core supports branching and
+        merging. Core implementations that can provide it should
+        override this method; callers must be prepared to catch
+        ``NotImplementedError`` for a Core that doesn't.
+
+        Parameters
+        ----------
+        base
+            The common ancestor (lowest common ancestor) structure.
+        branch_a, branch_b
+            Two structures assumed to have evolved from ``base``.
+
+        Returns
+        -------
+        Any
+            The merged Core-native structure.
+
+        Raises
+        ------
+        RuntimeMergeConflictError
+            ``branch_a`` and ``branch_b`` changed one or more of the
+            same identities to different, irreconcilable results. Core
+            implementations should raise this Runtime-native error
+            (translating their own conflict representation into it)
+            rather than an implementation-specific exception, so
+            callers never need to know which Core is attached.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement merge()."
+        )
+
+    # ------------------------------------------------------------------
     # Content hashing (optional capability)
     # ------------------------------------------------------------------
 

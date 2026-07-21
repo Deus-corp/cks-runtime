@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from cks_runtime.core_api.interfaces import (
     CoreInterface,
 )
@@ -76,3 +78,17 @@ def test_validate_returns_runtime_validation_result():
         result,
         RuntimeValidationResult,
     )
+
+
+def test_merge_is_an_optional_capability_by_default():
+    """
+    A CoreInterface implementation that does not override merge()
+    (like DummyCore) must not be forced to implement branching/merge
+    support -- calling the default raises NotImplementedError, the
+    same optional-capability contract hash() already has.
+    """
+
+    core = DummyCore()
+
+    with pytest.raises(NotImplementedError):
+        core.merge({}, {}, {})

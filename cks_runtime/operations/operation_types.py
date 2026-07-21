@@ -254,3 +254,112 @@ class DiffOperation(Operation):
             status=OperationStatus.COMPLETED,
             payload=diff_patch,
         )
+
+
+class MergeOperation(Operation):
+    """
+    Three-way merge of another (source) session's branch into the
+    current session.
+
+    The merge base (lowest common ancestor) can be supplied directly
+    via ``base_structure``, or resolved from a version id in the
+    *current* session's own history via ``base_version_id``. When
+    neither is given, ``source_session.parent_version_id`` is used --
+    the common case of merging a branch back into the session it
+    forked from, where the branch itself recorded its own fork point
+    at creation time (see ``SessionManager.create_branch``).
+
+    On conflict, ``executor.core.merge()`` raises
+    ``RuntimeMergeConflictError`` (with a ``.conflicts`` list), which
+    this operation captures as ``ExecutionResult.error`` without
+    raising it further. Callers that need the structured conflict
+    list -- e.g. to present it to an LLM agent for manual resolution
+    -- should run this operation directly via
+    ``executor.execute(MergeOperation(...), session)`` and inspect
+    the result before deciding whether to commit a transaction.
+    Going through ``Runtime.commit_transaction`` instead re-raises any
+    failure as a generic ``RuntimeError`` (see
+    ``ExecutionPipeline._handle_result``), which loses the structured
+    conflict list.
+    """
+    operation_id: str = "merge"
+
+    def __init__(
+        self,
+        operation_id: str = "merge",
+        *,
+        source_session: RuntimeSession | None = None,
+        base_version_id: str | None = None,
+        base_structure: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(operation_id, metadata=metadata)
+        self.source_session = source_session
+        self.base_version_id = base_version_id
+        self.base_structure = base_structure
+
+    def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        if self.source_session is None:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=ValueError(
+                    "MergeOperation requires 'source_session' (the "
+                    "branch being merged in)."
+                ),
+            )
+
+        if self.base_structure is not None:
+            base = self.base_structure
+        else:
+            base_version_id = (
+                self.base_version_id
+                if self.base_version_id is not None
+                else self.source_session.parent_version_id
+            )
+            if base_version_id is None:
+                return ExecutionResult(
+                    operation_id=self.operation_id,
+                    status=OperationStatus.FAILED,
+                    error=ValueError(
+                        "MergeOperation could not determine a merge "
+                        "base: pass 'base_structure' or "
+                        "'base_version_id' explicitly, or merge a "
+                        "session whose 'parent_version_id' was "
+                        "recorded at branch time."
+                    ),
+                )
+            try:
+                base = session.get_version_state(
+                    base_version_id,
+                    executor.core,
+                )
+            except ValueError as exc:
+                return ExecutionResult(
+                    operation_id=self.operation_id,
+                    status=OperationStatus.FAILED,
+                    error=exc,
+                )
+
+        try:
+            merged = executor.core.merge(
+                base,
+                session.knowledge_structure,
+                self.source_session.knowledge_structure,
+            )
+        except Exception as exc:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=exc,
+            )
+
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=merged,
+        )

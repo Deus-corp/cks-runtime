@@ -19,6 +19,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.3.0] - 2026-07-21
+
+### Added
+- `CoreInterface.merge()` and `CoreBridge.merge()` – optional three-way merge capability for Core plugins.
+- `MergeOperation` – merges a branch session into the current session via `CoreBridge.merge()`.
+- `Runtime.create_branch()` and `SessionManager.create_branch()` – explicit branching with parent version tracking.
+- `RuntimeMergeConflict` and `RuntimeMergeConflictError` – Runtime-native conflict representation.
+- `RuntimeSession.parent_session_id`, `parent_version_id`, `is_branch` – branch lineage metadata.
+- `CksCoreAdapter.merge()` – translates `cks.MergeConflictError` into Runtime-native conflict error.
+- 21 new tests covering branching, merging, conflict translation, and bridge contracts (total 176 passed).
+
+---
+
 ## [1.2.3] - 2026-07-21
 
 ### Changed

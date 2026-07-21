@@ -287,6 +287,47 @@ class Runtime:
         return session
 
 
+    def create_branch(
+        self,
+        session: RuntimeSession,
+        *,
+        version_id: str | None = None,
+    ) -> RuntimeSession:
+        """
+        Create and persist a branch of ``session``.
+
+        When ``version_id`` is given, the branch starts from that
+        historical version, reconstructed via
+        ``RuntimeSession.get_version_state`` (which may need
+        ``core_bridge`` to replay delta versions past the nearest
+        snapshot) -- and that same ``version_id`` is recorded on the
+        branch as its ``parent_version_id``, so a later merge can find
+        this exact fork point again. When omitted, the branch starts
+        from ``session``'s current, possibly uncommitted, state, and
+        ``parent_version_id`` is left unset.
+        """
+
+        if version_id is not None:
+            structure = session.get_version_state(
+                version_id,
+                self._core_bridge,
+            )
+        else:
+            structure = session.knowledge_structure
+
+        branch = self._sessions.create_branch(
+            session,
+            structure,
+            parent_version_id=version_id,
+        )
+
+        self._storage.save_session(
+            branch,
+        )
+
+        return branch
+
+
     def get_session(
         self,
         session_id: str,

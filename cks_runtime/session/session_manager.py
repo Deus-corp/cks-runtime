@@ -55,6 +55,54 @@ class SessionManager:
 
         return session
 
+    def create_branch(
+        self,
+        parent_session: RuntimeSession,
+        knowledge_structure: Any,
+        *,
+        parent_version_id: str | None = None,
+    ) -> RuntimeSession:
+        """
+        Create and register a RuntimeSession that branches from
+        ``parent_session``.
+
+        A branch is just a new RuntimeSession that records where it
+        forked from -- no Knowledge Structure is copied or shared by
+        reference here beyond what the caller already resolved.
+
+        SessionManager never reconstructs version state itself (that
+        stays the caller's responsibility, matching ``create_session``
+        never inspecting the Knowledge Structure it's handed): callers
+        that want to branch from a specific historical version must
+        resolve it themselves first, e.g. via
+        ``parent_session.get_version_state(version_id, core_bridge)``,
+        and pass the result as ``knowledge_structure``.
+
+        Parameters
+        ----------
+        parent_session
+            The RuntimeSession being branched from. Only its
+            ``session_id`` is recorded -- ``parent_session`` need not
+            still be active or even registered with this manager.
+        knowledge_structure
+            The already-resolved Knowledge Structure the new branch
+            should start from.
+        parent_version_id
+            Optional identifier of the specific parent version this
+            branch forked from, recorded on the new session for later
+            use as a merge base (lowest common ancestor).
+        """
+
+        session = RuntimeSession(
+            knowledge_structure=knowledge_structure,
+            parent_session_id=parent_session.session_id,
+            parent_version_id=parent_version_id,
+        )
+
+        self._sessions[session.session_id] = session
+
+        return session
+
     #
     # ------------------------------------------------------------------
     # Lookup

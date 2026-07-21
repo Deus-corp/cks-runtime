@@ -18,6 +18,10 @@ from cks.evolution import compose
 from cks.interface import inspect as cks_inspect
 
 from cks_runtime.core_api.interfaces import CoreInterface
+from cks_runtime.core_api.merge_conflict import (
+    RuntimeMergeConflict,
+    RuntimeMergeConflictError,
+)
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
 )
@@ -151,6 +155,35 @@ class CksCoreAdapter(CoreInterface):
 
     def diff(self, source: Any, target: Any) -> list[Any]:
         return source.diff(target)
+
+    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
+        """
+        Three-way merge through CKS Core.
+
+        cks-core's own ``MergeConflictError`` is a Core-native
+        exception (it carries ``cks.MergeConflict`` instances holding
+        raw ``KnowledgeObject``/``CanonicalRelation`` values) -- it is
+        translated into the Runtime-native ``RuntimeMergeConflictError``
+        here, at the same adapter boundary that ``_translate_diagnostic``
+        already uses for validation diagnostics, so Runtime code never
+        needs to import or recognize a cks-core-specific exception
+        type.
+        """
+
+        try:
+            return cks.merge(base, branch_a, branch_b)
+        except cks.MergeConflictError as exc:
+            raise RuntimeMergeConflictError(
+                [
+                    RuntimeMergeConflict(
+                        object_id=conflict.object_id,
+                        base=conflict.base,
+                        branch_a=conflict.branch_a,
+                        branch_b=conflict.branch_b,
+                    )
+                    for conflict in exc.conflicts
+                ]
+            ) from exc
 
     def hash(self, knowledge_structure: Any) -> str:
         return knowledge_structure.root_hash

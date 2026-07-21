@@ -176,6 +176,49 @@ class CoreBridge:
         return self._implementation.diff(source, target)
 
     # ------------------------------------------------------------------
+    # Three-way merge (optional capability)
+    # ------------------------------------------------------------------
+
+    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
+        """
+        Delegate a three-way merge.
+
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached at all -- unlike
+            ``evolve``/``explain``/``diff``, there is no sensible
+            identity-like default to fall back to for a merge of three
+            structures.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            merging. Propagated as-is, matching ``hash()``'s contract,
+            so callers can distinguish "no Core" from "Core doesn't
+            support this".
+        RuntimeMergeConflictError
+            The two branches changed the same identity to different,
+            irreconcilable results.
+        """
+        if not self.available:
+            raise RuntimeError(
+                "No Runtime Core implementation is attached."
+            )
+        return self._implementation.merge(base, branch_a, branch_b)
+
+    @property
+    def supports_merge(self) -> bool:
+        """
+        Whether the attached Core implementation overrides ``merge()``.
+
+        Mirrors ``supports_hash`` -- lets callers check capability
+        without a try/except when they want to fail fast instead of
+        catching ``NotImplementedError``.
+        """
+        if not self.available:
+            return False
+        return type(self._implementation).merge is not CoreInterface.merge
+
+    # ------------------------------------------------------------------
     # Content hashing (optional capability)
     # ------------------------------------------------------------------
 

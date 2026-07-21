@@ -17,6 +17,84 @@ def test_create_session():
     ) == 1
 
 
+def test_create_branch():
+
+    manager = SessionManager()
+
+    parent = manager.create_session(
+        knowledge_structure={"a": 1}
+    )
+
+    branch = manager.create_branch(
+        parent,
+        {"a": 1, "b": 2},
+    )
+
+    assert branch is not None
+    assert branch.knowledge_structure == {"a": 1, "b": 2}
+    assert branch.parent_session_id == parent.session_id
+    assert branch.parent_version_id is None
+    assert branch.is_branch is True
+
+    assert len(
+        manager.list_sessions()
+    ) == 2
+
+
+def test_create_branch_records_parent_version_id():
+
+    manager = SessionManager()
+
+    parent = manager.create_session(
+        knowledge_structure={"a": 1}
+    )
+
+    branch = manager.create_branch(
+        parent,
+        {"a": 1},
+        parent_version_id="v-1",
+    )
+
+    assert branch.parent_version_id == "v-1"
+
+
+def test_create_branch_has_its_own_identifier():
+
+    manager = SessionManager()
+
+    parent = manager.create_session(
+        knowledge_structure={}
+    )
+
+    branch = manager.create_branch(
+        parent,
+        {},
+    )
+
+    assert branch.session_id != parent.session_id
+
+    assert manager.get_session(
+        branch.session_id
+    ) is branch
+
+
+def test_create_branch_does_not_mutate_parent():
+
+    manager = SessionManager()
+
+    parent = manager.create_session(
+        knowledge_structure={"a": 1}
+    )
+
+    manager.create_branch(
+        parent,
+        {"a": 1, "b": 2},
+    )
+
+    assert parent.knowledge_structure == {"a": 1}
+    assert parent.is_branch is False
+
+
 def test_get_session():
 
     manager = SessionManager()
