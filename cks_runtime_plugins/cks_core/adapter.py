@@ -153,4 +153,4 @@ class CksCoreAdapter(CoreInterface):
         return source.diff(target)
 
     def hash(self, knowledge_structure: Any) -> str:
-        return knowledge_structure._root_hash.hex()
+        return knowledge_structure.root_hash

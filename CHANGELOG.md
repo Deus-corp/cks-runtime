@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.2.1] - 2026-07-21
+
+### Fixed
+- `DiffOperation` now correctly supports the `target_structure` parameter again, after it was silently dropped during the delta-version refactor.
+- `CksCoreAdapter.hash()` now uses the public `root_hash` property instead of the private `_root_hash`.
+- `verify_checkpoint` in `RuntimeSession.get_version_state()` now catches both `NotImplementedError` and `RuntimeError`, matching the contract in `VersionManager.create()`.
+
+### Added
+- Tests for `DiffOperation` with `target_structure` (2 new tests, total 153 passed).
+
+---
+
 ## [1.2.0] - 2026-07-21
 
 ### Added

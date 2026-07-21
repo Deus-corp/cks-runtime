@@ -213,16 +213,28 @@ class DiffOperation(Operation):
         session: RuntimeSession,
         executor,
     ) -> ExecutionResult:
-        try:
-            target = session.get_version_state(
-                self.target_version_id,
-                executor.core,
-            )
-        except ValueError as exc:
+        if self.target_version_id is not None:
+            try:
+                target = session.get_version_state(
+                    self.target_version_id,
+                    executor.core,
+                )
+            except ValueError as exc:
+                return ExecutionResult(
+                    operation_id=self.operation_id,
+                    status=OperationStatus.FAILED,
+                    error=exc,
+                )
+        elif self.target_structure is not None:
+            target = self.target_structure
+        else:
             return ExecutionResult(
                 operation_id=self.operation_id,
                 status=OperationStatus.FAILED,
-                error=exc,
+                error=ValueError(
+                    "DiffOperation requires either 'target_version_id' or "
+                    "'target_structure'."
+                ),
             )
 
         try:

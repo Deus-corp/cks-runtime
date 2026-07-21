@@ -91,7 +91,7 @@ class RuntimeSession:
                 return
             try:
                 actual_hash = core_bridge.hash(structure)
-            except NotImplementedError:
+            except (NotImplementedError, RuntimeError):
                 return
             if actual_hash != version.state_hash:
                 raise ValueError(

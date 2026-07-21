@@ -18,7 +18,7 @@ url: "https://github.com/Deus-corp/cks-runtime"
 
 license: "MIT"
 
-version: "1.2.0"
+version: "1.2.1"
 
 date-released: "2026-07-15"
 
@@ -49,5 +49,5 @@ preferred-citation:
     - family-names: "Hruznov"
       given-names: "Vladyslav"
   title: "CKS Runtime"
-  version: "1.2.0"
+  version: "1.2.1"
   url: "https://github.com/Deus-corp/cks-runtime"
