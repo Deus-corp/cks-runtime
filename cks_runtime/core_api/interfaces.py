@@ -189,6 +189,53 @@ class CoreInterface(ABC):
         )
 
     # ------------------------------------------------------------------
+    # Subgraph query (optional capability)
+    # ------------------------------------------------------------------
+
+    def query_subgraph(
+        self,
+        knowledge_structure: Any,
+        seed_ids: Any,
+        depth: int = 1,
+        *,
+        include_relation_types: Any = None,
+        include_object_types: Any = None,
+        max_tokens: int | None = None,
+        max_objects: int | None = None,
+        type_weights: Any = None,
+    ) -> Any:
+        """
+        Extract the local k-hop neighborhood around ``seed_ids`` from
+        ``knowledge_structure``, as a self-contained subgraph.
+
+        Optional, like ``merge()``/``hash()``: Runtime must not assume
+        every plugged-in Core exposes graph traversal. Core
+        implementations that can provide it should override this
+        method; callers must be prepared to catch
+        ``NotImplementedError`` for a Core that doesn't.
+
+        The return value is treated as fully opaque by Runtime -- the
+        same way ``knowledge_structure`` itself already is -- since
+        it's just a Core-native result (e.g. cks-core's
+        ``SubgraphResult``) carrying a Core-native structure alongside
+        whatever truncation metadata that Core implementation
+        produces. Runtime never inspects its fields, unlike the
+        conflict-carrying exception ``merge()`` raises, which does
+        need a Runtime-native shape because it crosses the boundary as
+        control flow rather than as a plain return value.
+
+        Parameters mirror cks-core's own
+        ``KnowledgeStructure.query_subgraph`` (depth, per-type
+        filters, and an optional token/object budget with
+        type-weighted ranking) but are typed ``Any`` here since
+        CoreInterface must not assume any particular Core's filter or
+        weight representation.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement query_subgraph()."
+        )
+
+    # ------------------------------------------------------------------
     # Content hashing (optional capability)
     # ------------------------------------------------------------------
 

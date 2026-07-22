@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.4.0] - 2026-07-22
+
+### Added
+- `CoreInterface.query_subgraph()` — optional k-hop subgraph extraction capability for Core plugins, mirroring the optional `merge()`/`hash()` contract.
+- `CoreBridge.query_subgraph()` and `supports_query_subgraph` — delegate and introspection property for the new capability.
+- `QuerySubgraphOperation` — read-only operation (like `ExplainOperation`) that extracts a local neighborhood from a Knowledge Structure, with support for depth, relation/object type filters, and budget/ranking parameters.
+- `CksCoreAdapter.query_subgraph()` — delegates to `cks.query_subgraph()` (requires `cks-core>=1.9.0`).
+- Bumped `cks-core` dependency to `>=1.9.0`.
+
+
+---
+
 ## [1.3.2] - 2026-07-22
 
 ### Changed

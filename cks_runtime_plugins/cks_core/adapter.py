@@ -185,5 +185,37 @@ class CksCoreAdapter(CoreInterface):
                 ]
             ) from exc
 
+    def query_subgraph(
+        self,
+        knowledge_structure: Any,
+        seed_ids: Any,
+        depth: int = 1,
+        *,
+        include_relation_types: Any = None,
+        include_object_types: Any = None,
+        max_tokens: int | None = None,
+        max_objects: int | None = None,
+        type_weights: Any = None,
+    ) -> Any:
+        """
+        k-hop subgraph extraction through CKS Core.
+
+        Unlike ``merge()``, there is no Core-native exception to
+        translate here: cks-core's ``query_subgraph`` never raises for
+        an unmatched seed (it returns an empty result instead), so
+        this is a plain passthrough, the same shape as ``diff()``
+        above.
+        """
+        return cks.query_subgraph(
+            knowledge_structure,
+            seed_ids,
+            depth,
+            include_relation_types=include_relation_types,
+            include_object_types=include_object_types,
+            max_tokens=max_tokens,
+            max_objects=max_objects,
+            type_weights=type_weights,
+        )
+
     def hash(self, knowledge_structure: Any) -> str:
         return knowledge_structure.root_hash

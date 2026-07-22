@@ -219,6 +219,63 @@ class CoreBridge:
         return type(self._implementation).merge is not CoreInterface.merge
 
     # ------------------------------------------------------------------
+    # Subgraph query (optional capability)
+    # ------------------------------------------------------------------
+
+    def query_subgraph(
+        self,
+        knowledge_structure: Any,
+        seed_ids: Any,
+        depth: int = 1,
+        *,
+        include_relation_types: Any = None,
+        include_object_types: Any = None,
+        max_tokens: int | None = None,
+        max_objects: int | None = None,
+        type_weights: Any = None,
+    ) -> Any:
+        """
+        Delegate a k-hop subgraph extraction.
+
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached -- there is no
+            sensible default subgraph to fall back to.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            subgraph queries. Propagated as-is, matching
+            ``hash()``/``merge()``'s contract.
+        """
+        if not self.available:
+            raise RuntimeError(
+                "No Runtime Core implementation is attached."
+            )
+        return self._implementation.query_subgraph(
+            knowledge_structure,
+            seed_ids,
+            depth,
+            include_relation_types=include_relation_types,
+            include_object_types=include_object_types,
+            max_tokens=max_tokens,
+            max_objects=max_objects,
+            type_weights=type_weights,
+        )
+
+    @property
+    def supports_query_subgraph(self) -> bool:
+        """
+        Whether the attached Core implementation overrides
+        ``query_subgraph()``. Mirrors ``supports_merge``.
+        """
+        if not self.available:
+            return False
+        return (
+            type(self._implementation).query_subgraph
+            is not CoreInterface.query_subgraph
+        )
+
+    # ------------------------------------------------------------------
     # Content hashing (optional capability)
     # ------------------------------------------------------------------
 

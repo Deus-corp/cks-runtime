@@ -129,6 +129,84 @@ class ExplainOperation(Operation):
         )
 
 
+class QuerySubgraphOperation(Operation):
+    """
+    Extract the local k-hop neighborhood around one or more seed ids
+    from a Knowledge Structure, as a self-contained subgraph.
+
+    Read-only, like ``ExplainOperation``: it never mutates session
+    state, so unlike ``EvolveOperation``/``RevertVersionOperation``/
+    ``MergeOperation`` it is deliberately NOT special-cased in
+    ``ExecutionPipeline._apply_state_mutation`` -- committing it
+    through a transaction records a version whose Knowledge Structure
+    is unchanged from before the operation ran, the same as
+    committing a bare ``ExplainOperation`` does today.
+    """
+    operation_id: str = "query_subgraph"
+
+    def __init__(
+        self,
+        operation_id: str = "query_subgraph",
+        *,
+        knowledge_structure: Any = None,
+        seed_ids: Any = None,
+        depth: int = 1,
+        include_relation_types: Any = None,
+        include_object_types: Any = None,
+        max_tokens: int | None = None,
+        max_objects: int | None = None,
+        type_weights: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(operation_id, metadata=metadata)
+        self.knowledge_structure = knowledge_structure
+        self.seed_ids = seed_ids
+        self.depth = depth
+        self.include_relation_types = include_relation_types
+        self.include_object_types = include_object_types
+        self.max_tokens = max_tokens
+        self.max_objects = max_objects
+        self.type_weights = type_weights
+
+    def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        if self.seed_ids is None:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=ValueError(
+                    "QuerySubgraphOperation requires 'seed_ids'."
+                ),
+            )
+
+        try:
+            result = executor.core.query_subgraph(
+                self.knowledge_structure,
+                self.seed_ids,
+                self.depth,
+                include_relation_types=self.include_relation_types,
+                include_object_types=self.include_object_types,
+                max_tokens=self.max_tokens,
+                max_objects=self.max_objects,
+                type_weights=self.type_weights,
+            )
+        except Exception as exc:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=exc,
+            )
+
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=result,
+        )
+
+
 class ListVersionsOperation(Operation):
     """List all versions in the current session history."""
     operation_id: str = "list_versions"
