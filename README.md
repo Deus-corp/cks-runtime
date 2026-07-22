@@ -165,6 +165,7 @@ The current Reference Runtime provides:
 - **Structural Diff** – compact change computation between versions
 - Three‑way merge of knowledge structures via `cks-core`'s `merge()` function
 - **Query Subgraph** – k‑hop neighbourhood extraction with type filters and budget/ranking, delegated to cks-core's query_subgraph()
+- **Persistent Storage** – SQLite-backed storage via `SQLiteStorage`, surviving server restarts. Configurable through `RuntimeConfig.storage_path`.
 
 ---
 
@@ -289,7 +290,7 @@ Supporting documents include:
 
 ## Project Status
 
-Current implementation status (v1.4.0):
+Current implementation status (v1.5.0):
 
 | Component | Status |
 |----------|--------|
@@ -306,6 +307,7 @@ Current implementation status (v1.4.0):
 | Time-Travel Operations | ✅ Complete |
 | Structural Diff | ✅ Complete |
 | Query Subgraph | ✅ Complete |
+| Persistent Storage (SQLite) | ✅ Complete |
 | Test Suite | ✅ 207+ tests passing |
 
 The current implementation serves as the reference implementation of the
