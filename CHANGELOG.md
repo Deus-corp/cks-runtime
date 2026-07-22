@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.3.2] - 2026-07-22
+
+### Changed
+- Bumped `cks-core` dependency to `>=1.8.3` (includes deterministic merge order fix).
+
+---
+
 ## [1.3.1] - 2026-07-21
 
 ### Fixed
