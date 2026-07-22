@@ -60,6 +60,7 @@ from cks_runtime.execution.operation_executor import OperationExecutor
 from cks_runtime.dispatcher.dispatcher import Dispatcher
 from cks_runtime.operations.operation_registry import OperationRegistry
 from cks_runtime.events.event_bus import EventBus
+from cks_runtime.storage.sqlite_storage import SQLiteStorage
 
 
 class Runtime:
@@ -128,6 +129,8 @@ class Runtime:
             storage
             if storage is not None
             else InMemoryStorage()
+            if self.config.storage_path == ":memory:"
+            else SQLiteStorage(self.config.storage_path)
         )
 
         #

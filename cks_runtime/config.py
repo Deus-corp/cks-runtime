@@ -28,7 +28,7 @@ def _runtime_version() -> str:
     try:
         return version("cks-runtime")
     except PackageNotFoundError:
-        return "1.4.1"
+        return "1.5.0"
 
 
 @dataclass(slots=True)
@@ -43,9 +43,7 @@ class RuntimeConfig:
     """
 
     runtime_name: str = "CKS Runtime"
-
     runtime_version: str = _runtime_version()
-
     auto_version_on_commit: bool = True
-
     collect_runtime_diagnostics: bool = True
+    storage_path: str = ":memory:"

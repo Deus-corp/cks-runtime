@@ -19,6 +19,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.5.0] - 2026-07-22
+
+### Added
+- `SQLiteStorage` — persistent storage backend using SQLite. Sessions and versions survive server restarts.
+- `RuntimeConfig.storage_path` — configure the path to the database file (use `:memory:` for in-memory, the default).
+- `Runtime` now creates `SQLiteStorage` when `storage_path` is set, otherwise falls back to `InMemoryStorage`.
+
+
+---
+
 ## [1.4.1] - 2026-07-22
 
 ### Changed

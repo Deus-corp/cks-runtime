@@ -95,6 +95,33 @@ class RuntimeVersion:
         memo[id(self)] = new
         return new
 
+
+    # ------------------------------------------------------------------
+    # Pickle support (MappingProxyType is not picklable)
+    # ------------------------------------------------------------------
+
+    def __getstate__(self):
+        return {
+            "session_id": self.session_id,
+            "transaction_id": self.transaction_id,
+            "knowledge_structure": self.knowledge_structure,
+            "metadata": dict(self.metadata),
+            "version_id": self.version_id,
+            "created_at": self.created_at,
+            "state_hash": self.state_hash,
+            "patch": self.patch,
+        }
+
+    def __setstate__(self, state):
+        object.__setattr__(self, "session_id", state["session_id"])
+        object.__setattr__(self, "transaction_id", state["transaction_id"])
+        object.__setattr__(self, "knowledge_structure", state["knowledge_structure"])
+        object.__setattr__(self, "metadata", MappingProxyType(state["metadata"]))
+        object.__setattr__(self, "version_id", state["version_id"])
+        object.__setattr__(self, "created_at", state["created_at"])
+        object.__setattr__(self, "state_hash", state["state_hash"])
+        object.__setattr__(self, "patch", state["patch"])
+
     #
     # ------------------------------------------------------------------
     # Storage shape
