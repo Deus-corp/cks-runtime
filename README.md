@@ -164,6 +164,7 @@ The current Reference Runtime provides:
 - **Time-Travel Operations** – `ListVersionsOperation`, `RevertVersionOperation`
 - **Structural Diff** – compact change computation between versions
 - Three‑way merge of knowledge structures via `cks-core`'s `merge()` function
+- **Query Subgraph** – k‑hop neighbourhood extraction with type filters and budget/ranking, delegated to cks-core's query_subgraph()
 
 ---
 
@@ -288,7 +289,7 @@ Supporting documents include:
 
 ## Project Status
 
-Current implementation status (v1.0.0):
+Current implementation status (v1.4.0):
 
 | Component | Status |
 |----------|--------|
@@ -304,6 +305,7 @@ Current implementation status (v1.0.0):
 | Event System | ✅ Complete |
 | Time-Travel Operations | ✅ Complete |
 | Structural Diff | ✅ Complete |
+| Query Subgraph | ✅ Complete |
 | Test Suite | ✅ 198+ tests passing |
 
 The current implementation serves as the reference implementation of the
