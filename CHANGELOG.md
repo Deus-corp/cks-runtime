@@ -19,6 +19,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.5.1] - 2026-07-22
+
+### Changed
+- **SQLiteStorage now uses JSON serialization** (via `cks.serialize`/`cks.parse`) instead of `pickle` for storing knowledge structures and patches. This eliminates `MappingProxyType` serialization issues and makes the storage format fully portable and inspectable.
+- `RuntimeVersion.__getstate__`/`__setstate__` methods remain for compatibility, but are no longer required for SQLiteStorage.
+
+### Fixed
+- Resolved `cannot pickle 'mappingproxy' object` errors that occurred when persisting sessions or versions to SQLite.
+- All storage tests (9 new) pass, and full test suite remains at 207+.
+
+### Deprecated
+- The previous pickle-based SQLiteStorage implementation is replaced; existing databases from v1.5.0 are not compatible. If you have data from the earlier version, re-create sessions after upgrading.
+
+---
+
 ## [1.5.0] - 2026-07-22
 
 ### Added

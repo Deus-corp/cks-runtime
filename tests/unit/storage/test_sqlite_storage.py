@@ -1,14 +1,14 @@
 """
-Tests for SQLiteStorage.
+Tests for SQLiteStorage (JSON-based).
 """
 
 from __future__ import annotations
 
 import pytest
-
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.versioning.version import RuntimeVersion
+import cks
 
 
 @pytest.fixture
@@ -19,9 +19,16 @@ def storage():
     store.clear()
 
 
+def make_ks():
+    """Minimal valid knowledge structure for testing."""
+    return cks.parse(
+        '{"objects":[{"identity":{"id":"obj-1","type":"Test","name":"t"},"structure":{}}]}'
+    )
+
+
 def make_session(session_id: str = "s1") -> RuntimeSession:
     return RuntimeSession(
-        knowledge_structure={"key": "value"},
+        knowledge_structure=make_ks(),
         session_id=session_id,
     )
 
@@ -29,12 +36,14 @@ def make_session(session_id: str = "s1") -> RuntimeSession:
 def make_version(
     session_id: str = "s1",
     version_id: str = "v1",
-    knowledge_structure: dict | None = None,
+    ks=None,
 ) -> RuntimeVersion:
+    if ks is None:
+        ks = make_ks()
     return RuntimeVersion(
         session_id=session_id,
         transaction_id="t1",
-        knowledge_structure=knowledge_structure or {"k": "v"},
+        knowledge_structure=ks,
         metadata={"m": 1},
         version_id=version_id,
     )
@@ -46,7 +55,8 @@ def test_save_and_load_session(storage):
     loaded = storage.load_session("s1")
     assert loaded is not None
     assert loaded.session_id == "s1"
-    assert loaded.knowledge_structure == {"key": "value"}
+    # Compare serialized forms to avoid deep structure issues
+    assert cks.serialize(loaded.knowledge_structure) == cks.serialize(make_ks())
 
 
 def test_load_missing_session_returns_none(storage):
@@ -75,7 +85,7 @@ def test_save_and_load_version(storage):
     assert loaded is not None
     assert loaded.version_id == "v1"
     assert loaded.session_id == "s1"
-    assert loaded.knowledge_structure == {"k": "v"}
+    assert cks.serialize(loaded.knowledge_structure) == cks.serialize(make_ks())
 
 
 def test_load_missing_version_returns_none(storage):
