@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.4.1] - 2026-07-22
+
+### Changed
+- Bumped `cks-core` dependency to `>=1.9.1` (includes query_subgraph ordering and relation-as-seed fixes).
+
+---
+
 ## [1.4.0] - 2026-07-22
 
 ### Added
