@@ -19,6 +19,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.6.2] - 2026-07-23
+
+### Added
+- `MetricsCollector` — tracks invocation counts and execution times per operation type.
+- `Runtime.metrics` property exposes the collector.
+- `OperationExecutor` records metrics automatically when a collector is present.
+
+
+---
+
 ## [1.6.1] - 2026-07-23
 
 ### Fixed

@@ -11,6 +11,7 @@ Semantic behaviour belongs exclusively to CKS Core.
 
 from __future__ import annotations
 
+import time
 from abc import ABC
 from abc import abstractmethod
 
@@ -157,9 +158,11 @@ class OperationExecutor:
         self,
         *,
         core_adapter: CoreBridge,
+        metrics: Any = None,
     ) -> None:
 
         self._core_adapter = core_adapter
+        self._metrics = metrics
 
     @property
     def core(
@@ -176,19 +179,11 @@ class OperationExecutor:
         operation: Operation,
         session: RuntimeSession,
     ) -> ExecutionResult:
-        """
-        Execute one Runtime Operation.
-        """
-
+        """Execute one Runtime Operation."""
+        start = time.monotonic()
         try:
-
-            result = operation.execute(
-                session,
-                self,
-            )
-
+            result = operation.execute(session, self)
         except Exception as exc:
-
             result = ExecutionResult(
                 operation_id=operation.operation_id,
                 status=OperationStatus.FAILED,
@@ -204,5 +199,7 @@ class OperationExecutor:
                     ),
                 ),
             )
-
+        duration_ms = (time.monotonic() - start) * 1000
+        if self._metrics is not None:
+            self._metrics.record(operation.operation_id, duration_ms)
         return result

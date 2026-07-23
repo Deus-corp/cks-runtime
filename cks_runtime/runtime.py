@@ -61,6 +61,7 @@ from cks_runtime.dispatcher.dispatcher import Dispatcher
 from cks_runtime.operations.operation_registry import OperationRegistry
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.storage.sqlite_storage import SQLiteStorage
+from cks_runtime.metrics.collector import MetricsCollector
 
 
 class Runtime:
@@ -97,6 +98,7 @@ class Runtime:
         "_registry",
         "_dispatcher",
         "_events",
+        "_metrics",
     )
 
     def __init__(
@@ -149,15 +151,17 @@ class Runtime:
             self,
         )
 
+        self._events = EventBus()
+        self._metrics = MetricsCollector()
+
         # Сначала создаём executor, потому что dispatcher зависит от него
-        self._executor = OperationExecutor(core_adapter=self._core_bridge)
+        self._executor = OperationExecutor(core_adapter=self._core_bridge, metrics=self._metrics)
 
         self._registry = OperationRegistry()
         self._dispatcher = Dispatcher(
             registry=self._registry,
             executor=self._executor,
         )
-        self._events = EventBus()
 
         # ------------------------------------------------------------------
         # Restore persisted sessions and versions at startup
@@ -268,6 +272,12 @@ class Runtime:
     def events(self) -> EventBus:
         """Runtime event bus."""
         return self._events
+
+
+    @property
+    def metrics(self) -> MetricsCollector:
+        """Runtime metrics collector."""
+        return self._metrics
 
 
     #
