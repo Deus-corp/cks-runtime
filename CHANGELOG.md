@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.8.2] - 2026-07-23
+
+### Fixed
+- `VersionCreated` event now carries `session_id`, fixing a bug where outbox tasks and embeddings were not associated with the correct session.
+- `EmbeddingProjection` now uses `event.session_id` when writing outbox tasks.
+- `search_semantic` in cks-mcp (>=1.6.1) can now find embeddings for the correct session.
+
+---
+
 ## [1.8.1] - 2026-07-23
 
 ### Added

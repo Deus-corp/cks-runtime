@@ -39,9 +39,9 @@ class EmbeddingProjection:
 
         try:
             self._storage.enqueue_outbox_task(
-                session_id,
+                event.session_id,
                 previous_version_id,
-                new_version_id,
+                event.version_id,
             )
             logger.debug(
                 "Outbox task created: session=%s, new_version=%s",
