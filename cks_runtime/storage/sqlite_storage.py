@@ -333,3 +333,36 @@ class SQLiteStorage(RuntimeStorage):
             (session_id, previous_version_id, new_version_id),
         )
         self._conn.commit()
+
+
+    def search_embeddings(
+        self,
+        query_embedding: bytes,
+        session_id: str,
+        top_k: int = 5,
+    ) -> list[str]:
+        """
+        Return object_ids of the top_k closest embeddings to query_embedding
+        within the given session.
+        """
+        rows = self._conn.execute(
+            "SELECT object_id, embedding FROM cks_object_embeddings WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+
+        if not rows:
+            return []
+
+        # Compute distances
+        import struct
+        def l1_distance(emb: bytes) -> float:
+            sum_dist = 0.0
+            for i in range(0, len(emb), 4):
+                val_db = struct.unpack("f", emb[i:i+4])[0]
+                val_q = struct.unpack("f", query_embedding[i:i+4])[0]
+                sum_dist += abs(val_db - val_q)
+            return sum_dist
+
+        scored = [(l1_distance(row[1]), row[0]) for row in rows]
+        scored.sort(key=lambda x: x[0])
+        return [oid for _, oid in scored[:top_k]]

@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.8.1] - 2026-07-23
+
+### Added
+- `SQLiteStorage.search_embeddings()` — searches the embeddings table for the closest vectors to a query embedding.
+
+---
+
 ## [1.8.0] - 2026-07-23
 
 ### Added
