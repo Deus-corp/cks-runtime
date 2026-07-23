@@ -63,6 +63,7 @@ from cks_runtime.events.event_bus import EventBus
 from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.metrics.collector import MetricsCollector
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
+from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
 
 
 class Runtime:
@@ -101,6 +102,7 @@ class Runtime:
         "_events",
         "_metrics",
         "_embedding_projection",
+        "_outbox_worker",
     )
 
     def __init__(
@@ -162,6 +164,11 @@ class Runtime:
             storage=self._storage,
         )
         self._embedding_projection.start()
+        self._outbox_worker = OutboxEmbeddingWorker(
+            storage=self._storage,
+            core_bridge=self._core_bridge,
+        )
+        self._outbox_worker.start()
 
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(core_adapter=self._core_bridge, metrics=self._metrics)

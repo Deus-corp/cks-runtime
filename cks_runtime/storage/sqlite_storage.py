@@ -147,6 +147,16 @@ class SQLiteStorage(RuntimeStorage):
             WHERE status IN ('PENDING', 'FAILED')
             """
         )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_object_embeddings (
+                object_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
         self._conn.commit()
 
     # ------------------------------------------------------------------

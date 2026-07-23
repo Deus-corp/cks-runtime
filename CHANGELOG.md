@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.8.0] - 2026-07-23
+
+### Added
+- `OutboxEmbeddingWorker` — background worker that polls the outbox, computes text representations of new/changed Knowledge Objects, generates embeddings (stub implementation with deterministic hashing), and stores them in SQLite.
+- `cks_object_embeddings` table in SQLiteStorage for persisting embeddings.
+- Worker starts automatically with `Runtime` and processes outbox tasks every 2 seconds.
+
+---
+
 ## [1.7.0] - 2026-07-23
 
 ### Added
