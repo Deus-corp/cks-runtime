@@ -19,6 +19,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.0] - 2026-07-23
+
+### Added
+- `EmbeddingClient` abstract interface for embedding providers.
+- `StubEmbeddingClient` (SHA-256 hash-based) for testing.
+- `OpenAIEmbeddingClient` for real semantic embeddings via OpenAI API.
+- `Runtime` now accepts optional `embedding_client` parameter, passed through to `OutboxEmbeddingWorker`.
+- `search_semantic` now uses the configured embedding client for query vectorization.
+
+### Changed
+- `OutboxEmbeddingWorker` generates embeddings via the configured client instead of hardcoded SHA-256 stubs.
+
+---
+
 ## [1.8.2] - 2026-07-23
 
 ### Fixed

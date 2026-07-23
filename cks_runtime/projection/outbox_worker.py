@@ -10,6 +10,8 @@ import time
 import threading
 from typing import Any
 
+from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,9 +22,16 @@ class OutboxEmbeddingWorker:
     and stores them in cks_object_embeddings.
     """
 
-    def __init__(self, storage: Any, core_bridge: Any, poll_interval: float = 2.0) -> None:
+    def __init__(
+        self,
+        storage: Any,
+        core_bridge: Any,
+        embedding_client: EmbeddingClient | None = None,
+        poll_interval: float = 2.0,
+    ) -> None:
         self._storage = storage
         self._core_bridge = core_bridge
+        self._embedding_client = embedding_client or StubEmbeddingClient()
         self._poll_interval = poll_interval
         self._running = False
         self._thread: threading.Thread | None = None
@@ -131,21 +140,11 @@ class OutboxEmbeddingWorker:
         if not objects_to_embed:
             return
 
-        # Generate embeddings (stub for now — random vectors)
-        import hashlib
-        for obj in objects_to_embed:
-            text_repr = self._format_for_embedding(obj)
-            # Stub embedding: hash the text and pad to 384 floats
-            digest = hashlib.sha256(text_repr.encode()).digest()
-            import struct
-            embedding = bytes()
-            for i in range(0, len(digest), 4):
-                val = struct.unpack("f", digest[i:i+4])[0]
-                embedding += struct.pack("f", val)
-            # Pad to 384 floats
-            while len(embedding) < 384 * 4:
-                embedding += struct.pack("f", 0.0)
+        # Generate embeddings using the configured client
+        texts = [self._format_for_embedding(obj) for obj in objects_to_embed]
+        embeddings = self._embedding_client.embed_batch(texts)
 
+        for obj, embedding in zip(objects_to_embed, embeddings):
             self._storage._conn.execute(
                 """
                 INSERT OR REPLACE INTO cks_object_embeddings

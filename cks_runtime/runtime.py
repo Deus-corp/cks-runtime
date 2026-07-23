@@ -64,6 +64,7 @@ from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.metrics.collector import MetricsCollector
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
 from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
+from cks_runtime.embedding.client import EmbeddingClient
 
 
 class Runtime:
@@ -111,6 +112,7 @@ class Runtime:
         core: CoreInterface | None = None,
         storage: RuntimeStorage | None = None,
         config: RuntimeConfig | None = None,
+        embedding_client: EmbeddingClient | None = None,
     ) -> None:
 
         self.config = (
@@ -167,6 +169,7 @@ class Runtime:
         self._outbox_worker = OutboxEmbeddingWorker(
             storage=self._storage,
             core_bridge=self._core_bridge,
+            embedding_client=embedding_client,
         )
         self._outbox_worker.start()
 
