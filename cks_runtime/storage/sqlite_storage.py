@@ -124,6 +124,29 @@ class SQLiteStorage(RuntimeStorage):
             )
             """
         )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_projection_outbox (
+                task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                previous_version_id TEXT,
+                new_version_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                next_retry_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        # Index for polling
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_outbox_pending
+            ON cks_projection_outbox(status, next_retry_at)
+            WHERE status IN ('PENDING', 'FAILED')
+            """
+        )
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -282,4 +305,21 @@ class SQLiteStorage(RuntimeStorage):
     def clear(self) -> None:
         self._conn.execute("DELETE FROM sessions")
         self._conn.execute("DELETE FROM versions")
+        self._conn.commit()
+
+
+    def enqueue_outbox_task(
+        self,
+        session_id: str,
+        previous_version_id: str | None,
+        new_version_id: str,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO cks_projection_outbox
+                (session_id, previous_version_id, new_version_id)
+            VALUES (?, ?, ?)
+            """,
+            (session_id, previous_version_id, new_version_id),
+        )
         self._conn.commit()

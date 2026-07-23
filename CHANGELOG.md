@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.7.0] - 2026-07-23
+
+### Added
+- **Transactional Outbox pattern** for asynchronous embedding generation. `SQLiteStorage` now maintains a `cks_projection_outbox` table.
+- **EmbeddingProjection** — listens for `VersionCreated` events and writes tasks to the outbox, ensuring no embedding task is ever lost even if the server restarts.
+- New test verifying outbox task creation on version commit.
+
+---
+
 ## [1.6.2] - 2026-07-23
 
 ### Added

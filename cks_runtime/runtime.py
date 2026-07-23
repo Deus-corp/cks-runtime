@@ -62,6 +62,7 @@ from cks_runtime.operations.operation_registry import OperationRegistry
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.metrics.collector import MetricsCollector
+from cks_runtime.projection.embedding_projection import EmbeddingProjection
 
 
 class Runtime:
@@ -99,6 +100,7 @@ class Runtime:
         "_dispatcher",
         "_events",
         "_metrics",
+        "_embedding_projection",
     )
 
     def __init__(
@@ -153,6 +155,13 @@ class Runtime:
 
         self._events = EventBus()
         self._metrics = MetricsCollector()
+
+        # Projections
+        self._embedding_projection = EmbeddingProjection(
+            event_bus=self._events,
+            storage=self._storage,
+        )
+        self._embedding_projection.start()
 
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(core_adapter=self._core_bridge, metrics=self._metrics)

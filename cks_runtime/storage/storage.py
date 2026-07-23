@@ -130,3 +130,16 @@ class RuntimeStorage(ABC):
         Primarily intended for testing and
         reference implementations.
         """
+
+
+    def enqueue_outbox_task(
+        self,
+        session_id: str,
+        previous_version_id: str | None,
+        new_version_id: str,
+    ) -> None:
+        """
+        Write a task to the projection outbox (if supported).
+        Default implementation does nothing — storage backends that
+        support projections override this.
+        """

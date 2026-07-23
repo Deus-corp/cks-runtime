@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-210%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-211%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
 CKS Runtime is the canonical execution environment for
@@ -308,7 +308,7 @@ Current implementation status (v1.5.0):
 | Structural Diff | ✅ Complete |
 | Query Subgraph | ✅ Complete |
 | Persistent Storage (SQLite) | ✅ Complete |
-| Test Suite | ✅ 210+ tests passing |
+| Test Suite | ✅ 211+ tests passing |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
