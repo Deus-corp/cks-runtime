@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.6.1] - 2026-07-23
+
+### Fixed
+- **Critical: `Dispatcher.dispatch()` now correctly instantiates operations** using `OperationRegistry.create()` instead of passing a class to the executor. Previously, any transaction using `DispatchRequest` would crash with `missing 1 required positional argument: 'executor'`. This bug was hidden by a test that monkey-patched the dispatcher. The test is now rewritten to exercise the real dispatch path.
+- Renamed `tests/unit/dispatcher/dispatcher.py` → `test_dispatcher.py` so pytest discovers it.
+
+
+---
+
 ## [1.6.0] - 2026-07-23
 
 ### Added

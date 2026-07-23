@@ -92,7 +92,13 @@ class Dispatcher:
         Resolve and execute a Runtime Operation.
         """
 
-        operation = self.registry.get(request.operation_id)
+        try:
+            operation = self.registry.create(
+                request.operation_id,
+                **request.parameters,
+            )
+        except KeyError:
+            operation = None
 
         if operation is None:
             diagnostic = Diagnostic(
