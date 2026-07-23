@@ -159,6 +159,11 @@ class Runtime:
         )
         self._events = EventBus()
 
+        # ------------------------------------------------------------------
+        # Restore persisted sessions and versions at startup
+        # ------------------------------------------------------------------
+        self._restore_from_storage()
+
     #
     # ------------------------------------------------------------------
     # Public subsystem access
@@ -442,3 +447,40 @@ class Runtime:
         return self._versions.latest(
             session,
         )
+
+    # ------------------------------------------------------------------
+    # Restore persisted sessions and versions at startup
+    # ------------------------------------------------------------------
+
+    def _restore_from_storage(self) -> None:
+        """
+        Load all sessions and versions from the attached storage and
+        register them with the in-memory managers.
+
+        Versions are sorted by ``created_at`` and appended to each
+        session's ``version_history`` in chronological order, which is
+        the order the delta-based reconstruction algorithm in
+        :meth:`RuntimeSession.get_version_state` expects.
+        """
+        stored_sessions = self._storage.list_sessions()
+        stored_versions = self._storage.list_versions()
+
+        if not stored_sessions:
+            return
+
+        # Group versions by session_id
+        versions_by_session: dict[str, list[Any]] = {}
+        for version in stored_versions:
+            versions_by_session.setdefault(version.session_id, []).append(version)
+
+        for session in stored_sessions:
+            # Attach versions in chronological order
+            versions = sorted(
+                versions_by_session.get(session.session_id, []),
+                key=lambda v: v.created_at,
+            )
+            for version in versions:
+                session.add_version(version)
+
+            # Register the session in the session manager
+            self._sessions.restore(session)

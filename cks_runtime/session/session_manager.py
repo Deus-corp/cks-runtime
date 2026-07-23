@@ -200,3 +200,17 @@ class SessionManager:
                 session.close()
 
         self._sessions.clear()
+    
+    def restore(
+        self,
+        session: RuntimeSession,
+    ) -> None:
+        """
+        Register a RuntimeSession loaded from persistent storage.
+
+        Unlike :meth:`create_session`, this does *not* create a new
+        session — it only registers an already existing session that
+        was read from the storage backend during startup.
+        """
+
+        self._sessions[session.session_id] = session

@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.6.0] - 2026-07-23
+
+### Added
+- **Startup persistence restore:** `Runtime` now automatically loads all previously saved sessions and versions from the attached storage backend. After a server restart, all historical sessions are immediately available via `get_session()`, `list_sessions()`, and MCP Resources without any additional configuration.
+
+### Fixed
+- `SQLiteStorage` sessions and versions are no longer invisible after a process restart. The `Runtime` now calls `restore` on the `SessionManager` for each persisted session, fully reconstructing `version_history` in the correct chronological order so that delta-based version reconstruction continues to work.
+- `InMemoryStorage` behaviour is unaffected (list_sessions returns empty on fresh start, as expected).
+
+---
+
 ## [1.5.1] - 2026-07-22
 
 ### Changed
