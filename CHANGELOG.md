@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.2] - 2026-07-24
+
+### Fixed
+- `HuggingFaceEmbeddingClient` now uses the new HuggingFace API endpoint `router.huggingface.co/hf-inference/models/` instead of the deprecated `api-inference.huggingface.co`.
+
+---
+
 ## [1.9.1] - 2026-07-24
 
 ### Added

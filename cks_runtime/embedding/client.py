@@ -106,7 +106,7 @@ class HuggingFaceEmbeddingClient(EmbeddingClient):
         import requests
         import struct
 
-        api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{self._model_name}"
+        api_url = f"https://router.huggingface.co/hf-inference/models/{self._model_name}/pipeline/feature-extraction"
         headers = {"Authorization": f"Bearer {self._token}"}
         response = requests.post(api_url, headers=headers, json={"inputs": texts, "options": {"wait_for_model": True}})
         response.raise_for_status()
