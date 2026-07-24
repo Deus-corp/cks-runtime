@@ -156,6 +156,7 @@ class QuerySubgraphOperation(Operation):
         max_tokens: int | None = None,
         max_objects: int | None = None,
         type_weights: Any = None,
+        compact_mode: bool = False,          # <-- новое поле
         metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(operation_id, metadata=metadata)
@@ -167,6 +168,7 @@ class QuerySubgraphOperation(Operation):
         self.max_tokens = max_tokens
         self.max_objects = max_objects
         self.type_weights = type_weights
+        self.compact_mode = compact_mode
 
     def execute(
         self,

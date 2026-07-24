@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.6] - 2026-07-24
+
+### Added
+- `QuerySubgraphOperation` now accepts an optional `compact_mode` parameter. This allows callers (like `cks-mcp`) to request a compact graph representation without changing the operation's core logic.
+
+---
+
 ## [1.9.5] - 2026-07-24
 
 ### Fixed
