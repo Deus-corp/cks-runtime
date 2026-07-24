@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.10.2] - 2026-07-24
+
+### Changed
+- Embeddings are now normalized to unit length at storage time and query time, enabling fast cosine similarity search via dot product in `search_embeddings`.
+- `EmbeddingClient.embed_batch` now accepts an optional `normalize` parameter.
+- `OutboxEmbeddingWorker` now stores normalized embeddings.
+
+---
+
 ## [1.10.0] - 2026-07-24
 
 ### Changed

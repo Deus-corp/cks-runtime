@@ -386,7 +386,7 @@ class SQLiteStorage(RuntimeStorage):
     ) -> list[str]:
         """
         Return object_ids of the top_k closest embeddings to query_embedding
-        within the given session.
+        within the given session. Assumes both query and stored vectors are normalized.
         """
         rows = self._conn.execute(
             "SELECT object_id, embedding FROM cks_object_embeddings WHERE session_id = ?",
@@ -396,16 +396,16 @@ class SQLiteStorage(RuntimeStorage):
         if not rows:
             return []
 
-        # Compute distances
-        import struct
-        def l1_distance(emb: bytes) -> float:
-            sum_dist = 0.0
-            for i in range(0, len(emb), 4):
-                val_db = struct.unpack("f", emb[i:i+4])[0]
-                val_q = struct.unpack("f", query_embedding[i:i+4])[0]
-                sum_dist += abs(val_db - val_q)
-            return sum_dist
+        import array
 
-        scored = [(l1_distance(row[1]), row[0]) for row in rows]
-        scored.sort(key=lambda x: x[0])
+        q = array.array("f")
+        q.frombytes(query_embedding)
+
+        def score(emb: bytes) -> float:
+            v = array.array("f")
+            v.frombytes(emb)
+            # Dot product = cosine similarity for normalized vectors
+            return 1.0 - sum(a * b for a, b in zip(v, q))
+
+        scored = sorted(((score(r[1]), r[0]) for r in rows))
         return [oid for _, oid in scored[:top_k]]

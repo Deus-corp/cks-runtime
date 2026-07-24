@@ -159,7 +159,7 @@ class OutboxEmbeddingWorker:
 
         # Generate embeddings using the configured client
         texts = [self._format_for_embedding(obj) for obj in objects_to_embed]
-        embeddings = self._embedding_client.embed_batch(texts)
+        embeddings = self._embedding_client.embed_batch(texts, normalize=True)
 
         for obj, embedding in zip(objects_to_embed, embeddings):
             self._storage._conn.execute(
