@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.10.3] - 2026-07-24
+
+### Fixed
+- `OutboxEmbeddingWorker` now correctly calls `_execute_task` instead of the removed `_execute_projection`, fixing a crash that prevented any embeddings from being generated after the Task Bus refactoring.
+
+---
+
 ## [1.10.2] - 2026-07-24
 
 ### Changed
