@@ -132,11 +132,11 @@ class SQLiteStorage(RuntimeStorage):
             self._conn.execute("ALTER TABLE versions ADD COLUMN session_id TEXT")
         self._conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS cks_projection_outbox (
+            CREATE TABLE IF NOT EXISTS cks_outbox_tasks (
                 task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_type TEXT NOT NULL,
                 session_id TEXT NOT NULL,
-                previous_version_id TEXT,
-                new_version_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'PENDING',
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 next_retry_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -145,11 +145,10 @@ class SQLiteStorage(RuntimeStorage):
             )
             """
         )
-        # Index for polling
         self._conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_outbox_pending
-            ON cks_projection_outbox(status, next_retry_at)
+            ON cks_outbox_tasks(status, next_retry_at)
             WHERE status IN ('PENDING', 'FAILED')
             """
         )
@@ -350,13 +349,31 @@ class SQLiteStorage(RuntimeStorage):
         previous_version_id: str | None,
         new_version_id: str,
     ) -> None:
+        """Legacy method for embedding projection tasks."""
+        import json
+        self.enqueue_task(
+            task_type="projection",
+            session_id=session_id,
+            payload=json.dumps({
+                "previous_version_id": previous_version_id,
+                "new_version_id": new_version_id,
+            }),
+        )
+
+    def enqueue_task(
+        self,
+        task_type: str,
+        session_id: str,
+        payload: str,
+    ) -> None:
+        """Enqueue a generic background task."""
         self._conn.execute(
             """
-            INSERT INTO cks_projection_outbox
-                (session_id, previous_version_id, new_version_id)
-            VALUES (?, ?, ?)
+            INSERT INTO cks_outbox_tasks
+                (task_type, session_id, payload, status, next_retry_at)
+            VALUES (?, ?, ?, 'PENDING', datetime('now'))
             """,
-            (session_id, previous_version_id, new_version_id),
+            (task_type, session_id, payload),
         )
         self._conn.commit()
 

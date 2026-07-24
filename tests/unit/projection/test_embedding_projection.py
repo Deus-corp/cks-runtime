@@ -20,9 +20,10 @@ def test_version_created_adds_outbox_task():
 
     # Check outbox table
     rows = storage._conn.execute(
-        "SELECT * FROM cks_projection_outbox"
+        "SELECT * FROM cks_outbox_tasks"
     ).fetchall()
     assert len(rows) == 1
-    # Row indices: 0=task_id, 1=session_id, 4=status
-    assert rows[0][1] == session.session_id
+    # Indices: 1=task_type, 2=session_id, 4=status
+    assert rows[0][1] == "projection"
+    assert rows[0][2] == session.session_id
     assert rows[0][4] == "PENDING"

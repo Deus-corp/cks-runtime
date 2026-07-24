@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.10.0] - 2026-07-24
+
+### Changed
+- **Generalised Task Bus:** Replaced the `cks_projection_outbox` table with a more generic `cks_outbox_tasks` table that supports multiple task types (`projection`, `merge_conflict`, etc.) via a `task_type` column and JSON `payload`.
+- `enqueue_outbox_task` now delegates to the new `enqueue_task` method.
+- `OutboxEmbeddingWorker` updated to read from the new table structure.
+
+### Migration note
+- Existing `cks_projection_outbox` data will NOT be migrated. For fresh installs, the new table is created automatically.
+
+---
+
 ## [1.9.6] - 2026-07-24
 
 ### Added

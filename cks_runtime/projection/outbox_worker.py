@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import time
 import threading
+import json
 from typing import Any
 
 from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
@@ -59,11 +60,10 @@ class OutboxEmbeddingWorker:
             time.sleep(self._poll_interval)
 
     def _process_next_task(self) -> None:
-        # Grab one pending task
         row = self._storage._conn.execute(
             """
-            SELECT task_id, session_id, previous_version_id, new_version_id
-            FROM cks_projection_outbox
+            SELECT task_id, task_type, session_id, payload
+            FROM cks_outbox_tasks
             WHERE status = 'PENDING' AND next_retry_at <= datetime('now')
             ORDER BY created_at ASC
             LIMIT 1
@@ -72,13 +72,18 @@ class OutboxEmbeddingWorker:
         if row is None:
             return
 
-        task_id, session_id, prev_version_id, new_version_id = row
+        task_id, task_type, session_id, payload_json = row
 
         try:
-            self._execute_task(session_id, prev_version_id, new_version_id)
+            if task_type == "projection":
+                payload = json.loads(payload_json)
+                self._execute_projection(session_id, payload["previous_version_id"], payload["new_version_id"])
+            else:
+                raise ValueError(f"Unknown task type: {task_type}")
+
             # Success — delete task
             self._storage._conn.execute(
-                "DELETE FROM cks_projection_outbox WHERE task_id = ?",
+                "DELETE FROM cks_outbox_tasks WHERE task_id = ?",
                 (task_id,),
             )
             self._storage._conn.commit()
@@ -88,7 +93,7 @@ class OutboxEmbeddingWorker:
             retry_count = row[5] + 1 if len(row) > 5 else 1
             self._storage._conn.execute(
                 """
-                UPDATE cks_projection_outbox
+                UPDATE cks_outbox_tasks
                 SET status = 'FAILED',
                     retry_count = ?,
                     next_retry_at = datetime('now', '+' || ? || ' seconds'),
