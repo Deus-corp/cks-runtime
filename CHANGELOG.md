@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.11.0] - 2026-07-24
+
+### Added
+- `Runtime.create_branch` now automatically records `parent_version_id` when the parent session has a committed version and no active transaction. This makes `merge_branch` work out-of-the-box without needing to pass `version_id` explicitly.
+- New regression tests for automatic `parent_version_id` and for failed operation result recording.
+
+### Fixed
+- `ExecutionPipeline._execute_operations` now records the operation result **before** failure handling, ensuring that diagnostics from failed operations are accessible to callers who catch the `RuntimeError`.
+
+---
+
 ## [1.10.3] - 2026-07-24
 
 ### Fixed

@@ -242,9 +242,18 @@ class ExecutionPipeline:
         # 1. Готовые операции (старый путь)
         for op in transaction.operations:
             result = executor.execute(op, session)
+            # Record the result before any failure handling. Callers
+            # (e.g. cks-mcp's validate_knowledge) inspect
+            # transaction.results after catching the RuntimeError that
+            # _handle_result raises on failure, to recover the precise
+            # core-level diagnostics instead of falling back to a
+            # generic message. _handle_result's rollback only flips
+            # transaction/session status -- it never clears results --
+            # so recording first is safe on both the success and
+            # failure paths.
+            transaction.add_result(result)
             self._handle_result(result, op.operation_id, transaction)
             self._apply_state_mutation(op, result, session)
-            transaction.add_result(result)
 
         # 2. DispatchRequest (новый путь)
         if dispatcher is not None and transaction.requests:

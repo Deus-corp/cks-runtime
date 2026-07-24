@@ -183,3 +183,44 @@ def test_merge_operation_surfaces_structured_conflicts_via_direct_execution():
 
     # The failed direct execution never touched the session's state.
     assert {o.identity.id for o in trunk.knowledge_structure.objects} == {"shared"}
+
+
+def test_create_branch_without_version_id_defaults_to_latest_committed_version():
+    """
+    Regression test: create_branch(session) -- with no explicit
+    version_id -- used to always leave parent_version_id unset, even
+    when session already had a committed version identical to its
+    current state (the common case: branching right after a
+    validate/evolve/merge call). That forced merge_branch to fail with
+    "could not determine a merge base" unless the caller remembered to
+    pass version_id=... explicitly at branch time.
+
+    Once session has at least one committed version and no operation
+    is in flight, omitting version_id should still record that latest
+    version as parent_version_id, since session.knowledge_structure is
+    then provably identical to it.
+    """
+    runtime = Runtime(core=CksCoreAdapter())
+
+    trunk = runtime.create_session(make_structure(["root"]))
+    _evolve(runtime, trunk, [_add("a")])
+    latest = runtime.latest_version(trunk)
+
+    branch = runtime.create_branch(trunk)  # no version_id passed
+
+    assert branch.parent_version_id == latest.version_id
+
+    # And merge_branch can now resolve its base automatically, exactly
+    # as if version_id had been passed explicitly at branch time.
+    _evolve(runtime, trunk, [_add("b")])
+    _evolve(runtime, branch, [_add("c")])
+
+    tx = runtime.begin_transaction(trunk)
+    tx.add_operation(MergeOperation("merge", source_session=branch))
+    runtime.commit_transaction(tx)
+
+    result = tx.results[0]
+    assert result.status == OperationStatus.COMPLETED
+
+    merged_ids = {obj.identity.id for obj in trunk.knowledge_structure.objects}
+    assert merged_ids == {"root", "a", "b", "c"}

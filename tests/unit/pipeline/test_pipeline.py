@@ -243,3 +243,74 @@ def test_commit_publishes_transaction_committed_event():
     history = runtime.events.history()
     assert any(isinstance(e, TransactionCommitted) for e in history)
     assert any(isinstance(e, VersionCreated) for e in history)
+
+
+def test_failed_operation_result_is_recorded_on_transaction():
+    """
+    Regression test: previously, transaction.add_result(result) ran
+    *after* _handle_result(result, ...), but _handle_result raises
+    RuntimeError immediately on a FAILED result -- so a failing
+    operation's ExecutionResult (and its diagnostics) never reached
+    transaction.results. Callers that catch the RuntimeError from
+    commit_transaction() and then inspect tx.results to recover the
+    precise failure diagnostics (e.g. cks-mcp's validate_knowledge)
+    would see an empty list and fall back to a generic message.
+
+    add_result must now run before _handle_result, so tx.results
+    still holds the failed result -- with its original diagnostics --
+    even though the transaction itself is rolled back.
+    """
+    from cks_runtime.diagnostics.diagnostic import (
+        Diagnostic,
+        DiagnosticSeverity,
+        DiagnosticSource,
+    )
+    from cks_runtime.execution.operation_executor import OperationStatus
+    from cks_runtime.operations.operation_types import ValidateOperation
+
+    sentinel_diagnostic = Diagnostic(
+        message="Relation 'rel-x' references unknown object 'nonexistent-source'.",
+        source=DiagnosticSource.CORE,
+        severity=DiagnosticSeverity.ERROR,
+        code="CKS-STRUCT-DANGLING-REF",
+    )
+
+    class DiagnosingInvalidCore(CoreInterface):
+        """Fake Core that fails validation with a specific diagnostic,
+        mirroring what cks-core reports for a dangling reference."""
+
+        def validate(self, knowledge_structure, *, extra_constraints=None):
+            return RuntimeValidationResult(
+                valid=False,
+                diagnostics=(sentinel_diagnostic,),
+            )
+
+        def serialize(self, knowledge_structure):
+            return knowledge_structure
+
+        def evolve(self, knowledge_structure, operation):
+            return knowledge_structure
+
+        def explain(self, knowledge_structure):
+            return {}
+
+        def diff(self, source, target):
+            return []
+
+    runtime = create_runtime(DiagnosingInvalidCore())
+    session = runtime.create_session({"objects": []})
+    tx = runtime.begin_transaction(session)
+    tx.add_operation(
+        ValidateOperation("validate", knowledge_structure={"objects": []})
+    )
+
+    with pytest.raises(RuntimeError, match="Operation validate failed"):
+        runtime.commit_transaction(tx)
+
+    assert len(tx.results) == 1
+    failed_result = tx.results[-1]
+    assert failed_result.status == OperationStatus.FAILED
+    assert failed_result.diagnostics == (sentinel_diagnostic,)
+    assert failed_result.diagnostics[0].message == (
+        "Relation 'rel-x' references unknown object 'nonexistent-source'."
+    )

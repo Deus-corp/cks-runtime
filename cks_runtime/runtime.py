@@ -340,8 +340,19 @@ class Runtime:
         snapshot) -- and that same ``version_id`` is recorded on the
         branch as its ``parent_version_id``, so a later merge can find
         this exact fork point again. When omitted, the branch starts
-        from ``session``'s current, possibly uncommitted, state, and
-        ``parent_version_id`` is left unset.
+        from ``session``'s current, possibly uncommitted, state. In
+        that case ``parent_version_id`` still defaults to ``session``'s
+        latest committed version whenever that version is provably
+        equal to the current state -- i.e. ``session`` has at least one
+        version and no transaction is active, which after any
+        successful commit means ``session.knowledge_structure`` is
+        exactly what that version recorded (see VersionManager.create,
+        which snapshots/hashes the session's live structure at commit
+        time). This is the common case (branching right after
+        validate/evolve/merge). Only when neither holds -- an empty
+        session, or one with a transaction still in flight -- is
+        ``parent_version_id`` left unset, since no committed version
+        can then be guaranteed to match the current state.
         """
 
         if version_id is not None:
@@ -349,13 +360,18 @@ class Runtime:
                 version_id,
                 self._core_bridge,
             )
+            fork_version_id = version_id
         else:
             structure = session.knowledge_structure
+            if session.has_versions and not session.has_active_transaction:
+                fork_version_id = session.version_history[-1].version_id
+            else:
+                fork_version_id = None
 
         branch = self._sessions.create_branch(
             session,
             structure,
-            parent_version_id=version_id,
+            parent_version_id=fork_version_id,
         )
 
         self._storage.save_session(
