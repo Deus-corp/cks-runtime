@@ -85,3 +85,40 @@ class OpenAIEmbeddingClient(EmbeddingClient):
                 emb += struct.pack("f", val)
             embeddings.append(emb)
         return embeddings
+
+
+class HuggingFaceEmbeddingClient(EmbeddingClient):
+    """Free Hugging Face Inference API client."""
+
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> None:
+        import os
+        self._model_name = model_name
+        self._token = os.environ.get("HF_TOKEN")
+        if not self._token:
+            raise ValueError("HF_TOKEN environment variable is not set")
+        self._dimension = 384
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def embed_batch(self, texts: list[str]) -> list[bytes]:
+        import requests
+        import struct
+
+        api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{self._model_name}"
+        headers = {"Authorization": f"Bearer {self._token}"}
+        response = requests.post(api_url, headers=headers, json={"inputs": texts, "options": {"wait_for_model": True}})
+        response.raise_for_status()
+        outputs = response.json()
+
+        if isinstance(texts, str):
+            outputs = [outputs]
+
+        result = []
+        for emb in outputs:
+            emb_bytes = bytes()
+            for val in emb:
+                emb_bytes += struct.pack("f", float(val))
+            result.append(emb_bytes)
+        return result

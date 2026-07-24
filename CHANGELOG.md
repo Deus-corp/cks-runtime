@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.1] - 2026-07-24
+
+### Added
+- `HuggingFaceEmbeddingClient` — free, token-based embedding client using Hugging Face Inference API. Requires `HF_TOKEN` environment variable.
+- `OnnxEmbeddingClient` — local embedding client using ONNX Runtime (requires model download).
+- Both clients are interchangeable via the `EmbeddingClient` abstract interface.
+
+### Changed
+- `Runtime` now passes `embedding_client` to `OutboxEmbeddingWorker`, enabling real semantic embeddings for `search_semantic`.
+
+---
+
 ## [1.9.0] - 2026-07-23
 
 ### Added
