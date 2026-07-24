@@ -106,14 +106,19 @@ class OutboxEmbeddingWorker:
         new_version_id: str,
     ) -> None:
         # Load versions
-        new_version = self._storage.load_version(new_version_id)
-        if new_version is None:
-            raise ValueError(f"Version {new_version_id} not found")
+        # Load session to reconstruct version state (handles delta versions)
+        session = self._storage.load_session(session_id)
+        if session is None:
+            raise ValueError(f"Session {session_id} not found")
 
-        new_structure = new_version.knowledge_structure
+        # Reconstruct the full Knowledge Structure for the new version
+        new_structure = session.get_version_state(new_version_id, self._core_bridge)
+        if new_structure is None:
+            raise ValueError(f"Failed to reconstruct state for version {new_version_id}")
+
+        # Reconstruct old structure for diff (if available)
         if prev_version_id:
-            prev_version = self._storage.load_version(prev_version_id)
-            old_structure = prev_version.knowledge_structure if prev_version else None
+            old_structure = session.get_version_state(prev_version_id, self._core_bridge)
         else:
             old_structure = None
 
@@ -127,7 +132,7 @@ class OutboxEmbeddingWorker:
         # Collect added/modified objects
         objects_to_embed: list[Any] = []
         if patch is not None:
-            from cks.evolution import AddObject, RemoveObject
+            from cks.evolution import AddObject
             for op in patch:
                 if isinstance(op, AddObject):
                     obj = new_structure.get(op._obj.identity.id)

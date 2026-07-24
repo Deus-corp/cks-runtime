@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.4] - 2026-07-24
+
+### Fixed
+- **Critical: `OutboxEmbeddingWorker` now correctly handles delta versions** by reconstructing the full Knowledge Structure via `session.get_version_state()`. Previously, the worker read `knowledge_structure` directly from `RuntimeVersion`, which is `None` for 90% of versions, causing continuous task failures. Embeddings are now generated for all new/modified objects, regardless of snapshot interval.
+
+---
+
 ## [1.9.3] - 2026-07-24
 
 ### Fixed
