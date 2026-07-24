@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.5] - 2026-07-24
+
+### Fixed
+- `SQLiteStorage.load_session` now restores the full `version_history` from the versions table. After a server restart, `get_version_state` works correctly for all previously committed versions.
+- `SQLiteStorage.list_sessions` now delegates to `load_session`, ensuring consistent behavior and full history restoration for all sessions.
+
+---
+
 ## [1.9.4] - 2026-07-24
 
 ### Fixed

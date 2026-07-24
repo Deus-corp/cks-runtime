@@ -120,10 +120,16 @@ class SQLiteStorage(RuntimeStorage):
             """
             CREATE TABLE IF NOT EXISTS versions (
                 version_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
                 data TEXT NOT NULL
             )
             """
         )
+        # Add session_id column to existing versions table if it's missing
+        cur = self._conn.execute("PRAGMA table_info(versions)")
+        cols = [row[1] for row in cur.fetchall()]
+        if "session_id" not in cols:
+            self._conn.execute("ALTER TABLE versions ADD COLUMN session_id TEXT")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cks_projection_outbox (
@@ -201,9 +207,38 @@ class SQLiteStorage(RuntimeStorage):
         session.closed = data.get("closed", False)
         session.parent_session_id = data.get("parent_session_id")
         session.parent_version_id = data.get("parent_version_id")
-        # Version history will be re-attached separately if needed,
-        # but for consistency we could store version IDs and expect them
-        # to be loaded later.
+
+        # Restore version history from the versions table
+        # (sort by created_at in Python to avoid relying on SQLite's JSON operator)
+        version_rows = self._conn.execute(
+            "SELECT data FROM versions WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+
+        versions: list[RuntimeVersion] = []
+        from datetime import datetime
+        for (version_json,) in version_rows:
+            vdata = json.loads(version_json)
+            ks_v = cks.parse(vdata["knowledge_structure"]) if vdata["knowledge_structure"] else None
+            patch_v = _deserialize_operators(vdata["patch"]) if vdata.get("patch") else None
+            created_at = datetime.fromisoformat(vdata["created_at"])
+            version = RuntimeVersion(
+                session_id=vdata["session_id"],
+                transaction_id=vdata["transaction_id"],
+                knowledge_structure=ks_v,
+                metadata=vdata["metadata"],
+                version_id=vdata["version_id"],
+                created_at=created_at,
+                state_hash=vdata.get("state_hash"),
+                patch=patch_v,
+            )
+            versions.append(version)
+
+        # Sort chronologically and add to session
+        versions.sort(key=lambda v: v.created_at)
+        for version in versions:
+            session.add_version(version)
+
         return session
 
     def has_session(self, session_id: str) -> bool:
@@ -213,21 +248,12 @@ class SQLiteStorage(RuntimeStorage):
         return row is not None
 
     def list_sessions(self) -> tuple[RuntimeSession, ...]:
-        rows = self._conn.execute("SELECT data FROM sessions").fetchall()
+        rows = self._conn.execute("SELECT session_id FROM sessions").fetchall()
         sessions = []
-        for (data_str,) in rows:
-            data = json.loads(data_str)
-            ks = cks.parse(data["knowledge_structure"])
-            session = RuntimeSession(
-                knowledge_structure=ks,
-                session_id=data["session_id"],
-                metadata=data.get("metadata", {}),
-                snapshot_interval=data.get("snapshot_interval", 10),
-            )
-            session.closed = data.get("closed", False)
-            session.parent_session_id = data.get("parent_session_id")
-            session.parent_version_id = data.get("parent_version_id")
-            sessions.append(session)
+        for (sid,) in rows:
+            session = self.load_session(sid)
+            if session is not None:
+                sessions.append(session)
         return tuple(sessions)
 
     # ------------------------------------------------------------------
@@ -252,8 +278,8 @@ class SQLiteStorage(RuntimeStorage):
             "patch": patch_json,
         }
         self._conn.execute(
-            "INSERT OR REPLACE INTO versions (version_id, data) VALUES (?, ?)",
-            (version.version_id, json.dumps(data, ensure_ascii=False)),
+            "INSERT OR REPLACE INTO versions (version_id, session_id, data) VALUES (?, ?, ?)",
+            (version.version_id, version.session_id, json.dumps(data, ensure_ascii=False)),
         )
         self._conn.commit()
 
