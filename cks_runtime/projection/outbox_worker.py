@@ -137,6 +137,13 @@ class OutboxEmbeddingWorker:
             # No diff — embed all objects
             objects_to_embed = list(new_structure.objects)
 
+        # Filter out relation objects — only Concepts/Documents/etc. should be searchable
+        from cks.core import CanonicalRelation
+        objects_to_embed = [
+            obj for obj in objects_to_embed
+            if not isinstance(obj, CanonicalRelation)
+        ]
+
         if not objects_to_embed:
             return
 

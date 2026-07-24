@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.9.3] - 2026-07-24
+
+### Fixed
+- `OutboxEmbeddingWorker` now excludes `CanonicalRelation` objects from embedding generation, preventing relation objects from appearing as false positives in semantic search results.
+
+---
+
 ## [1.9.2] - 2026-07-24
 
 ### Fixed
