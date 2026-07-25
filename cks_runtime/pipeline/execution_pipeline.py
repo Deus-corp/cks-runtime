@@ -51,6 +51,18 @@ class ExecutionPipeline:
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
         initial_state = transaction.session.knowledge_structure
+        # Captured before _create_version appends the new version to
+        # session.version_history: this is "what latest_version_id the
+        # backend should still show" at commit time. If another writer
+        # already advanced it, save_session raises
+        # ConcurrentModificationError instead of silently clobbering
+        # that writer's version with this one (see cks_runtime.storage
+        # .storage.ConcurrentModificationError).
+        expected_version_id = (
+            transaction.session.version_history[-1].version_id
+            if transaction.session.version_history
+            else None
+        )
 
         if transaction.operations or transaction.requests:
             self._execute_operations(transaction)
@@ -60,7 +72,7 @@ class ExecutionPipeline:
             self._quality_gate(validation, transaction)
 
         version = self._create_version(transaction, initial_state)
-        self._persist(version, transaction)
+        self._persist(version, transaction, expected_version_id=expected_version_id)
         self._finalize(transaction)
 
         self._runtime.events.publish(
@@ -210,6 +222,7 @@ class ExecutionPipeline:
         self,
         version: RuntimeVersion,
         transaction: RuntimeTransaction,
+        expected_version_id: str | None = None,
     ) -> None:
         """
         Persist Runtime state.
@@ -219,6 +232,7 @@ class ExecutionPipeline:
 
         self._runtime.storage.save_session(
             transaction.session,
+            expected_version_id=expected_version_id,
         )
 
     def _finalize(

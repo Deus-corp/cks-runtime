@@ -63,6 +63,53 @@ def test_load_missing_session_returns_none(storage):
     assert storage.load_session("missing") is None
 
 
+def test_save_session_cas_accepts_matching_expected_version(storage):
+    session = make_session("s1")
+    session.add_version(make_version("s1", "v1"))
+    storage.save_version(make_version("s1", "v1"))
+    storage.save_session(session)  # initial write, no CAS
+
+    session.add_version(make_version("s1", "v2"))
+    storage.save_version(make_version("s1", "v2"))
+    # Matches the latest_version_id the first write just persisted (v1).
+    storage.save_session(session, expected_version_id="v1")
+
+    loaded = storage.load_session("s1")
+    assert [v.version_id for v in loaded.version_history] == ["v1", "v2"]
+
+
+def test_save_session_cas_rejects_stale_expected_version(storage):
+    from cks_runtime.storage.storage import ConcurrentModificationError
+
+    session = make_session("s1")
+    session.add_version(make_version("s1", "v1"))
+    storage.save_version(make_version("s1", "v1"))
+    storage.save_session(session)
+
+    # Simulate a second writer racing in and committing v2 first.
+    racer = make_session("s1")
+    racer.add_version(make_version("s1", "v1"))
+    racer.add_version(make_version("s1", "v2"))
+    storage.save_version(make_version("s1", "v2"))
+    storage.save_session(racer, expected_version_id="v1")
+
+    # Original writer, still working off v1, tries to commit v3 --
+    # must be rejected rather than silently clobbering v2.
+    session.add_version(make_version("s1", "v3"))
+    with pytest.raises(ConcurrentModificationError):
+        storage.save_session(session, expected_version_id="v1")
+
+    # v2 must survive untouched.
+    loaded = storage.load_session("s1")
+    assert [v.version_id for v in loaded.version_history] == ["v1", "v2"]
+
+
+def test_save_version_rejects_duplicate_version_id(storage):
+    storage.save_version(make_version("s1", "v1"))
+    with pytest.raises(Exception):  # sqlite3.IntegrityError
+        storage.save_version(make_version("s1", "v1"))
+
+
 def test_has_session(storage):
     assert not storage.has_session("s1")
     storage.save_session(make_session("s1"))

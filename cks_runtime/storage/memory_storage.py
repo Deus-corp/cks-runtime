@@ -41,10 +41,26 @@ class InMemoryStorage(RuntimeStorage):
     def save_session(
         self,
         session: RuntimeSession,
+        expected_version_id: str | None = None,
     ) -> None:
         """
         Persist a RuntimeSession.
+
+        Honors the same ``expected_version_id`` CAS contract as
+        SQLiteStorage, checked against the previously-saved copy's
+        latest version -- see ``RuntimeStorage.save_session``.
         """
+
+        if expected_version_id is not None:
+            current = self._sessions.get(session.session_id)
+            current_latest = (
+                current.version_history[-1].version_id
+                if current is not None and current.version_history
+                else None
+            )
+            if current_latest != expected_version_id:
+                from cks_runtime.storage.storage import ConcurrentModificationError
+                raise ConcurrentModificationError(session.session_id)
 
         self._sessions[
             session.session_id

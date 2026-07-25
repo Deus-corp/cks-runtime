@@ -19,6 +19,22 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.15.0] - 2026-07-25
+
+### Added
+- Optimistic concurrency control (OCC) for session saves via `expected_version_id` CAS in `SQLiteStorage`.
+- `ConcurrentModificationError` exception for CAS failures.
+- `PRAGMA busy_timeout` and retry-on-locked helper for concurrent writes.
+- `enqueue_task` base-class no-op default, preventing `AttributeError` on backends without outbox.
+- Regression tests for CAS accept/reject and duplicate version-id rejection.
+
+### Changed
+- `RuntimeStorage.save_session` now accepts optional `expected_version_id` for OCC.
+- `save_version` now uses strict `INSERT` instead of `OR REPLACE`.
+- `ExecutionPipeline.commit()` passes the session's pre-transaction version as the CAS anchor.
+
+---
+
 ## [1.14.0] - 2026-07-25
 
 ### Added

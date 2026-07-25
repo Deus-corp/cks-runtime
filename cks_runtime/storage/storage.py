@@ -17,6 +17,24 @@ from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version import RuntimeVersion
 
 
+class ConcurrentModificationError(RuntimeError):
+    """
+    Raised by ``save_session`` when ``expected_version_id`` was given
+    and no longer matches the persisted ``latest_version_id`` -- i.e.
+    another writer (another process, or another concurrent commit on
+    this one) has already advanced this session since the caller last
+    read it. Callers should reload the session and retry, not treat
+    this as a generic storage failure.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(
+            f"Session '{session_id}' was modified concurrently; "
+            "reload and retry."
+        )
+
+
 class RuntimeStorage(ABC):
     """
     Abstract Runtime storage.
@@ -41,9 +59,20 @@ class RuntimeStorage(ABC):
     def save_session(
         self,
         session: RuntimeSession,
+        expected_version_id: str | None = None,
     ) -> None:
         """
         Persist a RuntimeSession.
+
+        expected_version_id
+            Optional compare-and-swap guard. When given, the write is
+            rejected with ``ConcurrentModificationError`` unless the
+            backend's currently persisted ``latest_version_id`` for
+            this session equals this value (``None`` matching "no
+            version persisted yet"). Callers that are not committing
+            a new version against a specific prior version (initial
+            creation, rollback, abort) may omit it to write
+            unconditionally, as before.
         """
 
     @abstractmethod
@@ -145,6 +174,20 @@ class RuntimeStorage(ABC):
         support projections override this.
         """
 
+
+    def enqueue_task(
+        self,
+        task_type: str,
+        session_id: str,
+        payload: str,
+    ) -> None:
+        """
+        Write a generic task to the outbox (if supported).
+        Default implementation does nothing -- storage backends that
+        support the task bus override this. Callers must not assume
+        this method's mere presence means the task will actually be
+        persisted; check ``supports_outbox`` first.
+        """
 
     def dequeue_next_outbox_task(self) -> OutboxTask | None:
         """

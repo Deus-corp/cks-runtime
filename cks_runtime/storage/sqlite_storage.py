@@ -10,16 +10,49 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Optional
+import time
+from typing import Any, Callable, Optional, TypeVar
 
 import cks
 from cks.core import ObjectIdentity, KnowledgeObject, CanonicalRelation
 from cks.evolution import AddObject, AddRelation, RemoveObject, RemoveRelation
 
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime.storage.storage import RuntimeStorage
+from cks_runtime.storage.storage import RuntimeStorage, ConcurrentModificationError
 from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime.storage.storage import OutboxTask
+
+# Retry tuning for transient "database is locked" errors under
+# concurrent writers. Mirrors the busy-wait/backoff pattern used for
+# multi-process SQLite writers elsewhere (see e.g. an operation-log
+# CRDT storage layer using the same PRAGMA busy_timeout + exponential
+# backoff combination) rather than inventing a second one here.
+_SQLITE_BUSY_TIMEOUT_MS = 30_000
+_WRITE_RETRIES = 5
+_WRITE_RETRY_BASE_DELAY_SECONDS = 0.05
+
+_T = TypeVar("_T")
+
+
+def _retry_on_locked(fn: Callable[[], _T]) -> _T:
+    """
+    Run fn(), retrying with exponential backoff if it raises a
+    "database is locked" sqlite3.OperationalError. Does NOT retry
+    ConcurrentModificationError -- that's a legitimate CAS rejection,
+    not transient lock contention, and retrying it blindly here would
+    silently overwrite the caller's compare-and-swap semantics.
+    """
+    last_exc: Optional[BaseException] = None
+    for attempt in range(_WRITE_RETRIES):
+        try:
+            return fn()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt >= _WRITE_RETRIES - 1:
+                raise
+            last_exc = exc
+            time.sleep(_WRITE_RETRY_BASE_DELAY_SECONDS * (2**attempt))
+    assert last_exc is not None
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +139,7 @@ class SQLiteStorage(RuntimeStorage):
     def __init__(self, db_path: str = "cks_runtime.db") -> None:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
         self._create_tables()
 
     def _create_tables(self) -> None:
@@ -113,10 +147,17 @@ class SQLiteStorage(RuntimeStorage):
             """
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
-                data TEXT NOT NULL
+                data TEXT NOT NULL,
+                latest_version_id TEXT
             )
             """
         )
+        # Add latest_version_id to an existing sessions table if it's
+        # missing (same migration pattern as versions.session_id below).
+        cur = self._conn.execute("PRAGMA table_info(sessions)")
+        session_cols = [row[1] for row in cur.fetchall()]
+        if "latest_version_id" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN latest_version_id TEXT")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS versions (
@@ -169,7 +210,11 @@ class SQLiteStorage(RuntimeStorage):
     # Sessions
     # ------------------------------------------------------------------
 
-    def save_session(self, session: RuntimeSession) -> None:
+    def save_session(
+        self,
+        session: RuntimeSession,
+        expected_version_id: str | None = None,
+    ) -> None:
         # Serialize knowledge structure to canonical JSON string
         ks_json = cks.serialize(session.knowledge_structure)
         data = {
@@ -183,11 +228,50 @@ class SQLiteStorage(RuntimeStorage):
             "parent_version_id": session.parent_version_id,
             "closed": session.closed,
         }
-        self._conn.execute(
-            "INSERT OR REPLACE INTO sessions (session_id, data) VALUES (?, ?)",
-            (session.session_id, json.dumps(data, ensure_ascii=False)),
+        payload = json.dumps(data, ensure_ascii=False)
+        new_latest_version_id = (
+            session.version_history[-1].version_id if session.version_history else None
         )
-        self._conn.commit()
+
+        def _write() -> None:
+            if expected_version_id is None:
+                # No CAS requested (initial create, rollback, abort):
+                # unconditional write, same as before.
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO sessions (session_id, data, latest_version_id) "
+                    "VALUES (?, ?, ?)",
+                    (session.session_id, payload, new_latest_version_id),
+                )
+                self._conn.commit()
+                return
+
+            cur = self._conn.execute(
+                """
+                UPDATE sessions SET data = ?, latest_version_id = ?
+                WHERE session_id = ? AND latest_version_id IS ?
+                """,
+                (payload, new_latest_version_id, session.session_id, expected_version_id),
+            )
+            if cur.rowcount == 0:
+                # Either the session doesn't exist yet, or another
+                # writer already advanced it past expected_version_id.
+                # Distinguish the two so a first-ever commit on a
+                # session that was created without going through this
+                # CAS path (expected_version_id=None) isn't rejected.
+                exists = self._conn.execute(
+                    "SELECT 1 FROM sessions WHERE session_id = ?",
+                    (session.session_id,),
+                ).fetchone()
+                self._conn.rollback()
+                if exists is not None:
+                    raise ConcurrentModificationError(session.session_id)
+                self._conn.execute(
+                    "INSERT INTO sessions (session_id, data, latest_version_id) VALUES (?, ?, ?)",
+                    (session.session_id, payload, new_latest_version_id),
+                )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     def load_session(self, session_id: str) -> Optional[RuntimeSession]:
         row = self._conn.execute(
@@ -277,11 +361,21 @@ class SQLiteStorage(RuntimeStorage):
             "state_hash": version.state_hash,
             "patch": patch_json,
         }
-        self._conn.execute(
-            "INSERT OR REPLACE INTO versions (version_id, session_id, data) VALUES (?, ?, ?)",
-            (version.version_id, version.session_id, json.dumps(data, ensure_ascii=False)),
-        )
-        self._conn.commit()
+        payload = json.dumps(data, ensure_ascii=False)
+
+        def _write() -> None:
+            # Strict INSERT, not OR REPLACE: version_id is a fresh
+            # uuid4 per version, so a collision here means two writers
+            # generated a version under the same id -- a bug worth
+            # surfacing as IntegrityError, not silently overwriting
+            # one writer's version with another's.
+            self._conn.execute(
+                "INSERT INTO versions (version_id, session_id, data) VALUES (?, ?, ?)",
+                (version.version_id, version.session_id, payload),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     def load_version(self, version_id: str) -> Optional[RuntimeVersion]:
         row = self._conn.execute(
