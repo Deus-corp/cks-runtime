@@ -433,9 +433,12 @@ class SQLiteStorage(RuntimeStorage):
     # ------------------------------------------------------------------
 
     def clear(self) -> None:
-        self._conn.execute("DELETE FROM sessions")
-        self._conn.execute("DELETE FROM versions")
-        self._conn.commit()
+        def _write() -> None:
+            self._conn.execute("DELETE FROM sessions")
+            self._conn.execute("DELETE FROM versions")
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
 
     def enqueue_outbox_task(
@@ -462,15 +465,18 @@ class SQLiteStorage(RuntimeStorage):
         payload: str,
     ) -> None:
         """Enqueue a generic background task."""
-        self._conn.execute(
-            """
-            INSERT INTO cks_outbox_tasks
-                (task_type, session_id, payload, status, next_retry_at)
-            VALUES (?, ?, ?, 'PENDING', datetime('now'))
-            """,
-            (task_type, session_id, payload),
-        )
-        self._conn.commit()
+        def _write() -> None:
+            self._conn.execute(
+                """
+                INSERT INTO cks_outbox_tasks
+                    (task_type, session_id, payload, status, next_retry_at)
+                VALUES (?, ?, ?, 'PENDING', datetime('now'))
+                """,
+                (task_type, session_id, payload),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
 
     def dequeue_next_outbox_task(self) -> OutboxTask | None:
@@ -494,36 +500,48 @@ class SQLiteStorage(RuntimeStorage):
         )
 
     def complete_outbox_task(self, task_id: int) -> None:
-        self._conn.execute("DELETE FROM cks_outbox_tasks WHERE task_id = ?", (task_id,))
-        self._conn.commit()
+        def _write() -> None:
+            self._conn.execute("DELETE FROM cks_outbox_tasks WHERE task_id = ?", (task_id,))
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     def fail_outbox_task(self, task_id: int, retry_count: int, error: str, next_retry_at: str) -> None:
-        self._conn.execute(
-            """
-            UPDATE cks_outbox_tasks
-            SET status = 'PENDING',
-                retry_count = ?,
-                next_retry_at = ?,
-                last_error = ?
-            WHERE task_id = ?
-            """,
-            (retry_count, next_retry_at, error, task_id),
-        )
-        self._conn.commit()
+        def _write() -> None:
+            self._conn.execute(
+                """
+                UPDATE cks_outbox_tasks
+                SET status = 'PENDING',
+                    retry_count = ?,
+                    next_retry_at = ?,
+                    last_error = ?
+                WHERE task_id = ?
+                """,
+                (retry_count, next_retry_at, error, task_id),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
-        self._conn.execute(
-            "INSERT OR REPLACE INTO cks_object_embeddings (object_id, session_id, embedding) VALUES (?, ?, ?)",
-            (object_id, session_id, embedding),
-        )
-        self._conn.commit()
+        def _write() -> None:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO cks_object_embeddings (object_id, session_id, embedding) VALUES (?, ?, ?)",
+                (object_id, session_id, embedding),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     def delete_object_embeddings(self, object_id: str, session_id: str) -> None:
-        self._conn.execute(
-            "DELETE FROM cks_object_embeddings WHERE object_id = ? AND session_id = ?",
-            (object_id, session_id),
-        )
-        self._conn.commit()
+        def _write() -> None:
+            self._conn.execute(
+                "DELETE FROM cks_object_embeddings WHERE object_id = ? AND session_id = ?",
+                (object_id, session_id),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     @property
     def supports_outbox(self) -> bool:

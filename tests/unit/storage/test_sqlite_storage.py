@@ -4,11 +4,44 @@ Tests for SQLiteStorage (JSON-based).
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime.storage.sqlite_storage import SQLiteStorage
+from cks_runtime.storage.sqlite_storage import SQLiteStorage, _retry_on_locked
+from cks_runtime.storage.storage import ConcurrentModificationError
 from cks_runtime.versioning.version import RuntimeVersion
 import cks
+
+
+class _FlakyConnProxy:
+    """
+    Wraps a real ``sqlite3.Connection`` so the first ``fail_times``
+    calls to ``execute()`` raise a transient "database is locked"
+    error before delegating to the real connection.
+
+    ``sqlite3.Connection`` instances (and the type itself) don't allow
+    arbitrary attribute assignment, so ``execute`` can't be monkeypatched
+    directly on the connection -- this proxy stands in for it instead.
+    Swap it onto ``storage._conn`` (a plain attribute on a normal
+    Python object) to verify a write path actually survives one round
+    of lock contention end-to-end, not just that ``_retry_on_locked``
+    works in isolation.
+    """
+
+    def __init__(self, real_conn, fail_times: int = 1) -> None:
+        self._real = real_conn
+        self._fail_times = fail_times
+        self.calls = 0
+
+    def execute(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise sqlite3.OperationalError("database is locked")
+        return self._real.execute(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
 
 @pytest.fixture
@@ -160,3 +193,105 @@ def test_clear(storage):
     storage.clear()
     assert not storage.has_session("s1")
     assert not storage.has_version("v1")
+
+
+# ---------------------------------------------------------------------------
+# _retry_on_locked
+# ---------------------------------------------------------------------------
+
+def test_retry_on_locked_succeeds_after_transient_failures():
+    attempts = {"n": 0}
+
+    def flaky():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    assert _retry_on_locked(flaky) == "ok"
+    assert attempts["n"] == 3
+
+
+def test_retry_on_locked_raises_after_exhausting_retries():
+    attempts = {"n": 0}
+
+    def always_locked():
+        attempts["n"] += 1
+        raise sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError):
+        _retry_on_locked(always_locked)
+    assert attempts["n"] == 5  # _WRITE_RETRIES, all exhausted
+
+
+def test_retry_on_locked_does_not_retry_unrelated_operational_error():
+    attempts = {"n": 0}
+
+    def broken_schema():
+        attempts["n"] += 1
+        raise sqlite3.OperationalError("no such table: ghost")
+
+    with pytest.raises(sqlite3.OperationalError):
+        _retry_on_locked(broken_schema)
+    assert attempts["n"] == 1  # not a lock error -- must not retry
+
+
+def test_retry_on_locked_does_not_retry_cas_rejection():
+    """
+    ConcurrentModificationError is a legitimate compare-and-swap
+    rejection, not transient lock contention -- _retry_on_locked must
+    let it through on the first attempt rather than masking a real
+    conflict behind retries.
+    """
+    attempts = {"n": 0}
+
+    def cas_rejected():
+        attempts["n"] += 1
+        raise ConcurrentModificationError("s1")
+
+    with pytest.raises(ConcurrentModificationError):
+        _retry_on_locked(cas_rejected)
+    assert attempts["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: every write path survives one transient "locked" error
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        pytest.param(lambda s: s.save_session(make_session("s1")), id="save_session"),
+        pytest.param(lambda s: s.save_version(make_version("s1", "v1")), id="save_version"),
+        pytest.param(lambda s: s.clear(), id="clear"),
+        pytest.param(lambda s: s.enqueue_task("projection", "s1", "{}"), id="enqueue_task"),
+        pytest.param(
+            lambda s: s.save_object_embeddings("obj-1", "s1", b"\x00\x00\x80?"),
+            id="save_object_embeddings",
+        ),
+        pytest.param(
+            lambda s: s.delete_object_embeddings("obj-1", "s1"),
+            id="delete_object_embeddings",
+        ),
+    ],
+)
+def test_write_path_survives_one_transient_lock(storage, run):
+    storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
+    run(storage)  # must not raise despite the injected transient lock
+    assert storage._conn.calls >= 2  # confirms a retry actually happened
+
+
+def test_complete_outbox_task_survives_transient_lock(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
+    storage.complete_outbox_task(task.task_id)
+    assert storage._conn.calls >= 2
+
+
+def test_fail_outbox_task_survives_transient_lock(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
+    storage.fail_outbox_task(task.task_id, 1, "boom", "2026-01-01 00:00:00")
+    assert storage._conn.calls >= 2

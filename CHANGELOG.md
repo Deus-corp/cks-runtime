@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.15.1] - 2026-07-25
+
+### Added
+- **Retry-on-locked helper** (`_retry_on_locked`) for all SQLite write operations, absorbing transient `database is locked` errors under concurrency.
+- 12 new tests covering retry behaviour, transient lock survival for every write path, and CAS rejection non-retry.
+- **ADR-007** design document proposing an operation log and version vectors for field-level merge conflict resolution and fast-forward detection.
+
+### Changed
+- All `SQLiteStorage` methods that perform writes (`save_session`, `save_version`, `enqueue_task`, `complete_outbox_task`, `fail_outbox_task`, `save_object_embeddings`, `delete_object_embeddings`, `clear`) now go through `_retry_on_locked`.
+
+---
+
 ## [1.15.0] - 2026-07-25
 
 ### Added
