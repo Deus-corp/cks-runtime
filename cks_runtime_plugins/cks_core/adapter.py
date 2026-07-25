@@ -156,7 +156,14 @@ class CksCoreAdapter(CoreInterface):
     def diff(self, source: Any, target: Any) -> list[Any]:
         return source.diff(target)
 
-    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
+    def merge(
+        self,
+        base: Any,
+        branch_a: Any,
+        branch_b: Any,
+        *,
+        resolutions: dict[str, Any] | None = None,
+    ) -> Any:
         """
         Three-way merge through CKS Core.
 
@@ -168,10 +175,17 @@ class CksCoreAdapter(CoreInterface):
         already uses for validation diagnostics, so Runtime code never
         needs to import or recognize a cks-core-specific exception
         type.
+
+        ``resolutions`` (optional) turns this into a partial merge --
+        see ``cks.merge``/``KnowledgeStructure.merge`` for the exact
+        semantics. It is passed straight through unmodified: values
+        are either the strings ``"branch_a"``/``"branch_b"``, ``None``,
+        or a raw cks-core ``KnowledgeObject``/``CanonicalRelation``
+        instance the caller has already constructed.
         """
 
         try:
-            return cks.merge(base, branch_a, branch_b)
+            return cks.merge(base, branch_a, branch_b, resolutions=resolutions)
         except cks.MergeConflictError as exc:
             raise RuntimeMergeConflictError(
                 [

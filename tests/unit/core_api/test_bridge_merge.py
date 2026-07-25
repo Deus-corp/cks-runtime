@@ -40,8 +40,8 @@ class _MergingCore(CoreInterface):
     def diff(self, source: Any, target: Any) -> list[Any]:
         return []
 
-    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
-        return {"merged": [base, branch_a, branch_b]}
+    def merge(self, base, branch_a, branch_b, *, resolutions=None):
+        return {"merged": ["base", "a", "b"]}
 
 
 class _NonMergingCore(CoreInterface):
@@ -91,7 +91,7 @@ def test_merge_propagates_not_implemented_when_core_lacks_support():
 def test_merge_propagates_conflict_error():
 
     class ConflictingCore(_MergingCore):
-        def merge(self, base, branch_a, branch_b):
+        def merge(self, base, branch_a, branch_b, *, resolutions=None):
             raise RuntimeMergeConflictError(
                 [
                     RuntimeMergeConflict(

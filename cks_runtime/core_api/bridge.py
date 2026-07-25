@@ -179,7 +179,14 @@ class CoreBridge:
     # Three-way merge (optional capability)
     # ------------------------------------------------------------------
 
-    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
+    def merge(
+        self,
+        base: Any,
+        branch_a: Any,
+        branch_b: Any,
+        *,
+        resolutions: dict[str, Any] | None = None,
+    ) -> Any:
         """
         Delegate a three-way merge.
 
@@ -200,10 +207,10 @@ class CoreBridge:
             irreconcilable results.
         """
         if not self.available:
-            raise RuntimeError(
-                "No Runtime Core implementation is attached."
-            )
-        return self._implementation.merge(base, branch_a, branch_b)
+            raise RuntimeError("No Runtime Core implementation is attached.")
+        return self._implementation.merge(
+            base, branch_a, branch_b, resolutions=resolutions
+        )
 
     @property
     def supports_merge(self) -> bool:

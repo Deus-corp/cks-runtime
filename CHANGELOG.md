@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.13.0] - 2026-07-25
+
+### Added
+- `CoreBridge.merge()`, `MergeOperation`, and `CksCoreAdapter.merge()` now accept an optional `resolutions` keyword argument for partial three-way merges, delegating directly to `cks-core>=1.10.6`.
+- `CoreInterface.merge()` signature updated to include `resolutions` parameter, enabling Core implementations to support conflict resolution.
+
+### Fixed
+- Test fakes updated to accept the new `resolutions` parameter, ensuring existing tests pass with the new interface.
+
+---
+
 ## [1.11.0] - 2026-07-24
 
 ### Added

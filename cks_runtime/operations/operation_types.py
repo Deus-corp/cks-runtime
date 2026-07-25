@@ -156,7 +156,7 @@ class QuerySubgraphOperation(Operation):
         max_tokens: int | None = None,
         max_objects: int | None = None,
         type_weights: Any = None,
-        compact_mode: bool = False,          # <-- новое поле
+        compact_mode: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(operation_id, metadata=metadata)
@@ -371,12 +371,14 @@ class MergeOperation(Operation):
         source_session: RuntimeSession | None = None,
         base_version_id: str | None = None,
         base_structure: Any = None,
+        resolutions: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(operation_id, metadata=metadata)
         self.source_session = source_session
         self.base_version_id = base_version_id
         self.base_structure = base_structure
+        self.resolutions = resolutions
 
     def execute(
         self,
@@ -430,6 +432,7 @@ class MergeOperation(Operation):
                 base,
                 session.knowledge_structure,
                 self.source_session.knowledge_structure,
+                resolutions=self.resolutions,
             )
         except Exception as exc:
             return ExecutionResult(

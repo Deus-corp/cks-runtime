@@ -228,7 +228,7 @@ def test_merge_calls_core(monkeypatch, adapter):
     result = adapter.merge(base, branch_a, branch_b)
 
     assert result == "merged-structure"
-    merge.assert_called_once_with(base, branch_a, branch_b)
+    merge.assert_called_once_with(base, branch_a, branch_b, resolutions=None)
 
 
 def test_merge_translates_conflict_error(monkeypatch, adapter):
@@ -246,7 +246,7 @@ def test_merge_translates_conflict_error(monkeypatch, adapter):
         branch_b="b-value",
     )
 
-    def raise_conflict(base, branch_a, branch_b):
+    def raise_conflict(base, branch_a, branch_b, *, resolutions=None):
         raise cks.MergeConflictError([core_conflict])
 
     monkeypatch.setattr("cks.merge", raise_conflict)

@@ -12,8 +12,7 @@ between Runtime and any Core implementation.
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any
 
 from cks_runtime.core_api.validation_result import (
@@ -151,7 +150,14 @@ class CoreInterface(ABC):
     # Three-way merge (optional capability)
     # ------------------------------------------------------------------
 
-    def merge(self, base: Any, branch_a: Any, branch_b: Any) -> Any:
+    def merge(
+        self,
+        base: Any,
+        branch_a: Any,
+        branch_b: Any,
+        *,
+        resolutions: dict[str, Any] | None = None,
+    ) -> Any:
         """
         Three-way merge two independently evolved structures against
         their common ancestor.
@@ -168,6 +174,17 @@ class CoreInterface(ABC):
             The common ancestor (lowest common ancestor) structure.
         branch_a, branch_b
             Two structures assumed to have evolved from ``base``.
+        resolutions
+            Optional per-identity conflict resolution, keyed by
+            object id, turning this into a *partial* merge: a
+            conflicting identity with an entry here is resolved using
+            that entry instead of blocking the merge; only identities
+            still unresolved after this raise. Core implementations
+            that don't support this MAY ignore it and merge as if it
+            were empty -- callers that need it should treat a merge
+            result which still reports a resolved id as a conflict as
+            a sign the attached Core doesn't honor it, not assume
+            every Core does.
 
         Returns
         -------
@@ -178,11 +195,13 @@ class CoreInterface(ABC):
         ------
         RuntimeMergeConflictError
             ``branch_a`` and ``branch_b`` changed one or more of the
-            same identities to different, irreconcilable results. Core
-            implementations should raise this Runtime-native error
-            (translating their own conflict representation into it)
-            rather than an implementation-specific exception, so
-            callers never need to know which Core is attached.
+            same identities to different, irreconcilable results, and
+            (if ``resolutions`` was given) at least one has no entry
+            there. Core implementations should raise this
+            Runtime-native error (translating their own conflict
+            representation into it) rather than an
+            implementation-specific exception, so callers never need
+            to know which Core is attached.
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not implement merge()."

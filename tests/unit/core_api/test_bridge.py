@@ -43,8 +43,8 @@ class _FakeCore(CoreInterface):
     def diff(self, source, target):
         return []
 
-    def merge(self, base, branch_a, branch_b):
-        return {"merged": [base, branch_a, branch_b]}
+    def merge(self, base, branch_a, branch_b, *, resolutions=None):
+        return {"merged": ["base", "a", "b"]}
 
     def hash(self, knowledge_structure):
         return "fake-hash"
