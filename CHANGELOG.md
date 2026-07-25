@@ -19,6 +19,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.14.0] - 2026-07-25
+
+### Added
+- Abstract outbox lifecycle methods (`dequeue_next_outbox_task`, `complete_outbox_task`, `fail_outbox_task`) in `RuntimeStorage`, with full implementation in `SQLiteStorage`.
+- `OutboxEmbeddingWorker` now uses storage abstraction instead of direct `_conn` access, and skips starting when the backend doesn't support outbox.
+- `supports_outbox` property on storage backends.
+- Worker now computes `previous_version_id` from session history, enabling diff-based incremental embeddings and cleanup of deleted objects.
+- `delete_object_embeddings` method for removing embeddings of deleted objects.
+
+### Fixed
+- Bug #5: `OutboxEmbeddingWorker` no longer crashes in an infinite loop with `InMemoryStorage`.
+- Bug #3: `previous_version_id` is now correctly resolved, making incremental embedding path functional.
+- Bug #4: Embeddings for deleted objects are now cleaned up.
+- Retry logic: tasks now keep status `PENDING` after failure so they are actually retried.
+
+---
+
 ## [1.13.0] - 2026-07-25
 
 ### Added

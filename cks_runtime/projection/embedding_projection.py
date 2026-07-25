@@ -32,8 +32,9 @@ class EmbeddingProjection:
     def _on_version_created(self, event: VersionCreated) -> None:
         """Callback: write a task to the outbox."""
         session_id = event.session_id
-        # We don't have previous_version_id directly on the event,
-        # but we can pass None — the worker can compute the diff later.
+        # previous_version_id is left as None here; the worker now
+        # resolves it itself from session history when it processes
+        # the task, so this is intentionally left blank.
         previous_version_id = None
         new_version_id = event.version_id
 

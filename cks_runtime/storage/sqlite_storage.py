@@ -19,6 +19,7 @@ from cks.evolution import AddObject, AddRelation, RemoveObject, RemoveRelation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.storage import RuntimeStorage
 from cks_runtime.versioning.version import RuntimeVersion
+from cks_runtime.storage.storage import OutboxTask
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +377,63 @@ class SQLiteStorage(RuntimeStorage):
             (task_type, session_id, payload),
         )
         self._conn.commit()
+
+
+    def dequeue_next_outbox_task(self) -> OutboxTask | None:
+        row = self._conn.execute(
+            """
+            SELECT task_id, task_type, session_id, payload, retry_count
+            FROM cks_outbox_tasks
+            WHERE status = 'PENDING' AND next_retry_at <= datetime('now')
+            ORDER BY created_at ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        return OutboxTask(
+            task_id=row[0],
+            task_type=row[1],
+            session_id=row[2],
+            payload=row[3],
+            retry_count=row[4],
+        )
+
+    def complete_outbox_task(self, task_id: int) -> None:
+        self._conn.execute("DELETE FROM cks_outbox_tasks WHERE task_id = ?", (task_id,))
+        self._conn.commit()
+
+    def fail_outbox_task(self, task_id: int, retry_count: int, error: str, next_retry_at: str) -> None:
+        self._conn.execute(
+            """
+            UPDATE cks_outbox_tasks
+            SET status = 'PENDING',
+                retry_count = ?,
+                next_retry_at = ?,
+                last_error = ?
+            WHERE task_id = ?
+            """,
+            (retry_count, next_retry_at, error, task_id),
+        )
+        self._conn.commit()
+
+    def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO cks_object_embeddings (object_id, session_id, embedding) VALUES (?, ?, ?)",
+            (object_id, session_id, embedding),
+        )
+        self._conn.commit()
+
+    def delete_object_embeddings(self, object_id: str, session_id: str) -> None:
+        self._conn.execute(
+            "DELETE FROM cks_object_embeddings WHERE object_id = ? AND session_id = ?",
+            (object_id, session_id),
+        )
+        self._conn.commit()
+
+    @property
+    def supports_outbox(self) -> bool:
+        return True
 
 
     def search_embeddings(

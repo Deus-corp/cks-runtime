@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from dataclasses import dataclass
 
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version import RuntimeVersion
@@ -143,3 +144,42 @@ class RuntimeStorage(ABC):
         Default implementation does nothing — storage backends that
         support projections override this.
         """
+
+
+    def dequeue_next_outbox_task(self) -> OutboxTask | None:
+        """
+        Return the next pending outbox task, or None if the backend
+        doesn't support outbox operations.
+        """
+        return None
+
+    def complete_outbox_task(self, task_id: int) -> None:
+        """Mark an outbox task as completed. No-op by default."""
+        pass
+
+    def fail_outbox_task(self, task_id: int, retry_count: int, error: str, next_retry_at: str) -> None:
+        """Mark a task as failed with exponential backoff. No-op by default."""
+        pass
+
+    def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
+        """Save an embedding for an object. No-op by default."""
+        pass
+
+    def delete_object_embeddings(self, object_id: str, session_id: str) -> None:
+        """Delete embeddings for an object. No-op by default."""
+        pass
+
+    @property
+    def supports_outbox(self) -> bool:
+        """Whether this storage backend supports outbox operations."""
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class OutboxTask:
+    """A task read from the outbox table."""
+    task_id: int
+    task_type: str
+    session_id: str
+    payload: str
+    retry_count: int = 0
