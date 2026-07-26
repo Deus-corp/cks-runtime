@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.7] - 2026-07-26
+
+### Changed
+- `SQLiteStorage.search_embeddings` now returns `list[tuple[object_id, similarity_score]]` instead of a bare `list[object_id]`. `similarity_score` is the cosine similarity between the query and stored vectors (a plain dot product, since both are normalized), clamped to `[0.0, 1.0]` so a negative raw similarity doesn't leak out as a meaningless "less than least similar" value. Results are still ordered most-to-least similar. **Breaking change** for any direct caller of `search_embeddings`; `cks-mcp`'s `search_semantic` has been updated accordingly (see `cks-mcp` 1.7.14).
+
+---
+
 ## [1.17.6] - 2026-07-26
 
 ### Fixed

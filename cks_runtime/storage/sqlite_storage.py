@@ -658,10 +658,19 @@ class SQLiteStorage(RuntimeStorage):
         query_embedding: bytes,
         session_id: str,
         top_k: int = 5,
-    ) -> list[str]:
+    ) -> list[tuple[str, float]]:
         """
-        Return object_ids of the top_k closest embeddings to query_embedding
-        within the given session. Assumes both query and stored vectors are normalized.
+        Return (object_id, similarity_score) pairs for the top_k closest
+        embeddings to query_embedding within the given session, ordered
+        from most to least similar. Assumes both query and stored vectors
+        are normalized, so cosine similarity reduces to a dot product.
+
+        similarity_score is clamped to [0.0, 1.0], where 1.0 means the
+        vectors are identical and 0.0 means unrelated or opposite --
+        raw cosine similarity can go negative for normalized vectors, but
+        that distinction isn't meaningful for ranking search results, so
+        it's clamped up to a single "least similar" floor instead of
+        leaking a negative number to callers.
         """
         rows = self._conn.execute(
             "SELECT object_id, embedding FROM cks_object_embeddings WHERE session_id = ?",
@@ -690,12 +699,17 @@ class SQLiteStorage(RuntimeStorage):
                 # no correct distance to compute between vectors from
                 # different embedding spaces.
                 return None
-            # Dot product = cosine similarity for normalized vectors
-            return 1.0 - sum(a * b for a, b in zip(v, q))
+            # Cosine similarity = dot product for normalized vectors.
+            similarity = sum(a * b for a, b in zip(v, q))
+            return max(0.0, min(1.0, similarity))
 
         scored = sorted(
-            (s, oid)
-            for oid, emb in ((r[0], r[1]) for r in rows)
-            if (s := score(emb)) is not None
+            (
+                (oid, s)
+                for oid, emb in ((r[0], r[1]) for r in rows)
+                if (s := score(emb)) is not None
+            ),
+            key=lambda pair: pair[1],
+            reverse=True,
         )
-        return [oid for _, oid in scored[:top_k]]
+        return scored[:top_k]
