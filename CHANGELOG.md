@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.6] - 2026-07-26
+
+### Fixed
+- `HuggingFaceEmbeddingClient` now detects embedding dimension dynamically from the API response instead of hardcoding 384. Supports `CKS_EMBEDDING_MODEL` and `CKS_EMBEDDING_DIMENSION` environment variables for configuration.
+
+---
+
 ## [1.17.5] - 2026-07-26
 
 ### Fixed

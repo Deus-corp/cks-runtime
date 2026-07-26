@@ -103,21 +103,40 @@ class OpenAIEmbeddingClient(EmbeddingClient):
 
 
 class HuggingFaceEmbeddingClient(EmbeddingClient):
-    """Free Hugging Face Inference API client."""
+    """Free Hugging Face Inference API client.
 
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> None:
+    Model can be overridden via the CKS_EMBEDDING_MODEL env var.
+    Dimension is detected from the first API response (lazy), or can
+    be set explicitly via CKS_EMBEDDING_DIMENSION.
+    """
+
+    def __init__(self, model_name: str | None = None) -> None:
         import os
-        self._model_name = model_name
+        self._model_name = (
+            model_name
+            or os.environ.get("CKS_EMBEDDING_MODEL")
+            or "sentence-transformers/all-MiniLM-L6-v2"
+        )
         self._token = os.environ.get("HF_TOKEN")
         if not self._token:
             raise ValueError("HF_TOKEN environment variable is not set")
-        self._dimension = 384
+        # Dimension is lazy-detected from the first embedding response,
+        # unless explicitly set via env var.
+        explicit_dim = os.environ.get("CKS_EMBEDDING_DIMENSION")
+        if explicit_dim is not None:
+            self._dimension = int(explicit_dim)
+        else:
+            self._dimension: int | None = None
 
     @property
     def dimension(self) -> int:
+        if self._dimension is None:
+            # Probe with a single word to detect dimension
+            probe = self.embed_batch(["probe"], normalize=False)[0]
+            self._dimension = len(probe) // 4  # 4 bytes per float
         return self._dimension
 
-    def embed_batch(self, texts: list[str], *, normalize: bool = False) -> list[bytes]:
+    def embed_batch(self, texts: list[str], *, normalize: bool = False, is_query: bool = False) -> list[bytes]:
         import requests
 
         api_url = f"https://router.huggingface.co/hf-inference/models/{self._model_name}/pipeline/feature-extraction"
@@ -127,7 +146,6 @@ class HuggingFaceEmbeddingClient(EmbeddingClient):
         outputs = response.json()
 
         if isinstance(outputs, list) and len(outputs) > 0 and isinstance(outputs[0], float):
-            # Single text returned a flat list of floats
             outputs = [outputs]
 
         result = []
