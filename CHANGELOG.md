@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.2] - 2026-07-26
+
+### Fixed
+- `OperationExecutor.execute()` now accepts `record_metrics=False` to suppress double-counting of probe-only executions in `get_metrics`. Probe calls from `evolve_knowledge` and `merge_branch` are now unmetered.
+- Resolved PyPI upload conflict with v1.17.0.
+
+---
+
 ## [1.17.1] - 2026-07-26
 
 ### Fixed
