@@ -79,8 +79,10 @@ class OutboxEmbeddingWorker:
 
         try:
             if task.task_type == "projection":
-                prev_version_id = task.payload.get("previous_version_id")
-                new_version_id = task.payload.get("new_version_id")
+                import json
+                payload = json.loads(task.payload)
+                prev_version_id = payload.get("previous_version_id")
+                new_version_id = payload.get("new_version_id")
                 self._execute_task(task.session_id, prev_version_id, new_version_id)
             else:
                 raise ValueError(f"Unknown task type: {task.task_type}")

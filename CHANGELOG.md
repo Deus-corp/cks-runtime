@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.5] - 2026-07-26
+
+### Fixed
+- `OutboxEmbeddingWorker` now correctly parses JSON payload when processing projection tasks, fixing a crash that prevented any embeddings from being generated.
+
+---
+
 ## [1.17.4] - 2026-07-26
 
 ### Fixed
