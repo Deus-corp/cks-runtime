@@ -64,7 +64,7 @@ from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.metrics.collector import MetricsCollector
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
 from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
-from cks_runtime.embedding.client import EmbeddingClient
+from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
 
 
 class Runtime:
@@ -104,6 +104,7 @@ class Runtime:
         "_metrics",
         "_embedding_projection",
         "_outbox_worker",
+        "_embedding_client",
     )
 
     def __init__(
@@ -160,6 +161,19 @@ class Runtime:
         self._events = EventBus()
         self._metrics = MetricsCollector()
 
+        # Resolved once, here, and shared verbatim between the outbox
+        # worker (which embeds and indexes objects) and whatever reads
+        # Runtime.embedding_client to embed a query (e.g. cks-mcp's
+        # search_semantic tool). Previously this fallback lived only
+        # inside OutboxEmbeddingWorker's own __init__, and the client
+        # instance itself was never stored on Runtime -- so a caller
+        # embedding a query had no way to reach the same client used
+        # to index, and would silently encode the query with a
+        # different (or non-semantic Stub) embedding space, making
+        # every similarity search meaningless without ever raising an
+        # error.
+        self._embedding_client = embedding_client or StubEmbeddingClient()
+
         # Projections
         self._embedding_projection = EmbeddingProjection(
             event_bus=self._events,
@@ -169,7 +183,7 @@ class Runtime:
         self._outbox_worker = OutboxEmbeddingWorker(
             storage=self._storage,
             core_bridge=self._core_bridge,
-            embedding_client=embedding_client,
+            embedding_client=self._embedding_client,
         )
         self._outbox_worker.start()
 
@@ -299,6 +313,18 @@ class Runtime:
     def metrics(self) -> MetricsCollector:
         """Runtime metrics collector."""
         return self._metrics
+
+
+    @property
+    def embedding_client(self) -> EmbeddingClient:
+        """
+        The embedding client used to index objects (via the outbox
+        worker). Callers that need to embed a query for similarity
+        search -- e.g. cks-mcp's search_semantic tool -- must use this
+        same instance, not a freshly-constructed client, or the query
+        vector will not be comparable to what was actually indexed.
+        """
+        return self._embedding_client
 
 
     #

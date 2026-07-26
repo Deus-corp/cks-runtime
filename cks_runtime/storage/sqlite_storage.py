@@ -676,11 +676,26 @@ class SQLiteStorage(RuntimeStorage):
         q = array.array("f")
         q.frombytes(query_embedding)
 
-        def score(emb: bytes) -> float:
+        def score(emb: bytes) -> float | None:
             v = array.array("f")
             v.frombytes(emb)
+            if len(v) != len(q):
+                # A dimension mismatch means this row was embedded by
+                # a different model/provider than the query (e.g. the
+                # embedding client was swapped after this object was
+                # indexed). zip(v, q) would otherwise silently
+                # truncate to the shorter vector and return a
+                # meaningless dot product instead of an error --
+                # excluding the row is the safe choice, since there is
+                # no correct distance to compute between vectors from
+                # different embedding spaces.
+                return None
             # Dot product = cosine similarity for normalized vectors
             return 1.0 - sum(a * b for a, b in zip(v, q))
 
-        scored = sorted(((score(r[1]), r[0]) for r in rows))
+        scored = sorted(
+            (s, oid)
+            for oid, emb in ((r[0], r[1]) for r in rows)
+            if (s := score(emb)) is not None
+        )
         return [oid for _, oid in scored[:top_k]]

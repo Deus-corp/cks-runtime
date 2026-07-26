@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.4] - 2026-07-26
+
+### Fixed
+- `SQLiteStorage.search_embeddings` now safely skips stored embeddings whose dimension doesn't match the query vector, instead of silently computing garbage similarity scores.
+- `Runtime` now properly stores and exposes the configured `embedding_client` via a public property, ensuring query-time and index-time use the same client instance.
+
+---
+
 ## [1.17.3] - 2026-07-26
 
 ### Fixed
