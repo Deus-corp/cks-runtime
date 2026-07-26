@@ -322,7 +322,14 @@ def test_record_operations_then_list_operations_round_trips(storage):
     ]
     storage.record_operations("s1", "v1", ops)
 
-    assert storage.list_operations("s1") == ops
+    expected = [
+        RuntimeFieldOperation(object_id="obj-1", op_type="remove_object", version_id="v1"),
+        RuntimeFieldOperation(object_id="obj-2", op_type="add_object", version_id="v1"),
+        RuntimeFieldOperation(
+            object_id="obj-3", op_type="set_field", field_key="color", field_value="blue", version_id="v1"
+        ),
+    ]
+    assert storage.list_operations("s1") == expected
 
 
 def test_record_operations_preserves_none_field_value_as_a_deletion():
@@ -338,7 +345,10 @@ def test_record_operations_preserves_none_field_value_as_a_deletion():
     )
     storage.record_operations("s1", "v1", [op])
 
-    assert storage.list_operations("s1") == [op]
+    expected = RuntimeFieldOperation(
+        object_id="obj-1", op_type="set_field", field_key="color", field_value=None, version_id="v1"
+    )
+    assert storage.list_operations("s1") == [expected]
 
 
 def test_list_operations_filters_by_object_id(storage):
@@ -352,7 +362,7 @@ def test_list_operations_filters_by_object_id(storage):
     )
 
     assert storage.list_operations("s1", object_id="obj-1") == [
-        RuntimeFieldOperation(object_id="obj-1", op_type="add_object")
+        RuntimeFieldOperation(object_id="obj-1", op_type="add_object", version_id="v1")
     ]
 
 
@@ -367,7 +377,7 @@ def test_record_operations_with_empty_list_is_a_no_op(storage):
 
 def test_record_operations_survives_one_transient_lock(storage):
     storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
-    ops = [RuntimeFieldOperation(object_id="obj-1", op_type="add_object")]
+    ops = [RuntimeFieldOperation(object_id="obj-1", op_type="add_object", version_id="v1")]
     storage.record_operations("s1", "v1", ops)
     assert storage._conn.calls >= 2
     assert storage.list_operations("s1") == ops

@@ -214,6 +214,40 @@ class CoreBridge:
         )
 
     # ------------------------------------------------------------------
+    # Field-level merge synthesis (optional capability)
+    # ------------------------------------------------------------------
+
+    def synthesize_merge(self, base_object: Any, operations: list[Any]) -> Any:
+        """
+        Delegate field-level merge synthesis.
+
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached at all.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            field-level merge synthesis. Propagated as-is, matching
+            ``field_diff()``'s contract.
+        """
+        if not self.available:
+            raise RuntimeError("No Runtime Core implementation is attached.")
+        return self._implementation.synthesize_merge(base_object, operations)
+
+    @property
+    def supports_synthesize_merge(self) -> bool:
+        """
+        Whether the attached Core implementation overrides
+        ``synthesize_merge()``. Mirrors ``supports_field_diff``.
+        """
+        if not self.available:
+            return False
+        return (
+            type(self._implementation).synthesize_merge
+            is not CoreInterface.synthesize_merge
+        )
+
+    # ------------------------------------------------------------------
     # Three-way merge (optional capability)
     # ------------------------------------------------------------------
 

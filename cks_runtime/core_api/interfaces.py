@@ -188,6 +188,34 @@ class CoreInterface(ABC):
         )
 
     # ------------------------------------------------------------------
+    # Field-level merge synthesis (optional capability)
+    # ------------------------------------------------------------------
+
+    def synthesize_merge(self, base_object: Any, operations: list[Any]) -> Any:
+        """
+        Apply a set of non-conflicting field-level operations
+        (``RuntimeFieldOperation`` instances, all ``set_field``/
+        ``delete_field``) on top of ``base_object``, producing the
+        Core-native object both branches' changes converge to.
+
+        The write-side counterpart to ``field_diff()`` -- tied to the
+        same optional capability, since a Core that cannot report
+        which fields changed has no basis for reconstructing them
+        either. A Core implementation that overrides ``field_diff()``
+        should also override this method.
+
+        Raises
+        ------
+        NotImplementedError
+            The attached Core does not support field-level merge
+            synthesis. Propagated as-is, matching ``field_diff()``'s
+            contract.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement synthesize_merge()."
+        )
+
+    # ------------------------------------------------------------------
     # Three-way merge (optional capability)
     # ------------------------------------------------------------------
 

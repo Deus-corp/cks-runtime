@@ -621,14 +621,14 @@ class SQLiteStorage(RuntimeStorage):
         """
         if object_id is not None:
             query = (
-                "SELECT object_id, op_type, field_key, field_value "
+                "SELECT object_id, op_type, field_key, field_value, version_id "
                 "FROM cks_operation_log WHERE session_id = ? AND object_id = ? "
                 "ORDER BY op_id"
             )
             params: tuple = (session_id, object_id)
         else:
             query = (
-                "SELECT object_id, op_type, field_key, field_value "
+                "SELECT object_id, op_type, field_key, field_value, version_id "
                 "FROM cks_operation_log WHERE session_id = ? ORDER BY op_id"
             )
             params = (session_id,)
@@ -639,7 +639,11 @@ class SQLiteStorage(RuntimeStorage):
                 object_id=row[0],
                 op_type=row[1],
                 field_key=row[2],
+                # delete_field never carries a serialized value (see
+                # record_operations); row[3] is NULL for it same as
+                # for add/remove_*, so this stays a plain null check.
                 field_value=json.loads(row[3]) if row[3] is not None else None,
+                version_id=row[4],
             )
             for row in rows
         ]

@@ -152,6 +152,16 @@ class OperationExecutor:
     Persistence,
     Versions
     remain owned elsewhere.
+
+    ``storage`` is the one exception, and deliberately narrow: it is
+    exposed read-only, solely so ``MergeOperation`` can look up the
+    operation log (ADR-007) for field-level conflict resolution when
+    run directly via ``executor.execute()`` -- e.g. cks-mcp's
+    ``merge_branch`` probes a merge this way, outside any transaction,
+    specifically to get a conflict result without touching persisted
+    state (see ``MergeOperation``'s docstring). The Executor still
+    never writes through it; ``ExecutionPipeline`` continues to own
+    every ``save_*``/``record_operations`` call.
     """
 
     def __init__(
@@ -159,10 +169,12 @@ class OperationExecutor:
         *,
         core_adapter: CoreBridge,
         metrics: Any = None,
+        storage: Any = None,
     ) -> None:
 
         self._core_adapter = core_adapter
         self._metrics = metrics
+        self._storage = storage
 
     @property
     def core(
@@ -173,6 +185,17 @@ class OperationExecutor:
         """
 
         return self._core_adapter
+
+    @property
+    def storage(
+        self,
+    ) -> Any:
+        """
+        Runtime Storage, read-only (see class docstring). ``None`` if
+        this Executor wasn't constructed with one.
+        """
+
+        return self._storage
 
     def execute(
         self,

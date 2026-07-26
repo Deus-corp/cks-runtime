@@ -19,6 +19,25 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.0] - 2026-07-26
+
+### Added
+- **Field-level auto-merge for disjoint edits (ADR-007 Part 2).**  
+  - `MergeOperation` now automatically resolves conflicts when both branches only touched disjoint `structure` keys on the same object, using the operation log and `synthesize_merge`.  
+  - `RuntimeFieldOperation.version_id` — identifies which committed version each logged operation belongs to, enabling scoped queries since a merge base.  
+  - `CoreInterface.synthesize_merge()` / `CoreBridge.synthesize_merge()` — write-side counterpart to `field_diff`, constructing a merged object from non-conflicting field-level operations.  
+  - `CksCoreAdapter.synthesize_merge()` — implements synthesis via `UpdateObject(mode="replace")` with explicit delete/set handling.  
+  - `OperationExecutor` now exposes `storage` read-only, allowing `MergeOperation` to look up the operation log during merge probes.  
+  - New tests for `synthesize_merge`, round-trip operation log with `version_id`, and field-level merge execution.
+
+### Changed
+- `RuntimeFieldOperation` now distinguishes `delete_field` from `set_field` with `None` value — resolving the ambiguity between "key deleted" and "key explicitly set to None".  
+- `CksCoreAdapter.field_diff()` emits `delete_field` for removed keys instead of `set_field` with `None`.  
+- `SQLiteStorage.list_operations()` returns `version_id` for every logged operation.  
+- Updated integration test for `ExecutionPipeline` to use real `CksCoreAdapter` and `KnowledgeStructure`.
+
+---
+
 ## [1.16.0] - 2026-07-26
 
 ### Added

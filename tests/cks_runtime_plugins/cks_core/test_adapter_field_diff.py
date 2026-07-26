@@ -76,7 +76,7 @@ def test_changed_field_reports_set_field_only_for_the_changed_key():
     ]
 
 
-def test_removed_field_reports_set_field_with_none_value():
+def test_removed_field_reports_delete_field():
     source = _structure(
         '{"identity": {"id": "obj-1", "type": "T", "name": "n"}, '
         '"structure": {"color": "red"}}'
@@ -87,7 +87,7 @@ def test_removed_field_reports_set_field_with_none_value():
 
     assert ADAPTER.field_diff(source, target) == [
         RuntimeFieldOperation(
-            object_id="obj-1", op_type="set_field", field_key="color", field_value=None
+            object_id="obj-1", op_type="delete_field", field_key="color"
         )
     ]
 

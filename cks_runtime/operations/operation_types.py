@@ -10,6 +10,8 @@ from cks_runtime.execution.operation_executor import (
     OperationStatus,
 )
 from cks_runtime.session.session import RuntimeSession
+from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
+from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 
 
 class ValidateOperation(Operation):
@@ -395,6 +397,8 @@ class MergeOperation(Operation):
                 ),
             )
 
+        base_version_id: str | None = None
+
         if self.base_structure is not None:
             base = self.base_structure
         else:
@@ -434,6 +438,35 @@ class MergeOperation(Operation):
                 self.source_session.knowledge_structure,
                 resolutions=self.resolutions,
             )
+        except RuntimeMergeConflictError as exc:
+            # ADR-007 fast path: before surfacing the conflict, check
+            # whether the operation log shows both branches only
+            # touched disjoint structure keys on the conflicting
+            # identities -- if so, synthesize resolutions for those
+            # and retry once. Explicit self.resolutions still wins
+            # over an auto-computed one for the same id.
+            auto = self._field_level_resolutions(
+                exc.conflicts, session, base_version_id, executor
+            )
+            if not auto:
+                return ExecutionResult(
+                    operation_id=self.operation_id,
+                    status=OperationStatus.FAILED,
+                    error=exc,
+                )
+            try:
+                merged = executor.core.merge(
+                    base,
+                    session.knowledge_structure,
+                    self.source_session.knowledge_structure,
+                    resolutions={**auto, **(self.resolutions or {})},
+                )
+            except Exception as exc2:
+                return ExecutionResult(
+                    operation_id=self.operation_id,
+                    status=OperationStatus.FAILED,
+                    error=exc2,
+                )
         except Exception as exc:
             return ExecutionResult(
                 operation_id=self.operation_id,
@@ -446,3 +479,70 @@ class MergeOperation(Operation):
             status=OperationStatus.COMPLETED,
             payload=merged,
         )
+
+    def _field_level_resolutions(
+        self,
+        conflicts: list[Any],
+        session: RuntimeSession,
+        base_version_id: str | None,
+        executor,
+    ) -> dict[str, Any]:
+        storage = getattr(executor, "storage", None)
+        core = executor.core
+
+        if (
+            base_version_id is None
+            or storage is None
+            or not storage.supports_operation_log
+            or not core.supports_synthesize_merge
+        ):
+            return {}
+
+        def versions_since(rt_session: RuntimeSession) -> set[str] | None:
+            version_ids = [v.version_id for v in rt_session.version_history]
+            if base_version_id in version_ids:
+                return set(version_ids[version_ids.index(base_version_id) + 1 :])
+            if rt_session.parent_version_id == base_version_id:
+                return set(version_ids)
+            return None
+
+        a_versions = versions_since(session)
+        b_versions = versions_since(self.source_session)
+        if a_versions is None or b_versions is None:
+            return {}
+
+        resolutions: dict[str, Any] = {}
+        for conflict in conflicts:
+            oid = conflict.object_id
+            if conflict.base is None:
+                continue
+
+            a_ops = [
+                op
+                for op in storage.list_operations(session.session_id, object_id=oid)
+                if op.version_id in a_versions
+            ]
+            b_ops = [
+                op
+                for op in storage.list_operations(
+                    self.source_session.session_id, object_id=oid
+                )
+                if op.version_id in b_versions
+            ]
+
+            if not a_ops and not b_ops:
+                continue
+            if any(
+                op.op_type not in ("set_field", "delete_field")
+                for op in a_ops + b_ops
+            ):
+                continue
+            if {op.field_key for op in a_ops} & {op.field_key for op in b_ops}:
+                continue
+
+            try:
+                resolutions[oid] = core.synthesize_merge(conflict.base, a_ops + b_ops)
+            except Exception:
+                continue
+
+        return resolutions

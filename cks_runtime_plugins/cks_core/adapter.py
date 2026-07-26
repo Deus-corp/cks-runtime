@@ -38,6 +38,11 @@ _SEVERITY_MAP = {
     CoreSeverity.ERROR: RuntimeSeverity.ERROR,
 }
 
+# Sentinel for "this structure key is absent", distinct from any
+# real value a key could hold (including None). Used by field_diff()
+# to tell a deleted key apart from a key explicitly set to None.
+_MISSING = object()
+
 
 def _translate_diagnostic(diagnostic: Any) -> RuntimeDiagnostic:
     """
@@ -226,17 +231,123 @@ class CksCoreAdapter(CoreInterface):
                 continue
 
             for key in sorted(set(source_structure) | set(target_structure)):
-                if source_structure.get(key) != target_structure.get(key):
+                # A sentinel, not dict.get(key)'s implicit None
+                # default: a key can legitimately hold the value
+                # None, and that must stay distinguishable from the
+                # key being absent altogether. Using None as the
+                # "missing" marker here would make an added-with-null
+                # key look unchanged (None == None) and a
+                # deleted-key look like "set to None" -- exactly the
+                # ambiguity delete_field exists to avoid.
+                source_val = source_structure.get(key, _MISSING)
+                target_val = target_structure.get(key, _MISSING)
+
+                if target_val is _MISSING:
+                    # Present in source, gone in target: deleted,
+                    # regardless of what value it used to hold.
+                    operations.append(
+                        RuntimeFieldOperation(
+                            object_id=oid, op_type="delete_field", field_key=key
+                        )
+                    )
+                    continue
+
+                if source_val != target_val:
+                    # Covers both a changed value and a key that's
+                    # new in target (source_val is _MISSING), field_value
+                    # is target's real value either way -- including
+                    # a literal None for a newly-added null field.
                     operations.append(
                         RuntimeFieldOperation(
                             object_id=oid,
                             op_type="set_field",
                             field_key=key,
-                            field_value=target_structure.get(key),
+                            field_value=target_val,
                         )
                     )
 
         return operations
+
+    def synthesize_merge(
+        self, base_object: Any, operations: list[RuntimeFieldOperation]
+    ) -> Any:
+        """
+        Build a merged KnowledgeObject by applying a set of
+        non-conflicting field-level operations on top of
+        ``base_object``.
+
+        This is the write-side counterpart to ``field_diff()``: given
+        an object as it existed at the merge base, and a combined
+        list of ``set_field``/``delete_field`` operations logged by
+        two branches for that object_id (already checked by the
+        caller -- typically ``MergeOperation`` -- to touch disjoint
+        ``field_key``s), reconstructs what the object should look
+        like with both branches' changes applied together.
+
+        Deliberately does not go through ``UpdateObject(mode="merge")``
+        directly: that mode treats any patch value of ``None`` as
+        "delete this key" (see its docstring), which would silently
+        misapply a ``set_field`` operation whose real field_value is
+        a literal ``None`` -- exactly the ambiguity ``delete_field``
+        exists to keep separate from ``set_field``. Instead, the new
+        ``structure`` dict is built by hand, where ``set_field`` and
+        ``delete_field`` are unambiguous, and committed via
+        ``UpdateObject(mode="replace")``, which takes it verbatim.
+
+        Only plain objects are supported: relations have no
+        granular-update operator in cks-core (``UpdateObject`` itself
+        rejects a ``CanonicalRelation`` target), and ``field_diff()``
+        never emits ``set_field``/``delete_field`` for one, so a
+        conflict on a relation should never reach this method -- the
+        caller's own op_type check already excludes it.
+
+        Raises
+        ------
+        ValueError
+            ``base_object`` is ``None`` (there is nothing to apply
+            the patch to -- the caller should not attempt a
+            field-level merge for an identity absent from the base),
+            or ``operations`` contains an object_id other than
+            ``base_object``'s, or an op_type other than
+            ``set_field``/``delete_field``.
+        """
+        from cks.core import KnowledgeStructure
+        from cks.evolution import UpdateObject
+
+        if base_object is None:
+            raise ValueError(
+                "synthesize_merge requires a base_object; an identity "
+                "absent from the merge base has no field-level patch "
+                "to apply -- it was added independently by both "
+                "branches, which field_diff() reports as add_object, "
+                "not set_field/delete_field."
+            )
+
+        object_id = base_object.identity.id
+        new_structure = dict(base_object.structure)
+
+        for op in operations:
+            if op.object_id != object_id:
+                raise ValueError(
+                    f"synthesize_merge got an operation for "
+                    f"'{op.object_id}' while merging '{object_id}'."
+                )
+            if op.op_type == "delete_field":
+                new_structure.pop(op.field_key, None)
+            elif op.op_type == "set_field":
+                new_structure[op.field_key] = op.field_value
+            else:
+                raise ValueError(
+                    f"synthesize_merge only supports set_field/"
+                    f"delete_field operations, got {op.op_type!r} "
+                    f"for '{object_id}'."
+                )
+
+        wrapper = KnowledgeStructure([base_object])
+        updated = UpdateObject(object_id, new_structure, mode="replace").apply(
+            wrapper
+        )
+        return updated.get(object_id)
 
     def merge(
         self,

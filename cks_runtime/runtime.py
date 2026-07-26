@@ -174,7 +174,9 @@ class Runtime:
         self._outbox_worker.start()
 
         # Сначала создаём executor, потому что dispatcher зависит от него
-        self._executor = OperationExecutor(core_adapter=self._core_bridge, metrics=self._metrics)
+        self._executor = OperationExecutor(
+            core_adapter=self._core_bridge, metrics=self._metrics, storage=self._storage
+        )
 
         self._registry = OperationRegistry()
         self._dispatcher = Dispatcher(
