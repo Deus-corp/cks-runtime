@@ -69,3 +69,17 @@ def test_storage_returns_deep_copy():
     restored.knowledge_structure["value"] = 42
     restored_again = storage.load_session(session.session_id)
     assert restored_again.knowledge_structure["value"] == 1
+
+
+def test_operation_log_is_unsupported_by_default():
+    """
+    InMemoryStorage doesn't override record_operations/
+    supports_operation_log, so it inherits RuntimeStorage's no-op
+    default (ADR-007) -- recording must not raise, and the capability
+    flag must honestly report it isn't persisted.
+    """
+    storage = InMemoryStorage()
+
+    storage.record_operations("s1", "v1", [])  # must not raise
+
+    assert storage.supports_operation_log is False

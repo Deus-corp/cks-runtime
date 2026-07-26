@@ -147,6 +147,47 @@ class CoreInterface(ABC):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
+    # Field-level structural diff (optional capability)
+    # ------------------------------------------------------------------
+
+    def field_diff(self, source: Any, target: Any) -> list[Any]:
+        """
+        Compute a field-granular structural diff between two
+        Core-native structures.
+
+        This is an *optional* capability, like ``merge()``/
+        ``query_subgraph()``/``hash()``: Runtime must not assume every
+        plugged-in Core can report which fields changed inside a
+        modified identity. ``diff()`` above is the only diff every
+        Core must support, and it is free to report any content
+        change as a whole-object remove+add -- exactly what cks-core's
+        own ``diff()`` does, so that ``cks.evolution.compose`` never
+        has to reason about partial objects. Core implementations
+        that can do better should override this method.
+
+        Returns
+        -------
+        list[cks_runtime.core_api.field_operation.RuntimeFieldOperation]
+            Field-granular changes. Unlike ``merge()``/
+            ``query_subgraph()``, whose results Runtime treats as
+            fully Core-opaque, this crosses the boundary as the one
+            Runtime-native shape (mirroring ``RuntimeMergeConflict``):
+            Runtime's operation log (ADR-007) needs a stable shape to
+            persist, regardless of which Core produced the diff.
+
+        Raises
+        ------
+        NotImplementedError
+            The attached Core does not support field-level diffing.
+            Propagated as-is, matching ``hash()``/``merge()``'s
+            contract, so callers can distinguish "not supported" from
+            "supported but nothing changed" (an empty list).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement field_diff()."
+        )
+
+    # ------------------------------------------------------------------
     # Three-way merge (optional capability)
     # ------------------------------------------------------------------
 

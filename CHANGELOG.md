@@ -19,6 +19,25 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.16.0] - 2026-07-26
+
+### Added
+- **Operation log for field-level change tracking (ADR-007 Part 1).**  
+  - New `RuntimeFieldOperation` dataclass — a stable, Runtime-native shape for field-granular diffs.  
+  - `CoreInterface.field_diff()` — optional Core capability for field-level structural diffing.  
+  - `CoreBridge.field_diff()` and `supports_field_diff` — delegation and introspection for the new capability.  
+  - `CksCoreAdapter.field_diff()` — computes field-granular diffs between two KnowledgeStructures, reporting `set_field` for modified scalar keys and `add_object`/`remove_object`/`add_relation`/`remove_relation` for identity changes.  
+  - `RuntimeStorage.record_operations()` and `supports_operation_log` — optional storage capability for persisting operation logs.  
+  - `SQLiteStorage` now maintains a `cks_operation_log` table, implements `record_operations` and `list_operations` (wrapped in `_retry_on_locked`).  
+  - `ExecutionPipeline._persist` now calls `_record_operations` after `save_version`/`save_session`, logging field-level changes if both Core and storage support it.  
+
+- Tests: 9 new tests for `CksCoreAdapter.field_diff()`, operation-log tests for `SQLiteStorage`, and coverage for the base `RuntimeStorage` defaults.
+
+### Changed
+- Updated `ADR-007` design document to reflect the implemented `field_diff` capability and the decision to use `session_id` as the natural `node_id` for future vector clocks.
+
+---
+
 ## [1.15.1] - 2026-07-25
 
 ### Added

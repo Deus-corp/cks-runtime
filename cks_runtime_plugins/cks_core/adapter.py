@@ -18,6 +18,7 @@ from cks.evolution import compose
 from cks.interface import inspect as cks_inspect
 
 from cks_runtime.core_api.interfaces import CoreInterface
+from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.core_api.merge_conflict import (
     RuntimeMergeConflict,
     RuntimeMergeConflictError,
@@ -155,6 +156,87 @@ class CksCoreAdapter(CoreInterface):
 
     def diff(self, source: Any, target: Any) -> list[Any]:
         return source.diff(target)
+
+    def field_diff(self, source: Any, target: Any) -> list[RuntimeFieldOperation]:
+        """
+        Field-granular diff between two KnowledgeStructures.
+
+        Unlike ``diff()`` (``source.diff(target)``), which reports any
+        content change to an existing identity as a
+        RemoveObject+AddObject pair -- deliberately discarding which
+        fields actually changed, so that ``cks.evolution.compose``
+        never has to reason about partially-applied objects -- this
+        walks every identity present in both structures and reports
+        exactly which ``structure`` keys differ. This is what lets
+        Runtime's operation log (ADR-007) tell "two branches edited
+        different fields of the same object" apart from "two branches
+        edited the same field", which a whole-object diff cannot.
+
+        Relations have no granular update in cks-core (``UpdateObject``
+        explicitly rejects a ``CanonicalRelation`` target: see its
+        docstring), so a changed relation is still reported as a
+        remove+add pair here, exactly as ``diff()`` would report it --
+        there is no narrower operation to name.
+        """
+        from cks.core import CanonicalRelation
+
+        source_ids = {obj.identity.id for obj in source.objects}
+        target_ids = {obj.identity.id for obj in target.objects}
+
+        added_ids = target_ids - source_ids
+        removed_ids = source_ids - target_ids
+        common_ids = source_ids & target_ids
+
+        operations: list[RuntimeFieldOperation] = []
+
+        for oid in sorted(removed_ids):
+            op_type = (
+                "remove_relation"
+                if isinstance(source.get(oid), CanonicalRelation)
+                else "remove_object"
+            )
+            operations.append(RuntimeFieldOperation(object_id=oid, op_type=op_type))
+
+        for oid in sorted(added_ids):
+            op_type = (
+                "add_relation"
+                if isinstance(target.get(oid), CanonicalRelation)
+                else "add_object"
+            )
+            operations.append(RuntimeFieldOperation(object_id=oid, op_type=op_type))
+
+        for oid in sorted(common_ids):
+            source_obj = source.get(oid)
+            target_obj = target.get(oid)
+            source_structure = dict(source_obj.structure)
+            target_structure = dict(target_obj.structure)
+
+            if source_structure == target_structure:
+                continue  # untouched -- carried over unchanged
+
+            if isinstance(source_obj, CanonicalRelation) or isinstance(
+                target_obj, CanonicalRelation
+            ):
+                operations.append(
+                    RuntimeFieldOperation(object_id=oid, op_type="remove_relation")
+                )
+                operations.append(
+                    RuntimeFieldOperation(object_id=oid, op_type="add_relation")
+                )
+                continue
+
+            for key in sorted(set(source_structure) | set(target_structure)):
+                if source_structure.get(key) != target_structure.get(key):
+                    operations.append(
+                        RuntimeFieldOperation(
+                            object_id=oid,
+                            op_type="set_field",
+                            field_key=key,
+                            field_value=target_structure.get(key),
+                        )
+                    )
+
+        return operations
 
     def merge(
         self,

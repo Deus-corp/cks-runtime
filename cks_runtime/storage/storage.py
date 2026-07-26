@@ -13,6 +13,7 @@ from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 
+from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version import RuntimeVersion
 
@@ -215,6 +216,29 @@ class RuntimeStorage(ABC):
     @property
     def supports_outbox(self) -> bool:
         """Whether this storage backend supports outbox operations."""
+        return False
+
+    def record_operations(
+        self,
+        session_id: str,
+        version_id: str,
+        operations: list[RuntimeFieldOperation],
+    ) -> None:
+        """
+        Append field-level operations for a committed version to the
+        operation log (if supported). No-op by default -- storage
+        backends that support it override this. See ADR-007: this is
+        an optional accelerant for future merge fast-paths, not part
+        of the observable Version history, so its absence never
+        affects commit correctness. Callers must not assume this
+        method's mere presence means anything is actually persisted;
+        check ``supports_operation_log`` first.
+        """
+        pass
+
+    @property
+    def supports_operation_log(self) -> bool:
+        """Whether this storage backend supports the operation log."""
         return False
 
 

@@ -19,6 +19,7 @@ from cks_runtime.events.runtime_event import (
     VersionCreated,
 )
 from cks_runtime.operations.operation_types import EvolveOperation
+from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 
 class ValidCore(CoreInterface):
@@ -314,3 +315,47 @@ def test_failed_operation_result_is_recorded_on_transaction():
     assert failed_result.diagnostics[0].message == (
         "Relation 'rel-x' references unknown object 'nonexistent-source'."
     )
+
+
+def test_commit_records_operations_when_core_and_storage_support_it():
+    """
+    Integration test for ADR-007 Part 1: when both the Core and the
+    storage backend support field-level diffing and operation logging,
+    a commit that mutates the Knowledge Structure must leave a trace
+    in the operation log.
+    """
+    from cks_runtime.storage.sqlite_storage import SQLiteStorage
+    from cks_runtime.operations.operation_types import EvolveOperation
+    from cks.evolution import AddObject
+    from cks.core import KnowledgeObject, ObjectIdentity
+    import cks
+
+    storage = SQLiteStorage(":memory:")
+    runtime = Runtime(core=CksCoreAdapter(), storage=storage)
+
+    # Build a real KnowledgeStructure
+    ks = cks.parse(
+        '{"objects":[{"identity":{"id":"obj-1","type":"Test","name":"t"},"structure":{"status":"draft"}}]}'
+    )
+    session = runtime.create_session(ks)
+
+    # Evolve: add a new object, which changes the structure
+    tx = runtime.begin_transaction(session)
+    new_obj = KnowledgeObject(
+        identity=ObjectIdentity(id="obj-2", type="Test", name="t2"),
+        structure={"status": "new"},
+    )
+    tx.add_operation(
+        EvolveOperation(
+            "evolve",
+            knowledge_structure=session.knowledge_structure,
+            evolution=[AddObject(new_obj)],
+        )
+    )
+    runtime.commit_transaction(tx)
+
+    # Verify the operation log was populated.
+    logged = storage.list_operations(session.session_id)
+    # Должна быть как минимум одна операция: add_object для obj-2
+    assert len(logged) >= 1
+    assert any(op.object_id == "obj-2" and op.op_type == "add_object" for op in logged)

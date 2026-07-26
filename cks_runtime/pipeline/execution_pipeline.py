@@ -72,7 +72,12 @@ class ExecutionPipeline:
             self._quality_gate(validation, transaction)
 
         version = self._create_version(transaction, initial_state)
-        self._persist(version, transaction, expected_version_id=expected_version_id)
+        self._persist(
+            version,
+            transaction,
+            expected_version_id=expected_version_id,
+            initial_state=initial_state,
+        )
         self._finalize(transaction)
 
         self._runtime.events.publish(
@@ -223,6 +228,7 @@ class ExecutionPipeline:
         version: RuntimeVersion,
         transaction: RuntimeTransaction,
         expected_version_id: str | None = None,
+        initial_state: Any = None,
     ) -> None:
         """
         Persist Runtime state.
@@ -233,6 +239,46 @@ class ExecutionPipeline:
         self._runtime.storage.save_session(
             transaction.session,
             expected_version_id=expected_version_id,
+        )
+
+        self._record_operations(version, transaction, initial_state)
+
+    def _record_operations(
+        self,
+        version: RuntimeVersion,
+        transaction: RuntimeTransaction,
+        initial_state: Any,
+    ) -> None:
+        """
+        Log field-level operations for this commit to the operation
+        log (ADR-007), if both the attached Core and the storage
+        backend support it.
+
+        Best-effort and strictly additive: this never runs unless
+        both capabilities are present, and an empty diff (nothing
+        actually changed -- e.g. a read-only ValidateOperation) logs
+        nothing. Absence of either capability is not an error and
+        never affects commit correctness -- the operation log is an
+        optional accelerant for a future merge fast-path, not part of
+        the observable Version history.
+        """
+
+        if not self._runtime.storage.supports_operation_log:
+            return
+        if not self._runtime.core_bridge.supports_field_diff:
+            return
+
+        operations = self._runtime.core_bridge.field_diff(
+            initial_state,
+            transaction.session.knowledge_structure,
+        )
+        if not operations:
+            return
+
+        self._runtime.storage.record_operations(
+            session_id=transaction.session.session_id,
+            version_id=version.version_id,
+            operations=operations,
         )
 
     def _finalize(

@@ -7,6 +7,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.sqlite_storage import SQLiteStorage, _retry_on_locked
 from cks_runtime.storage.storage import ConcurrentModificationError
@@ -39,6 +40,12 @@ class _FlakyConnProxy:
         if self.calls <= self._fail_times:
             raise sqlite3.OperationalError("database is locked")
         return self._real.execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise sqlite3.OperationalError("database is locked")
+        return self._real.executemany(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._real, name)
@@ -295,3 +302,72 @@ def test_fail_outbox_task_survives_transient_lock(storage):
     storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
     storage.fail_outbox_task(task.task_id, 1, "boom", "2026-01-01 00:00:00")
     assert storage._conn.calls >= 2
+
+
+# ---------------------------------------------------------------------------
+# Operation log (ADR-007)
+# ---------------------------------------------------------------------------
+
+def test_supports_operation_log(storage):
+    assert storage.supports_operation_log is True
+
+
+def test_record_operations_then_list_operations_round_trips(storage):
+    ops = [
+        RuntimeFieldOperation(object_id="obj-1", op_type="remove_object"),
+        RuntimeFieldOperation(object_id="obj-2", op_type="add_object"),
+        RuntimeFieldOperation(
+            object_id="obj-3", op_type="set_field", field_key="color", field_value="blue"
+        ),
+    ]
+    storage.record_operations("s1", "v1", ops)
+
+    assert storage.list_operations("s1") == ops
+
+
+def test_record_operations_preserves_none_field_value_as_a_deletion():
+    """
+    field_value=None on a set_field op means "this key was removed",
+    distinct from the op simply carrying no field_value at all (e.g.
+    add_object) -- both must round-trip as None, not collapse into
+    each other or into a JSON string "null".
+    """
+    storage = SQLiteStorage(":memory:")
+    op = RuntimeFieldOperation(
+        object_id="obj-1", op_type="set_field", field_key="color", field_value=None
+    )
+    storage.record_operations("s1", "v1", [op])
+
+    assert storage.list_operations("s1") == [op]
+
+
+def test_list_operations_filters_by_object_id(storage):
+    storage.record_operations(
+        "s1",
+        "v1",
+        [
+            RuntimeFieldOperation(object_id="obj-1", op_type="add_object"),
+            RuntimeFieldOperation(object_id="obj-2", op_type="add_object"),
+        ],
+    )
+
+    assert storage.list_operations("s1", object_id="obj-1") == [
+        RuntimeFieldOperation(object_id="obj-1", op_type="add_object")
+    ]
+
+
+def test_list_operations_returns_empty_for_unknown_session(storage):
+    assert storage.list_operations("nonexistent-session") == []
+
+
+def test_record_operations_with_empty_list_is_a_no_op(storage):
+    storage.record_operations("s1", "v1", [])
+    assert storage.list_operations("s1") == []
+
+
+def test_record_operations_survives_one_transient_lock(storage):
+    storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
+    ops = [RuntimeFieldOperation(object_id="obj-1", op_type="add_object")]
+    storage.record_operations("s1", "v1", ops)
+    assert storage._conn.calls >= 2
+    assert storage.list_operations("s1") == ops

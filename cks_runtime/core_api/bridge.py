@@ -176,6 +176,44 @@ class CoreBridge:
         return self._implementation.diff(source, target)
 
     # ------------------------------------------------------------------
+    # Field-level structural diff (optional capability)
+    # ------------------------------------------------------------------
+
+    def field_diff(self, source: Any, target: Any) -> list[Any]:
+        """
+        Delegate a field-granular structural diff.
+
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached at all -- unlike
+            ``diff()``, there is no sensible empty-list default here:
+            an empty list from ``field_diff`` means "nothing changed",
+            which would be actively wrong to report when there's no
+            Core attached to have computed that.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            field-level diffing. Propagated as-is, matching
+            ``hash()``/``merge()``'s contract.
+        """
+        if not self.available:
+            raise RuntimeError("No Runtime Core implementation is attached.")
+        return self._implementation.field_diff(source, target)
+
+    @property
+    def supports_field_diff(self) -> bool:
+        """
+        Whether the attached Core implementation overrides
+        ``field_diff()``. Mirrors ``supports_hash``/``supports_merge``.
+        """
+        if not self.available:
+            return False
+        return (
+            type(self._implementation).field_diff
+            is not CoreInterface.field_diff
+        )
+
+    # ------------------------------------------------------------------
     # Three-way merge (optional capability)
     # ------------------------------------------------------------------
 

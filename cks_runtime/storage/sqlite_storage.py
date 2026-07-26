@@ -17,6 +17,7 @@ import cks
 from cks.core import ObjectIdentity, KnowledgeObject, CanonicalRelation
 from cks.evolution import AddObject, AddRelation, RemoveObject, RemoveRelation
 
+from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.storage import RuntimeStorage, ConcurrentModificationError
 from cks_runtime.versioning.version import RuntimeVersion
@@ -202,6 +203,26 @@ class SQLiteStorage(RuntimeStorage):
                 embedding BLOB NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_operation_log (
+                op_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                version_id TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                op_type TEXT NOT NULL,
+                field_key TEXT,
+                field_value TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_operation_log_object
+            ON cks_operation_log(session_id, object_id)
             """
         )
         self._conn.commit()
@@ -545,6 +566,86 @@ class SQLiteStorage(RuntimeStorage):
 
     @property
     def supports_outbox(self) -> bool:
+        return True
+
+    # ------------------------------------------------------------------
+    # Operation log (ADR-007)
+    # ------------------------------------------------------------------
+
+    def record_operations(
+        self,
+        session_id: str,
+        version_id: str,
+        operations: list[RuntimeFieldOperation],
+    ) -> None:
+        if not operations:
+            return
+
+        rows = [
+            (
+                session_id,
+                version_id,
+                op.object_id,
+                op.op_type,
+                op.field_key,
+                json.dumps(op.field_value) if op.op_type == "set_field" else None,
+            )
+            for op in operations
+        ]
+
+        def _write() -> None:
+            self._conn.executemany(
+                """
+                INSERT INTO cks_operation_log
+                    (session_id, version_id, object_id, op_type, field_key, field_value)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
+    def list_operations(
+        self,
+        session_id: str,
+        object_id: str | None = None,
+    ) -> list[RuntimeFieldOperation]:
+        """
+        Return logged field-level operations for a session (optionally
+        filtered to a single object_id), oldest first.
+
+        Foundational read path for the merge fast-path sketched in
+        ADR-007 (not yet consumed by MergeOperation there); also used
+        directly by tests to assert what a commit logged.
+        """
+        if object_id is not None:
+            query = (
+                "SELECT object_id, op_type, field_key, field_value "
+                "FROM cks_operation_log WHERE session_id = ? AND object_id = ? "
+                "ORDER BY op_id"
+            )
+            params: tuple = (session_id, object_id)
+        else:
+            query = (
+                "SELECT object_id, op_type, field_key, field_value "
+                "FROM cks_operation_log WHERE session_id = ? ORDER BY op_id"
+            )
+            params = (session_id,)
+
+        rows = self._conn.execute(query, params).fetchall()
+        return [
+            RuntimeFieldOperation(
+                object_id=row[0],
+                op_type=row[1],
+                field_key=row[2],
+                field_value=json.loads(row[3]) if row[3] is not None else None,
+            )
+            for row in rows
+        ]
+
+    @property
+    def supports_operation_log(self) -> bool:
         return True
 
 
