@@ -201,8 +201,25 @@ class OperationExecutor:
         self,
         operation: Operation,
         session: RuntimeSession,
+        *,
+        record_metrics: bool = True,
     ) -> ExecutionResult:
-        """Execute one Runtime Operation."""
+        """
+        Execute one Runtime Operation.
+
+        ``record_metrics`` defaults to True for every ordinary
+        execution (including the one ``ExecutionPipeline`` performs on
+        commit). Callers that execute an operation purely as a
+        pre-commit probe -- to detect a conflict or validate
+        provenance before deciding whether to commit at all, e.g.
+        cks-mcp's ``evolve_knowledge``/``merge_branch`` -- should pass
+        ``record_metrics=False`` for that probe call. Otherwise every
+        successful evolve/merge is executed (and thus metered) twice:
+        once for the probe, once again when ``ExecutionPipeline``
+        replays the same operation during commit, silently doubling
+        ``get_metrics``' counts and average-time figures relative to
+        the number of MCP tool calls actually made.
+        """
         start = time.monotonic()
         try:
             result = operation.execute(session, self)
@@ -223,6 +240,6 @@ class OperationExecutor:
                 ),
             )
         duration_ms = (time.monotonic() - start) * 1000
-        if self._metrics is not None:
+        if self._metrics is not None and record_metrics:
             self._metrics.record(operation.operation_id, duration_ms)
         return result
