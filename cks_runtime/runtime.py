@@ -414,9 +414,28 @@ class Runtime:
         Close Runtime Session.
         """
 
+        session = self._sessions.get_session(
+            session_id,
+        )
+
         self._sessions.close_session(
             session_id,
         )
+
+        # SessionManager.close_session() only updates the in-memory
+        # registry (it calls session.close(), which sets
+        # session.closed = True, then discards the session from its
+        # dict) -- it never touches storage. Without persisting here,
+        # the closed session's on-disk record still shows closed=False,
+        # so after any process restart, load_session() would
+        # reconstruct it as an active session again, even though
+        # SQLiteStorage.save_session/load_session already fully support
+        # the 'closed' field. This mirrors create_session/create_branch,
+        # which persist immediately for the same reason.
+        if session is not None:
+            self._storage.save_session(
+                session,
+            )
 
 
     #

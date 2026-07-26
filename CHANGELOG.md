@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.17.3] - 2026-07-26
+
+### Fixed
+- `Runtime.close_session()` now persists the closed state to storage, preventing closed sessions from resurrecting as active after a process restart.
+- `SessionManager.restore()` no longer re-registers closed sessions loaded from storage, ensuring they stay unreachable via `get_session()`.
+- Added regression test `test_closed_session_stays_closed_after_runtime_restart`.
+
+---
+
 ## [1.17.2] - 2026-07-26
 
 ### Fixed

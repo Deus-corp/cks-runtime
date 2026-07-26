@@ -211,6 +211,16 @@ class SessionManager:
         Unlike :meth:`create_session`, this does *not* create a new
         session — it only registers an already existing session that
         was read from the storage backend during startup.
+
+        Closed sessions are intentionally NOT re-registered.
+        close_session() removes a session from this registry as its
+        closing action (see close_session below) -- a session reloaded
+        from storage after a restart must not undo that removal by
+        reappearing as an active, operable session just because its
+        (correctly persisted) storage record still exists.
         """
+
+        if session.closed:
+            return
 
         self._sessions[session.session_id] = session

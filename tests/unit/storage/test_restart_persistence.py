@@ -47,3 +47,53 @@ def test_sessions_survive_runtime_restart():
         assert session.session_id in [s.session_id for s in rt2.list_sessions()]
     finally:
         os.unlink(path)
+
+
+def test_closed_session_stays_closed_after_runtime_restart():
+    """
+    Regression test: Runtime.close_session() used to only update the
+    in-memory registry (via SessionManager.close_session(), which
+    calls session.close() and discards the session from its dict) --
+    it never called storage.save_session(), unlike create_session and
+    create_branch. So the storage record kept reflecting closed=False,
+    and after a restart _restore_from_storage() would reconstruct the
+    session as active again -- reachable via get_session() and,
+    because nothing in the transaction/commit pipeline checks
+    session.closed before operating, fully operable again too. This
+    was true even for a session closed specifically because it had
+    just been merged into another one (the merge_branch +
+    close_session workflow the README documents).
+
+    A closed session must stay unreachable via get_session() -- in
+    the same process (already true before this fix, since
+    close_session() removes it from the in-memory registry outright)
+    and after a restart (the actual regression).
+    """
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    try:
+        ks = cks.parse(
+            '{"objects":[{"identity":{"id":"obj-1","type":"Test","name":"t"},"structure":{}}]}'
+        )
+
+        config = RuntimeConfig(storage_path=path)
+        rt1 = Runtime(core=CksCoreAdapter(), config=config)
+        session = rt1.create_session(ks)
+        tx = rt1.begin_transaction(session)
+        tx.add_operation(ValidateOperation("v1", knowledge_structure=ks))
+        rt1.commit_transaction(tx)
+
+        session_id = session.session_id
+        rt1.close_session(session_id)
+
+        # Same-process: already unreachable before this fix.
+        assert rt1.get_session(session_id) is None
+
+        # Simulate a restart: a fresh Runtime attached to the same storage file.
+        rt2 = Runtime(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
+
+        assert rt2.get_session(session_id) is None
+        assert session_id not in [s.session_id for s in rt2.list_sessions()]
+    finally:
+        os.unlink(path)
