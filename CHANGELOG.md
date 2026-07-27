@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.18.1] - 2026-07-27
+
+### Fixed
+- `RuntimeTransaction` now captures `session.knowledge_structure` at begin time; `ExecutionPipeline.rollback()` restores it, so a transaction with multiple operations that partially mutated the session is properly reverted on failure, not just marked as "rolled back".
+- `DispatchRequest` path in `_execute_operations` now records results and applies state mutation via `result.operation`, mirroring the `transaction.operations` loop — previously, an `EvolveOperation`/`MergeOperation`/`RevertVersionOperation` dispatched through `add_request` would silently commit without updating the session's Knowledge Structure.
+- `OperationExecutor` now centrally attaches the `Operation` instance to every `ExecutionResult`, making it available to both the direct and dispatch paths for `_apply_state_mutation`.
+
+---
+
 ## [1.18.0] - 2026-07-27
 
 ### Added

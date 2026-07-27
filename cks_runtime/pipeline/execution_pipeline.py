@@ -101,7 +101,20 @@ class ExecutionPipeline:
     ) -> None:
         """
         Execute Runtime rollback.
+
+        Restores ``session.knowledge_structure`` to the snapshot taken
+        when the transaction began (``transaction.initial_state``).
+        Without this, a multi-operation transaction where an earlier
+        operation already mutated the session (via
+        ``_apply_state_mutation``) before a later operation failed
+        would stay partially applied even after "rollback" -- flipping
+        ``status`` to ROLLED_BACK is not enough on its own. For a
+        transaction rolled back before any operation ran,
+        ``initial_state`` still equals the current state, so this is a
+        no-op.
         """
+
+        transaction.session.knowledge_structure = transaction.initial_state
 
         self._runtime.transactions.rollback(transaction)
 
@@ -320,7 +333,18 @@ class ExecutionPipeline:
             for req in transaction.requests:
                 context = ExecutionContext(session=session, executor=executor)
                 result = dispatcher.dispatch(req, context)
+                # Mirrors the transaction.operations loop above: record
+                # the result and write back any state change *before*
+                # _handle_result can raise, and use result.operation
+                # (set by OperationExecutor.execute()) since this path
+                # never constructs the Operation itself -- Dispatcher
+                # resolves it internally and only used to return the
+                # bare ExecutionResult, which silently dropped evolve/
+                # merge/revert_version results instead of committing
+                # them to session.knowledge_structure.
+                transaction.add_result(result)
                 self._handle_result(result, req.operation_id, transaction)
+                self._apply_state_mutation(result.operation, result, session)
 
     def _handle_result(self, result, operation_id, transaction):
         if result.status == OperationStatus.FAILED:

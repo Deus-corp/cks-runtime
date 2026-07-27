@@ -28,6 +28,14 @@ class RuntimeTransaction:
     results: list[Any] = field(default_factory=list)
     diagnostics: list[Any] = field(default_factory=list)
     status: TransactionStatus = TransactionStatus.CREATED
+    # Snapshot of session.knowledge_structure taken when the
+    # transaction began (see TransactionManager.begin). Used by
+    # ExecutionPipeline.rollback() to restore the session if one or
+    # more operations already mutated it (via _apply_state_mutation)
+    # before a later operation in the same transaction failed --
+    # RuntimeTransaction.rollback()/TransactionManager.rollback() only
+    # ever flip `status`; neither touches session.knowledge_structure.
+    initial_state: Any = field(default=None, repr=False)
 
     @property
     def completed(self) -> bool:

@@ -74,6 +74,17 @@ class ExecutionResult:
 
     error: Exception | None = None
 
+    # The Operation instance that produced this result. Set centrally
+    # by OperationExecutor.execute() below (regardless of whether it
+    # was called directly from the transaction.operations loop or via
+    # Dispatcher.dispatch()'s DispatchRequest path), so
+    # ExecutionPipeline._apply_state_mutation can do its
+    # isinstance(operation, EvolveOperation/...) check from the result
+    # alone -- the dispatch path never had the constructed Operation
+    # in scope otherwise, which is why it used to skip state mutation
+    # entirely.
+    operation: Any | None = None
+
     @property
     def succeeded(
         self,
@@ -239,6 +250,7 @@ class OperationExecutor:
                     ),
                 ),
             )
+        result.operation = operation
         duration_ms = (time.monotonic() - start) * 1000
         if self._metrics is not None and record_metrics:
             self._metrics.record(operation.operation_id, duration_ms)

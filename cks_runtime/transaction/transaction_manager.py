@@ -56,6 +56,7 @@ class TransactionManager:
 
         transaction = RuntimeTransaction(
             session=session,
+            initial_state=session.knowledge_structure,
         )
 
         self._transactions[
