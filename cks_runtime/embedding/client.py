@@ -6,8 +6,53 @@ from __future__ import annotations
 
 import math
 import struct
+import time
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable, Optional, TypeVar
+
+_T = TypeVar("_T")
+
+# Retry tuning for transient Hugging Face Inference API failures
+# (timeouts, connection errors, rate limiting, server errors). Mirrors
+# the busy-wait/backoff pattern used for SQLite lock contention
+# elsewhere (see cks_runtime.storage.sqlite_storage._retry_on_locked)
+# rather than inventing a second one here.
+_HF_REQUEST_TIMEOUT_SECONDS = 30
+_HF_MAX_RETRIES = 3
+_HF_RETRY_BASE_DELAY_SECONDS = 1.0
+
+
+def _is_retryable_hf_error(exc: Exception) -> bool:
+    """
+    Whether exc is a transient Hugging Face API failure worth retrying:
+    a network-level timeout/connection error, or an HTTP 429 (rate
+    limit) / 5xx (server-side) response. Any other HTTP error (bad
+    model name, malformed payload, invalid token) is the caller's
+    fault and won't succeed on retry, so it's raised immediately.
+    """
+    import requests
+
+    if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = exc.response.status_code if exc.response is not None else None
+        return status == 429 or (status is not None and 500 <= status < 600)
+    return False
+
+
+def _retry_on_transient_hf_error(fn: Callable[[], _T]) -> _T:
+    """Run fn(), retrying with exponential backoff on transient Hugging Face API failures."""
+    last_exc: Optional[BaseException] = None
+    for attempt in range(_HF_MAX_RETRIES):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _is_retryable_hf_error(exc) or attempt >= _HF_MAX_RETRIES - 1:
+                raise
+            last_exc = exc
+            time.sleep(_HF_RETRY_BASE_DELAY_SECONDS * (2**attempt))
+    assert last_exc is not None
+    raise last_exc
 
 
 def _normalize_vector(emb: bytes) -> bytes:
@@ -123,10 +168,11 @@ class HuggingFaceEmbeddingClient(EmbeddingClient):
         # Dimension is lazy-detected from the first embedding response,
         # unless explicitly set via env var.
         explicit_dim = os.environ.get("CKS_EMBEDDING_DIMENSION")
+        self._dimension: int | None
         if explicit_dim is not None:
             self._dimension = int(explicit_dim)
         else:
-            self._dimension: int | None = None
+            self._dimension = None
 
     @property
     def dimension(self) -> int:
@@ -141,9 +187,18 @@ class HuggingFaceEmbeddingClient(EmbeddingClient):
 
         api_url = f"https://router.huggingface.co/hf-inference/models/{self._model_name}/pipeline/feature-extraction"
         headers = {"Authorization": f"Bearer {self._token}"}
-        response = requests.post(api_url, headers=headers, json={"inputs": texts, "options": {"wait_for_model": True}})
-        response.raise_for_status()
-        outputs = response.json()
+
+        def _do_request() -> Any:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json={"inputs": texts, "options": {"wait_for_model": True}},
+                timeout=_HF_REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        outputs = _retry_on_transient_hf_error(_do_request)
 
         if isinstance(outputs, list) and len(outputs) > 0 and isinstance(outputs[0], float):
             outputs = [outputs]

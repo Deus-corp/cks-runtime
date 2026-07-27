@@ -79,7 +79,6 @@ class OutboxEmbeddingWorker:
 
         try:
             if task.task_type == "projection":
-                import json
                 payload = json.loads(task.payload)
                 prev_version_id = payload.get("previous_version_id")
                 new_version_id = payload.get("new_version_id")

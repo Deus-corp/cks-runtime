@@ -192,8 +192,12 @@ class RuntimeStorage(ABC):
 
     def dequeue_next_outbox_task(self) -> OutboxTask | None:
         """
-        Return the next pending outbox task, or None if the backend
-        doesn't support outbox operations.
+        Atomically claim and return the next eligible outbox task, or
+        None if the backend doesn't support outbox operations (or
+        nothing is eligible). Implementations that support the outbox
+        must claim the task as part of the same operation that reads
+        it, so that two callers polling concurrently never both
+        receive the same task.
         """
         return None
 

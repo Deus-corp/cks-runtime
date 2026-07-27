@@ -19,6 +19,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.18.0] - 2026-07-27
+
+### Added
+- `SQLiteStorage.dequeue_next_outbox_task` now atomically claims a task (`status='IN_PROGRESS'`, `claimed_at` set) as part of the same `UPDATE ... RETURNING` statement that reads it, instead of a plain `SELECT`. Two workers polling the same outbox table concurrently (e.g. two `cks-mcp` server processes sharing a SQLite file) can no longer both dequeue and process the same task. Verified with a real multi-threaded, multi-connection test, not just sequential calls.
+- A claimed task whose worker crashed or hung without calling `complete_outbox_task`/`fail_outbox_task` is automatically reclaimed by another `dequeue_next_outbox_task` call once its lease goes stale (5 minutes), so a dead worker can no longer strand a task in `IN_PROGRESS` forever.
+- New `claimed_at` column on `cks_outbox_tasks` (migrated in for existing databases). `fail_outbox_task` clears it when resetting a task back to `PENDING`.
+- `HuggingFaceEmbeddingClient.embed_batch` now passes an explicit 30s `timeout` to the underlying HTTP call (previously unbounded — a hung Hugging Face Inference API request would block the caller indefinitely) and retries transient failures (connection errors, timeouts, HTTP 429/5xx) with exponential backoff, up to 3 attempts. Non-retryable errors (4xx other than 429 — bad model name, malformed payload, invalid token) are raised immediately.
+- New tests: `tests/unit/embedding/test_client.py` (7 tests covering timeout, retry, and non-retry behavior) and 6 new outbox tests in `tests/unit/storage/test_sqlite_storage.py`, including a real multi-threaded concurrency regression test.
+
+### Fixed
+- Removed a redundant local `import json` inside `OutboxEmbeddingWorker._process_next_task` — `json` was already imported at module level (leftover from the 1.17.5 JSON-parsing fix).
+- Fixed a `mypy` `no-redef` error in `HuggingFaceEmbeddingClient.__init__` where `self._dimension`'s type was re-annotated in an `else` branch.
+
+---
+
 ## [1.17.7] - 2026-07-26
 
 ### Changed

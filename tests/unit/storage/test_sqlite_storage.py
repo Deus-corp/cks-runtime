@@ -5,6 +5,7 @@ Tests for SQLiteStorage (JSON-based).
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 import pytest
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
@@ -302,6 +303,102 @@ def test_fail_outbox_task_survives_transient_lock(storage):
     storage._conn = _FlakyConnProxy(storage._conn, fail_times=1)
     storage.fail_outbox_task(task.task_id, 1, "boom", "2026-01-01 00:00:00")
     assert storage._conn.calls >= 2
+
+
+def test_dequeue_claims_task_so_it_is_not_returned_again(storage):
+    """
+    dequeue_next_outbox_task must atomically claim the task (moving it
+    out of PENDING), not just read it -- otherwise two workers polling
+    the same table would both pick up the same task and double-process
+    it.
+    """
+    storage.enqueue_task("projection", "s1", "{}")
+    first = storage.dequeue_next_outbox_task()
+    assert first is not None
+    second = storage.dequeue_next_outbox_task()
+    assert second is None, "the same task must not be claimable twice"
+
+
+def test_dequeue_sets_status_and_claimed_at(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    row = storage._conn.execute(
+        "SELECT status, claimed_at FROM cks_outbox_tasks WHERE task_id = ?",
+        (task.task_id,),
+    ).fetchone()
+    assert row[0] == "IN_PROGRESS"
+    assert row[1] is not None
+
+
+def test_fail_outbox_task_clears_claim_and_is_reclaimable(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage.fail_outbox_task(task.task_id, 1, "boom", "2020-01-01 00:00:00")
+    row = storage._conn.execute(
+        "SELECT status, claimed_at FROM cks_outbox_tasks WHERE task_id = ?",
+        (task.task_id,),
+    ).fetchone()
+    assert row == ("PENDING", None)
+    retried = storage.dequeue_next_outbox_task()
+    assert retried is not None and retried.task_id == task.task_id
+
+
+def test_stale_in_progress_claim_is_reclaimed(storage):
+    """A worker that claimed a task and then crashed/hung without
+    calling complete/fail must not strand the task forever -- once the
+    lease goes stale, another dequeue call should pick it back up."""
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage._conn.execute(
+        "UPDATE cks_outbox_tasks SET claimed_at = datetime('now', '-10 minutes') WHERE task_id = ?",
+        (task.task_id,),
+    )
+    storage._conn.commit()
+    reclaimed = storage.dequeue_next_outbox_task()
+    assert reclaimed is not None and reclaimed.task_id == task.task_id
+
+
+def test_fresh_in_progress_claim_is_not_reclaimed(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    storage.dequeue_next_outbox_task()
+    assert storage.dequeue_next_outbox_task() is None
+
+
+def test_dequeue_never_double_claims_under_real_concurrency(tmp_path):
+    """
+    End-to-end regression test using real threads, each with its own
+    connection to the same file-backed database -- the actual scenario
+    the claim mechanism protects against. A weaker single-threaded
+    test could pass even with a plain SELECT (no atomic UPDATE) if the
+    two dequeue calls merely happen to be sequential; this test
+    exercises genuine concurrent access.
+    """
+    db_path = str(tmp_path / "outbox_concurrency.db")
+    setup_storage = SQLiteStorage(db_path)
+    task_count = 20
+    for i in range(task_count):
+        setup_storage.enqueue_task("projection", f"s{i}", "{}")
+
+    claimed_task_ids: list[int] = []
+    lock = threading.Lock()
+
+    def worker() -> None:
+        worker_storage = SQLiteStorage(db_path)
+        while True:
+            task = worker_storage.dequeue_next_outbox_task()
+            if task is None:
+                break
+            with lock:
+                claimed_task_ids.append(task.task_id)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(claimed_task_ids) == task_count
+    assert len(set(claimed_task_ids)) == task_count, "a task_id was claimed by more than one worker"
 
 
 # ---------------------------------------------------------------------------

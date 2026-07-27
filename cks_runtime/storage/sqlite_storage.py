@@ -184,15 +184,21 @@ class SQLiteStorage(RuntimeStorage):
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 next_retry_at TEXT NOT NULL DEFAULT (datetime('now')),
                 last_error TEXT,
+                claimed_at TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
         )
+        # Add claimed_at to pre-existing databases created before it existed.
+        cur = self._conn.execute("PRAGMA table_info(cks_outbox_tasks)")
+        outbox_cols = [row[1] for row in cur.fetchall()]
+        if "claimed_at" not in outbox_cols:
+            self._conn.execute("ALTER TABLE cks_outbox_tasks ADD COLUMN claimed_at TEXT")
         self._conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_outbox_pending
-            ON cks_outbox_tasks(status, next_retry_at)
-            WHERE status IN ('PENDING', 'FAILED')
+            ON cks_outbox_tasks(status, next_retry_at, claimed_at)
+            WHERE status IN ('PENDING', 'FAILED', 'IN_PROGRESS')
             """
         )
         self._conn.execute(
@@ -500,16 +506,41 @@ class SQLiteStorage(RuntimeStorage):
         _retry_on_locked(_write)
 
 
+    # A claimed (IN_PROGRESS) task whose worker never called
+    # complete_outbox_task/fail_outbox_task (crashed or hung) is
+    # treated as abandoned after this long and becomes eligible for
+    # another worker to claim.
+    _OUTBOX_LEASE_TIMEOUT_MODIFIER = "-5 minutes"
+
     def dequeue_next_outbox_task(self) -> OutboxTask | None:
-        row = self._conn.execute(
-            """
-            SELECT task_id, task_type, session_id, payload, retry_count
-            FROM cks_outbox_tasks
-            WHERE status = 'PENDING' AND next_retry_at <= datetime('now')
-            ORDER BY created_at ASC
-            LIMIT 1
-            """
-        ).fetchone()
+        """
+        Atomically claim and return the next eligible task: a PENDING
+        task whose retry delay has elapsed, or an IN_PROGRESS task
+        whose lease has gone stale. Claiming (the UPDATE) and reading
+        happen in one statement, so two workers polling the same table
+        concurrently (e.g. two cks-mcp server processes sharing a
+        SQLite file) can never both claim the same task.
+        """
+        def _write() -> tuple | None:
+            row = self._conn.execute(
+                """
+                UPDATE cks_outbox_tasks
+                SET status = 'IN_PROGRESS', claimed_at = datetime('now')
+                WHERE task_id = (
+                    SELECT task_id FROM cks_outbox_tasks
+                    WHERE (status = 'PENDING' AND next_retry_at <= datetime('now'))
+                       OR (status = 'IN_PROGRESS' AND claimed_at <= datetime('now', ?))
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                )
+                RETURNING task_id, task_type, session_id, payload, retry_count
+                """,
+                (self._OUTBOX_LEASE_TIMEOUT_MODIFIER,),
+            ).fetchone()
+            self._conn.commit()
+            return row
+
+        row = _retry_on_locked(_write)
         if row is None:
             return None
         return OutboxTask(
@@ -535,7 +566,8 @@ class SQLiteStorage(RuntimeStorage):
                 SET status = 'PENDING',
                     retry_count = ?,
                     next_retry_at = ?,
-                    last_error = ?
+                    last_error = ?,
+                    claimed_at = NULL
                 WHERE task_id = ?
                 """,
                 (retry_count, next_retry_at, error, task_id),
