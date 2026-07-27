@@ -56,4 +56,5 @@ include = [
 dev = [
     "pytest>=8.0",
     "mypy>=1.0",
+    "requests>=2.0",
 ]
