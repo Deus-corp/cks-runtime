@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.18.2] - 2026-07-27
+
+### Changed
+- Bumped `cks-core` dependency to `>=1.12.0` (ontology/type-hierarchy constraints, CKS-009 spec).
+
+---
+
 ## [1.18.1] - 2026-07-27
 
 ### Fixed
