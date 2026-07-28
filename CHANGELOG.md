@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.20.0] - 2026-07-28
+
+### Added
+- **ADR-007 Part 2 — Version Vectors and Fast-Path Merge.**  
+  - `VersionVector` class tracks per-session commit clocks, enabling `MergeOperation` to detect no-op and fast-forward scenarios without running a full three-way merge.  
+  - `Runtime` now generates a unique `node_id` (uuid4) for each instance, used to increment the session's version vector on every commit via `VersionManager.create()`.  
+  - `MergeOperation.execute()` checks vector dominance before resolving the merge base: if target dominates source → no-op; if source dominates target → fast-forward.  
+- `node_id` added to `Runtime.__slots__` and `Runtime.__init__`.
+
+---
+
 ## [1.19.0] - 2026-07-28
 
 ### Added

@@ -14,6 +14,7 @@ from cks_runtime.execution.operation_executor import (
     OperationStatus,
 )
 from cks_runtime.session.session import RuntimeSession
+from cks_runtime.versioning.version_vector import VersionVector
 
 logger = logging.getLogger(__name__)
 
@@ -399,6 +400,29 @@ class MergeOperation(Operation):
                     "MergeOperation requires 'source_session' (the "
                     "branch being merged in)."
                 ),
+            )
+
+        # ADR-007 Part 2: compare version vectors for fast-path decisions
+        # before resolving the merge base.
+        target_vector = VersionVector.from_metadata(session.metadata)
+        source_vector = VersionVector.from_metadata(self.source_session.metadata)
+
+        if target_vector.dominates(source_vector):
+            # Target already contains everything source has — no-op.
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.COMPLETED,
+                payload=session.knowledge_structure,
+            )
+
+        if source_vector.dominates(target_vector):
+            # Source is a strict descendant — fast-forward.
+            target_vector.absorb(source_vector)
+            target_vector.to_metadata(session.metadata)
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.COMPLETED,
+                payload=self.source_session.knowledge_structure,
             )
 
         base_version_id: str | None = None

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from cks_runtime.session.session import RuntimeSession
 
 from .version import RuntimeVersion
+from .version_vector import VersionVector
 
 if TYPE_CHECKING:
     from cks_runtime.core_api.bridge import CoreBridge
@@ -44,6 +45,7 @@ class VersionManager:
         session: RuntimeSession,
         core_bridge: CoreBridge | None = None,
         previous_state: Any | None = None,
+        node_id: str | None = None,
     ) -> RuntimeVersion:
         """
         Create a new RuntimeVersion.
@@ -92,6 +94,16 @@ class VersionManager:
             snapshot versions, so callers that always pass it (e.g.
             "state of the session at the start of every commit") do
             not need to special-case anything.
+        node_id
+            Optional (ADR-007 Part 2). When supplied, this call bumps
+            ``session.metadata``'s VersionVector for ``node_id``
+            *before* building the version, so the version's own
+            (frozen, deep-copied) ``metadata`` snapshot and the
+            session's live metadata agree on the post-bump vector.
+            ``None`` (the default) leaves ``session.metadata``
+            untouched -- callers that construct a VersionManager
+            directly without a Runtime (e.g. existing unit tests) see
+            no behaviour change.
 
         Raises
         ------
@@ -99,6 +111,11 @@ class VersionManager:
             A delta version is being recorded but ``previous_state``
             was not supplied.
         """
+
+        if node_id is not None:
+            vector = VersionVector.from_metadata(session.metadata)
+            vector.bump(node_id)
+            vector.to_metadata(session.metadata)
 
         transaction_id = ""
 

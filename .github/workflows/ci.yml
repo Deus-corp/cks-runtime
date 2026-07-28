@@ -2,38 +2,44 @@ name: Continuous Integration
 
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   tests:
-
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
-        python-version:
-          - "3.12"
-
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install package
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+      - run: pytest -v
 
-      - name: Run test suite
-        run: |
-          pytest -v
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - run: mypy cks_runtime

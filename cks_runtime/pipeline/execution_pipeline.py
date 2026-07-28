@@ -224,10 +224,12 @@ class ExecutionPipeline:
     ) -> RuntimeVersion:
         """Create a Runtime version, passing the pre-transaction state for delta computation."""
 
+        node_id = transaction.session.metadata.get("node_id")
         version = self._runtime.versions.create(
             transaction.session,
             core_bridge=self._runtime.core_bridge,
             previous_state=initial_state,
+            node_id=node_id,
         )
 
         self._runtime.events.publish(

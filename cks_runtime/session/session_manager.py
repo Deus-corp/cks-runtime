@@ -21,6 +21,7 @@ Does not own:
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from .session import RuntimeSession
 
@@ -43,16 +44,12 @@ class SessionManager:
         self,
         knowledge_structure: Any,
     ) -> RuntimeSession:
-        """
-        Create and register a RuntimeSession.
-        """
-
         session = RuntimeSession(
             knowledge_structure=knowledge_structure,
         )
-
+        # Each session gets its own node_id for independent version vectors
+        session.metadata["node_id"] = str(uuid4())
         self._sessions[session.session_id] = session
-
         return session
 
     def create_branch(
@@ -98,9 +95,9 @@ class SessionManager:
             parent_session_id=parent_session.session_id,
             parent_version_id=parent_version_id,
         )
-
+        # Each session gets its own node_id for independent version vectors
+        session.metadata["node_id"] = str(uuid4())
         self._sessions[session.session_id] = session
-
         return session
 
     #

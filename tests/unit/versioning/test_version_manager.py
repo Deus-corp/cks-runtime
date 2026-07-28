@@ -123,4 +123,5 @@ def test_version_is_snapshot():
 
     assert version.knowledge_structure == {}
 
-    assert version.metadata == {}
+    assert version.metadata.get("node_id") is not None
+    assert "user" not in version.metadata
