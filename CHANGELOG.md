@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.20.2] - 2026-07-28
+
+### Changed
+- Bumped `cks-core` dependency to `>=1.13.0` (contradiction detection: `mutual_exclusion` and `functional_relation` optional constraints).
+
+---
+
 ## [1.20.1] - 2026-07-28
 
 ### Changed
