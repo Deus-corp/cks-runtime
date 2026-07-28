@@ -9,14 +9,11 @@ CKS Core semantics.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import field
-from datetime import UTC
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
-from uuid import UUID
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 
 class DiagnosticSource(str, Enum):

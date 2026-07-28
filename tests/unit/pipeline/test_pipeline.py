@@ -1,24 +1,23 @@
 import pytest
 
 from cks_runtime import Runtime
-
 from cks_runtime.core_api.interfaces import (
     CoreInterface,
 )
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
 )
+from cks_runtime.events.runtime_event import (
+    TransactionCommitted,
+    VersionCreated,
+)
+from cks_runtime.operations.operation_types import EvolveOperation
 from cks_runtime.pipeline.execution_pipeline import (
     ExecutionPipeline,
 )
 from cks_runtime.versioning.version import (
     RuntimeVersion,
 )
-from cks_runtime.events.runtime_event import (
-    TransactionCommitted,
-    VersionCreated,
-)
-from cks_runtime.operations.operation_types import EvolveOperation
 from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 
@@ -211,7 +210,6 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
     tx2.add_operation(
         ValidateOperation("validate", knowledge_structure={"objects": []})
     )
-    version2 = runtime.commit_transaction(tx2)
     assert session2.diagnostics == [] or all(
         True for _ in session2.diagnostics
     )  # no crash; COMPLETED regardless of validity
@@ -324,11 +322,12 @@ def test_commit_records_operations_when_core_and_storage_support_it():
     a commit that mutates the Knowledge Structure must leave a trace
     in the operation log.
     """
-    from cks_runtime.storage.sqlite_storage import SQLiteStorage
-    from cks_runtime.operations.operation_types import EvolveOperation
-    from cks.evolution import AddObject
-    from cks.core import KnowledgeObject, ObjectIdentity
     import cks
+    from cks.core import KnowledgeObject, ObjectIdentity
+    from cks.evolution import AddObject
+
+    from cks_runtime.operations.operation_types import EvolveOperation
+    from cks_runtime.storage.sqlite_storage import SQLiteStorage
 
     storage = SQLiteStorage(":memory:")
     runtime = Runtime(core=CksCoreAdapter(), storage=storage)

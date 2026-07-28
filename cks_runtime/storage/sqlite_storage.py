@@ -11,17 +11,21 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
 
 import cks
-from cks.core import ObjectIdentity, KnowledgeObject, CanonicalRelation
+import numpy as np
+from cks.core import CanonicalRelation, KnowledgeObject, ObjectIdentity
 from cks.evolution import AddObject, AddRelation, RemoveObject, RemoveRelation
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime.storage.storage import RuntimeStorage, ConcurrentModificationError
+from cks_runtime.storage.storage import (
+    ConcurrentModificationError,
+    OutboxTask,
+    RuntimeStorage,
+)
 from cks_runtime.versioning.version import RuntimeVersion
-from cks_runtime.storage.storage import OutboxTask
 
 # Retry tuning for transient "database is locked" errors under
 # concurrent writers. Mirrors the busy-wait/backoff pattern used for
@@ -32,10 +36,8 @@ _SQLITE_BUSY_TIMEOUT_MS = 30_000
 _WRITE_RETRIES = 5
 _WRITE_RETRY_BASE_DELAY_SECONDS = 0.05
 
-_T = TypeVar("_T")
 
-
-def _retry_on_locked(fn: Callable[[], _T]) -> _T:
+def _retry_on_locked[T](fn: Callable[[], T]) -> T:
     """
     Run fn(), retrying with exponential backoff if it raises a
     "database is locked" sqlite3.OperationalError. Does NOT retry
@@ -43,7 +45,7 @@ def _retry_on_locked(fn: Callable[[], _T]) -> _T:
     not transient lock contention, and retrying it blindly here would
     silently overwrite the caller's compare-and-swap semantics.
     """
-    last_exc: Optional[BaseException] = None
+    last_exc: BaseException | None = None
     for attempt in range(_WRITE_RETRIES):
         try:
             return fn()
@@ -213,6 +215,12 @@ class SQLiteStorage(RuntimeStorage):
         )
         self._conn.execute(
             """
+            CREATE INDEX IF NOT EXISTS idx_object_embeddings_session
+            ON cks_object_embeddings(session_id)
+            """
+        )
+        self._conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS cks_operation_log (
                 op_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -300,7 +308,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
-    def load_session(self, session_id: str) -> Optional[RuntimeSession]:
+    def load_session(self, session_id: str) -> RuntimeSession | None:
         row = self._conn.execute(
             "SELECT data FROM sessions WHERE session_id = ?", (session_id,)
         ).fetchone()
@@ -404,7 +412,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
-    def load_version(self, version_id: str) -> Optional[RuntimeVersion]:
+    def load_version(self, version_id: str) -> RuntimeVersion | None:
         row = self._conn.execute(
             "SELECT data FROM versions WHERE version_id = ?", (version_id,)
         ).fetchone()
@@ -703,6 +711,13 @@ class SQLiteStorage(RuntimeStorage):
         that distinction isn't meaningful for ranking search results, so
         it's clamped up to a single "least similar" floor instead of
         leaking a negative number to callers.
+
+        Scoring is vectorized: every candidate embedding for the session
+        is stacked into a single (n, dim) matrix and scored against the
+        query in one matrix-vector product, instead of a per-row Python
+        loop. That loop -- not the SQL query -- was the dominant cost of
+        this call once a session holds more than a few hundred embedded
+        objects.
         """
         rows = self._conn.execute(
             "SELECT object_id, embedding FROM cks_object_embeddings WHERE session_id = ?",
@@ -712,36 +727,34 @@ class SQLiteStorage(RuntimeStorage):
         if not rows:
             return []
 
-        import array
+        query_vec = np.frombuffer(query_embedding, dtype=np.float32)
 
-        q = array.array("f")
-        q.frombytes(query_embedding)
-
-        def score(emb: bytes) -> float | None:
-            v = array.array("f")
-            v.frombytes(emb)
-            if len(v) != len(q):
+        object_ids: list[str] = []
+        vectors: list[np.ndarray] = []
+        for object_id, emb in rows:
+            v = np.frombuffer(emb, dtype=np.float32)
+            if v.shape[0] != query_vec.shape[0]:
                 # A dimension mismatch means this row was embedded by
                 # a different model/provider than the query (e.g. the
                 # embedding client was swapped after this object was
-                # indexed). zip(v, q) would otherwise silently
-                # truncate to the shorter vector and return a
-                # meaningless dot product instead of an error --
-                # excluding the row is the safe choice, since there is
-                # no correct distance to compute between vectors from
-                # different embedding spaces.
-                return None
-            # Cosine similarity = dot product for normalized vectors.
-            similarity = sum(a * b for a, b in zip(v, q))
-            return max(0.0, min(1.0, similarity))
+                # indexed). Stacking it into the matrix would either
+                # raise or force a meaningless truncation -- excluding
+                # the row is the safe choice, since there is no correct
+                # distance to compute between vectors from different
+                # embedding spaces.
+                continue
+            object_ids.append(object_id)
+            vectors.append(v)
 
-        scored = sorted(
-            (
-                (oid, s)
-                for oid, emb in ((r[0], r[1]) for r in rows)
-                if (s := score(emb)) is not None
-            ),
-            key=lambda pair: pair[1],
-            reverse=True,
-        )
-        return scored[:top_k]
+        if not vectors:
+            return []
+
+        # Cosine similarity = dot product for normalized vectors,
+        # computed for every candidate against the query in one call.
+        matrix = np.stack(vectors)
+        similarities = np.clip(matrix @ query_vec, 0.0, 1.0)
+
+        # Stable sort so ties keep their original (SQL result) order,
+        # matching the previous sorted(..., reverse=True) behaviour.
+        order = np.argsort(-similarities, kind="stable")[:top_k]
+        return [(object_ids[i], float(similarities[i])) for i in order]

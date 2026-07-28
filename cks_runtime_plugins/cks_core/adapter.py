@@ -17,8 +17,8 @@ from cks.diagnostics import DiagnosticSeverity as CoreSeverity
 from cks.evolution import compose
 from cks.interface import inspect as cks_inspect
 
-from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
+from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.core_api.merge_conflict import (
     RuntimeMergeConflict,
     RuntimeMergeConflictError,
@@ -28,7 +28,11 @@ from cks_runtime.core_api.validation_result import (
 )
 from cks_runtime.diagnostics.diagnostic import (
     Diagnostic as RuntimeDiagnostic,
+)
+from cks_runtime.diagnostics.diagnostic import (
     DiagnosticSeverity as RuntimeSeverity,
+)
+from cks_runtime.diagnostics.diagnostic import (
     DiagnosticSource,
 )
 

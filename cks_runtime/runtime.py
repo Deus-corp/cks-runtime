@@ -13,58 +13,51 @@ from __future__ import annotations
 from typing import Any
 
 from cks_runtime.config import RuntimeConfig
-
 from cks_runtime.core_api.bridge import (
     CoreBridge,
 )
 from cks_runtime.core_api.interfaces import (
     CoreInterface,
 )
-
 from cks_runtime.diagnostics.aggregator import (
     DiagnosticAggregator,
 )
-
+from cks_runtime.dispatcher.dispatcher import Dispatcher
+from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
+from cks_runtime.events.event_bus import EventBus
+from cks_runtime.execution.operation_executor import OperationExecutor
+from cks_runtime.metrics.collector import MetricsCollector
+from cks_runtime.operations.operation_registry import OperationRegistry
 from cks_runtime.pipeline.execution_pipeline import (
     ExecutionPipeline,
 )
-
+from cks_runtime.projection.embedding_projection import EmbeddingProjection
+from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
 from cks_runtime.session.session import (
     RuntimeSession,
 )
 from cks_runtime.session.session_manager import (
     SessionManager,
 )
-
 from cks_runtime.storage.memory_storage import (
     InMemoryStorage,
 )
+from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.storage.storage import (
     RuntimeStorage,
 )
-
 from cks_runtime.transaction.transaction import (
     RuntimeTransaction,
 )
 from cks_runtime.transaction.transaction_manager import (
     TransactionManager,
 )
-
 from cks_runtime.versioning.version import (
     RuntimeVersion,
 )
 from cks_runtime.versioning.version_manager import (
     VersionManager,
 )
-from cks_runtime.execution.operation_executor import OperationExecutor
-from cks_runtime.dispatcher.dispatcher import Dispatcher
-from cks_runtime.operations.operation_registry import OperationRegistry
-from cks_runtime.events.event_bus import EventBus
-from cks_runtime.storage.sqlite_storage import SQLiteStorage
-from cks_runtime.metrics.collector import MetricsCollector
-from cks_runtime.projection.embedding_projection import EmbeddingProjection
-from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
-from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
 
 
 class Runtime:
@@ -89,22 +82,22 @@ class Runtime:
     """
 
     __slots__ = (
-        "config",
         "_core_bridge",
-        "_storage",
+        "_diagnostics",
+        "_dispatcher",
+        "_embedding_client",
+        "_embedding_projection",
+        "_events",
+        "_executor",
+        "_metrics",
+        "_outbox_worker",
+        "_pipeline",
+        "_registry",
         "_sessions",
+        "_storage",
         "_transactions",
         "_versions",
-        "_diagnostics",
-        "_pipeline",
-        "_executor",
-        "_registry",
-        "_dispatcher",
-        "_events",
-        "_metrics",
-        "_embedding_projection",
-        "_outbox_worker",
-        "_embedding_client",
+        "config",
     )
 
     def __init__(

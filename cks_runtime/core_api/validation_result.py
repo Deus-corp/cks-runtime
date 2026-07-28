@@ -4,9 +4,10 @@ Runtime Validation Result.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,10 +27,10 @@ class RuntimeValidationResult:
     # ------------------------------------------------------------------
     # RuntimeValidationResult is immutable, so it can safely return self
     # on copy/deepcopy, avoiding issues with MappingProxyType.
-    def __copy__(self) -> "RuntimeValidationResult":
+    def __copy__(self) -> RuntimeValidationResult:
         return self
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> "RuntimeValidationResult":
+    def __deepcopy__(self, memo: dict[int, Any]) -> RuntimeValidationResult:
         memo[id(self)] = self
         return self
 

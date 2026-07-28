@@ -13,7 +13,6 @@ from .validation_result import (
     RuntimeValidationResult,
 )
 
-
 __all__ = [
     "CoreBridge",
     "CoreInterface",

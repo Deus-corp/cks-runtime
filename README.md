@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-260%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-267%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
 CKS Runtime is the canonical execution environment for
@@ -166,6 +166,7 @@ The current Reference Runtime provides:
 - Three‑way merge of knowledge structures via `cks-core`'s `merge()` function
 - **Query Subgraph** – k‑hop neighbourhood extraction with type filters and budget/ranking, delegated to cks-core's query_subgraph()
 - **Persistent Storage** – SQLite-backed storage via `SQLiteStorage`, surviving server restarts. Configurable through `RuntimeConfig.storage_path`.
+- **Indexed & Vectorized Embeddings** – `search_embeddings` uses NumPy matrix operations for ~10× faster similarity search, with a database index for multi-session scalability.
 
 ---
 
@@ -308,7 +309,7 @@ Current implementation status (v1.5.0):
 | Structural Diff | ✅ Complete |
 | Query Subgraph | ✅ Complete |
 | Persistent Storage (SQLite) | ✅ Complete |
-| Test Suite | ✅ 260+ tests passing |
+| Test Suite | ✅ 267+ tests passing |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).

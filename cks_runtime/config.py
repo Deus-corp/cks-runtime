@@ -12,8 +12,7 @@ Configuration never owns Runtime state.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 
 def _runtime_version() -> str:
@@ -28,7 +27,7 @@ def _runtime_version() -> str:
     try:
         return version("cks-runtime")
     except PackageNotFoundError:
-        return "1.18.2"
+        return "1.19.0"
 
 
 @dataclass(slots=True)

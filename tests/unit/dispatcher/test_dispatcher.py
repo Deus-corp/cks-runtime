@@ -3,12 +3,13 @@ Tests for Dispatcher.
 """
 
 import pytest
+
 from cks_runtime.dispatcher.dispatcher import Dispatcher, DispatchRequest
 from cks_runtime.execution.execution_context import ExecutionContext
 from cks_runtime.execution.operation_executor import (
-    OperationExecutor,
-    Operation,
     ExecutionResult,
+    Operation,
+    OperationExecutor,
     OperationStatus,
 )
 from cks_runtime.operations.operation_registry import OperationRegistry

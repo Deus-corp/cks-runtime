@@ -4,11 +4,12 @@ Test that sessions and versions survive a Runtime restart.
 
 import os
 import tempfile
-import pytest
+
 import cks
-from cks_runtime.runtime import Runtime
+
 from cks_runtime.config import RuntimeConfig
 from cks_runtime.operations.operation_types import ValidateOperation
+from cks_runtime.runtime import Runtime
 from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 

@@ -1,16 +1,15 @@
 import pytest
 
-from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime import Runtime
 from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.core_api.validation_result import RuntimeValidationResult
-from cks_runtime.operations.operation_types import (
-    ValidateOperation,
-    SerializeOperation,
-    ExplainOperation,
-)
 from cks_runtime.execution.operation_executor import ExecutionResult, OperationStatus
-import pytest
+from cks_runtime.operations.operation_types import (
+    ExplainOperation,
+    SerializeOperation,
+    ValidateOperation,
+)
+from cks_runtime.versioning.version import RuntimeVersion
 
 
 def test_runtime_create_session():

@@ -8,9 +8,8 @@ import math
 import struct
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, TypeVar
-
-_T = TypeVar("_T")
+from collections.abc import Callable
+from typing import Any
 
 # Retry tuning for transient Hugging Face Inference API failures
 # (timeouts, connection errors, rate limiting, server errors). Mirrors
@@ -40,9 +39,9 @@ def _is_retryable_hf_error(exc: Exception) -> bool:
     return False
 
 
-def _retry_on_transient_hf_error(fn: Callable[[], _T]) -> _T:
+def _retry_on_transient_hf_error[T](fn: Callable[[], T]) -> T:
     """Run fn(), retrying with exponential backoff on transient Hugging Face API failures."""
-    last_exc: Optional[BaseException] = None
+    last_exc: BaseException | None = None
     for attempt in range(_HF_MAX_RETRIES):
         try:
             return fn()
@@ -103,7 +102,7 @@ class StubEmbeddingClient(EmbeddingClient):
         embeddings = []
         for text in texts:
             digest = hashlib.sha256(text.encode()).digest()
-            embedding = bytes()
+            embedding = b""
             for i in range(0, len(digest), 4):
                 val = struct.unpack("f", digest[i:i+4])[0]
                 embedding += struct.pack("f", val)
@@ -130,6 +129,7 @@ class OpenAIEmbeddingClient(EmbeddingClient):
 
     def embed_batch(self, texts: list[str], *, normalize: bool = False) -> list[bytes]:
         import os
+
         import openai
         client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         response = client.embeddings.create(
@@ -138,7 +138,7 @@ class OpenAIEmbeddingClient(EmbeddingClient):
         )
         embeddings = []
         for item in response.data:
-            emb = bytes()
+            emb = b""
             for val in item.embedding:
                 emb += struct.pack("f", val)
             embeddings.append(emb)
@@ -205,7 +205,7 @@ class HuggingFaceEmbeddingClient(EmbeddingClient):
 
         result = []
         for emb in outputs:
-            emb_bytes = bytes()
+            emb_bytes = b""
             for val in emb:
                 emb_bytes += struct.pack("f", float(val))
             result.append(emb_bytes)

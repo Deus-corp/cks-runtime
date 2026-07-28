@@ -117,17 +117,6 @@ def test_completed_transaction_cannot_change_state():
     assert tx.status == TransactionStatus.COMMITTED
 
 
-def test_completed_transaction_cannot_change_state():
-
-    tx = create_transaction()
-
-    tx.commit()
-
-    tx.mark_executing()
-
-    assert tx.status == TransactionStatus.COMMITTED
-
-
 def test_completed_transaction_cannot_validate():
 
     tx = create_transaction()

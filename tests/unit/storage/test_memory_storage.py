@@ -1,4 +1,3 @@
-import pytest
 
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.memory_storage import InMemoryStorage

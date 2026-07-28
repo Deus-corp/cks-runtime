@@ -3,15 +3,19 @@ Canonical Runtime Operations.
 """
 
 from __future__ import annotations
+
+import logging
 from typing import Any
+
+from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.execution.operation_executor import (
-    Operation,
     ExecutionResult,
+    Operation,
     OperationStatus,
 )
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
-from cks_runtime.core_api.field_operation import RuntimeFieldOperation
+
+logger = logging.getLogger(__name__)
 
 
 class ValidateOperation(Operation):
@@ -197,7 +201,7 @@ class QuerySubgraphOperation(Operation):
                 max_objects=self.max_objects,
                 type_weights=self.type_weights,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Core plugin boundary; captured below, not swallowed
             return ExecutionResult(
                 operation_id=self.operation_id,
                 status=OperationStatus.FAILED,
@@ -324,7 +328,7 @@ class DiffOperation(Operation):
                 source=session.knowledge_structure,
                 target=target,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- Core plugin boundary; captured below, not swallowed
             return ExecutionResult(
                 operation_id=self.operation_id,
                 status=OperationStatus.FAILED,
@@ -461,13 +465,13 @@ class MergeOperation(Operation):
                     self.source_session.knowledge_structure,
                     resolutions={**auto, **(self.resolutions or {})},
                 )
-            except Exception as exc2:
+            except Exception as exc2:  # noqa: BLE001 -- Core plugin boundary; captured below, not swallowed
                 return ExecutionResult(
                     operation_id=self.operation_id,
                     status=OperationStatus.FAILED,
                     error=exc2,
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Core plugin boundary; captured below, not swallowed
             return ExecutionResult(
                 operation_id=self.operation_id,
                 status=OperationStatus.FAILED,
@@ -489,6 +493,11 @@ class MergeOperation(Operation):
     ) -> dict[str, Any]:
         storage = getattr(executor, "storage", None)
         core = executor.core
+
+        # Only reachable from execute() after its own
+        # `self.source_session is None` guard above, so this always
+        # holds -- this just makes the invariant visible to mypy.
+        assert self.source_session is not None
 
         if (
             base_version_id is None
@@ -543,6 +552,12 @@ class MergeOperation(Operation):
             try:
                 resolutions[oid] = core.synthesize_merge(conflict.base, a_ops + b_ops)
             except Exception:
+                logger.warning(
+                    "ADR-007 auto-resolution failed for object %s; "
+                    "falling back to the original conflict.",
+                    oid,
+                    exc_info=True,
+                )
                 continue
 
         return resolutions

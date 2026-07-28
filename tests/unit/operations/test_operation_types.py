@@ -1,11 +1,12 @@
 """Basic tests for operation types existence."""
 
 from cks_runtime.operations.operation_types import (
-    ExplainOperation,
     EvolveOperation,
+    ExplainOperation,
     SerializeOperation,
     ValidateOperation,
 )
+
 
 def test_validate_operation_exists():
     assert ValidateOperation is not None
@@ -21,8 +22,8 @@ def test_explain_operation_exists():
 
 
 def test_query_subgraph_operation_requires_seed_ids():
-    from cks_runtime.operations.operation_types import QuerySubgraphOperation
     from cks_runtime.execution.operation_executor import OperationStatus
+    from cks_runtime.operations.operation_types import QuerySubgraphOperation
 
     op = QuerySubgraphOperation(seed_ids=None, knowledge_structure={})
     # execute вне рантайма можно протестировать, замокав executor.core

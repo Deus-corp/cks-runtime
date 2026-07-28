@@ -42,7 +42,7 @@ class VersionManager:
     def create(
         self,
         session: RuntimeSession,
-        core_bridge: "CoreBridge | None" = None,
+        core_bridge: CoreBridge | None = None,
         previous_state: Any | None = None,
     ) -> RuntimeVersion:
         """
@@ -102,10 +102,9 @@ class VersionManager:
 
         transaction_id = ""
 
-        if session.has_active_transaction:
-            transaction_id = (
-                session.active_transaction.transaction_id
-            )
+        active_transaction = session.active_transaction
+        if active_transaction is not None:
+            transaction_id = active_transaction.transaction_id
 
         state_hash: str | None = None
         if core_bridge is not None:
@@ -137,6 +136,11 @@ class VersionManager:
                     "Knowledge Structure as it was immediately before "
                     "this transaction's mutations."
                 )
+            # is_snapshot is False here, and is_snapshot's own
+            # definition above ORs in `core_bridge is None` -- so
+            # core_bridge being None would have forced is_snapshot
+            # True. This branch is unreachable with core_bridge=None.
+            assert core_bridge is not None
             patch = core_bridge.diff(previous_state, session.knowledge_structure)
             version = RuntimeVersion(
                 session_id=session.session_id,

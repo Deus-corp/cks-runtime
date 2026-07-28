@@ -12,16 +12,14 @@ It never owns Runtime behaviour.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable
-from collections.abc import Iterable
-from collections.abc import Iterator
-from typing import DefaultDict
-from typing import Type
+from collections.abc import Callable, Iterator
+from typing import TypeVar, cast
 
 from .runtime_event import RuntimeEvent
 
-
 EventHandler = Callable[[RuntimeEvent], None]
+
+_E = TypeVar("_E", bound=RuntimeEvent)
 
 
 class EventBus:
@@ -45,8 +43,8 @@ class EventBus:
 
     def __init__(self) -> None:
 
-        self._subscribers: DefaultDict[
-            Type[RuntimeEvent],
+        self._subscribers: defaultdict[
+            type[RuntimeEvent],
             list[EventHandler],
         ] = defaultdict(list)
 
@@ -60,32 +58,41 @@ class EventBus:
 
     def subscribe(
         self,
-        event_type: Type[RuntimeEvent],
-        handler: EventHandler,
+        event_type: type[_E],
+        handler: Callable[[_E], None],
     ) -> None:
         """
         Subscribe a handler to an event type.
-        """
 
-        if handler not in self._subscribers[event_type]:
+        ``handler`` may be typed for ``event_type`` specifically (e.g.
+        ``Callable[[VersionCreated], None]``) rather than the base
+        ``EventHandler``: publish() only ever invokes it with an
+        instance of the type it was registered under (exact-type
+        dispatch), so the narrower parameter type is sound even though
+        it's stored internally as the erased ``EventHandler`` alias.
+        """
+        stored = cast(EventHandler, handler)
+
+        if stored not in self._subscribers[event_type]:
 
             self._subscribers[event_type].append(
-                handler,
+                stored,
             )
 
     def unsubscribe(
         self,
-        event_type: Type[RuntimeEvent],
-        handler: EventHandler,
+        event_type: type[_E],
+        handler: Callable[[_E], None],
     ) -> None:
         """
         Remove an event handler.
         """
+        stored = cast(EventHandler, handler)
 
-        if handler in self._subscribers[event_type]:
+        if stored in self._subscribers[event_type]:
 
             self._subscribers[event_type].remove(
-                handler,
+                stored,
             )
 
     #
@@ -175,7 +182,7 @@ class EventBus:
 
     def subscribers(
         self,
-        event_type: Type[RuntimeEvent],
+        event_type: type[RuntimeEvent],
     ) -> tuple[
         EventHandler,
         ...

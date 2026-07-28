@@ -1,12 +1,14 @@
 """Unit tests for ExecutionPipeline."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from unittest.mock import MagicMock
 from cks_runtime.pipeline.execution_pipeline import ExecutionPipeline
-from cks_runtime.transaction.transaction import RuntimeTransaction
 from cks_runtime.session.session import RuntimeSession
+from cks_runtime.transaction.transaction import RuntimeTransaction
 from cks_runtime.versioning.version import RuntimeVersion
+
 
 def create_transaction(with_core=False):
     runtime = MagicMock()

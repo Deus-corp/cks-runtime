@@ -12,24 +12,18 @@ Semantic behaviour belongs exclusively to CKS Core.
 from __future__ import annotations
 
 import time
-from abc import ABC
-from abc import abstractmethod
-
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-
 from enum import Enum
 from typing import Any
 
 from cks_runtime.core_api.bridge import CoreBridge
-
 from cks_runtime.diagnostics.diagnostic import (
     Diagnostic,
     DiagnosticSeverity,
     DiagnosticSource,
 )
-
 from cks_runtime.session.session import RuntimeSession
-
 
 # ---------------------------------------------------------------------
 # Operation lifecycle
@@ -139,7 +133,7 @@ class Operation(ABC):
     def execute(
         self,
         session: RuntimeSession,
-        executor: "OperationExecutor",
+        executor: OperationExecutor,
     ) -> ExecutionResult:
         """
         Execute the Runtime Operation.
@@ -234,7 +228,7 @@ class OperationExecutor:
         start = time.monotonic()
         try:
             result = operation.execute(session, self)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- plugin boundary; captured below, not swallowed
             result = ExecutionResult(
                 operation_id=operation.operation_id,
                 status=OperationStatus.FAILED,

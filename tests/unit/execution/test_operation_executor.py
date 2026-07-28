@@ -5,22 +5,19 @@ import pytest
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
 )
-
+from cks_runtime.diagnostics.diagnostic import (
+    Diagnostic,
+    DiagnosticSeverity,
+    DiagnosticSource,
+)
 from cks_runtime.execution.operation_executor import (
     ExecutionResult,
     Operation,
     OperationExecutor,
     OperationStatus,
 )
-
 from cks_runtime.session.session import (
     RuntimeSession,
-)
-
-from cks_runtime.diagnostics.diagnostic import (
-    Diagnostic,
-    DiagnosticSeverity,
-    DiagnosticSource,
 )
 
 

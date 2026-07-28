@@ -7,13 +7,15 @@ from __future__ import annotations
 import sqlite3
 import threading
 
+import cks
+import numpy as np
 import pytest
+
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.sqlite_storage import SQLiteStorage, _retry_on_locked
 from cks_runtime.storage.storage import ConcurrentModificationError
 from cks_runtime.versioning.version import RuntimeVersion
-import cks
 
 
 class _FlakyConnProxy:
@@ -147,7 +149,7 @@ def test_save_session_cas_rejects_stale_expected_version(storage):
 
 def test_save_version_rejects_duplicate_version_id(storage):
     storage.save_version(make_version("s1", "v1"))
-    with pytest.raises(Exception):  # sqlite3.IntegrityError
+    with pytest.raises(sqlite3.IntegrityError):  # sqlite3.IntegrityError
         storage.save_version(make_version("s1", "v1"))
 
 
@@ -478,3 +480,81 @@ def test_record_operations_survives_one_transient_lock(storage):
     storage.record_operations("s1", "v1", ops)
     assert storage._conn.calls >= 2
     assert storage.list_operations("s1") == ops
+
+
+# ---------------------------------------------------------------------------
+# search_embeddings
+# ---------------------------------------------------------------------------
+
+def _vec(*components: float) -> bytes:
+    """Pack floats as the little-endian float32 blob search_embeddings expects."""
+    return np.array(components, dtype=np.float32).tobytes()
+
+
+def test_search_embeddings_ranks_by_similarity(storage):
+    query = _vec(1.0, 0.0)
+    storage.save_object_embeddings("close", "s1", _vec(0.9, 0.436))   # near-identical
+    storage.save_object_embeddings("far", "s1", _vec(0.436, 0.9))     # near-orthogonal
+
+    results = storage.search_embeddings(query, "s1", top_k=5)
+
+    assert [oid for oid, _ in results] == ["close", "far"]
+    close_score, far_score = results[0][1], results[1][1]
+    assert close_score > far_score
+    assert 0.0 <= far_score <= close_score <= 1.0
+
+
+def test_search_embeddings_respects_top_k(storage):
+    query = _vec(1.0, 0.0)
+    for i in range(5):
+        storage.save_object_embeddings(f"obj-{i}", "s1", _vec(1.0, 0.0))
+
+    assert len(storage.search_embeddings(query, "s1", top_k=2)) == 2
+    assert len(storage.search_embeddings(query, "s1", top_k=100)) == 5
+
+
+def test_search_embeddings_is_scoped_to_session(storage):
+    query = _vec(1.0, 0.0)
+    storage.save_object_embeddings("in-session", "s1", _vec(1.0, 0.0))
+    storage.save_object_embeddings("other-session", "s2", _vec(1.0, 0.0))
+
+    results = storage.search_embeddings(query, "s1", top_k=5)
+
+    assert [oid for oid, _ in results] == ["in-session"]
+
+
+def test_search_embeddings_empty_session_returns_empty_list(storage):
+    assert storage.search_embeddings(_vec(1.0, 0.0), "no-such-session", top_k=5) == []
+
+
+def test_search_embeddings_skips_dimension_mismatches(storage):
+    query = _vec(1.0, 0.0, 0.0)
+    storage.save_object_embeddings("same-dim", "s1", _vec(1.0, 0.0, 0.0))
+    # Indexed by a different embedding model/provider -- wrong dimensionality.
+    storage.save_object_embeddings("wrong-dim", "s1", _vec(1.0, 0.0))
+
+    results = storage.search_embeddings(query, "s1", top_k=5)
+
+    assert [oid for oid, _ in results] == ["same-dim"]
+
+
+def test_search_embeddings_clamps_negative_similarity_to_zero(storage):
+    query = _vec(1.0, 0.0)
+    storage.save_object_embeddings("opposite", "s1", _vec(-1.0, 0.0))
+
+    results = storage.search_embeddings(query, "s1", top_k=5)
+
+    assert results == [("opposite", 0.0)]
+
+
+def test_object_embeddings_session_index_exists(storage):
+    """
+    Regression guard for the session_id index: search_embeddings'
+    WHERE session_id = ? query (and delete_object_embeddings') should
+    never fall back to a full table scan.
+    """
+    rows = storage._conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND tbl_name='cks_object_embeddings'"
+    ).fetchall()
+    assert ("idx_object_embeddings_session",) in rows

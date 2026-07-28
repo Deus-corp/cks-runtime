@@ -19,7 +19,7 @@ from cks_runtime.versioning.version_manager import VersionManager
 from cks_runtime_plugins.cks_core.adapter import CksCoreAdapter
 
 
-def make_structure(ids: list[str]) -> "cks.KnowledgeStructure":
+def make_structure(ids: list[str]) -> cks.KnowledgeStructure:
     objects = [
         cks.KnowledgeObject(cks.ObjectIdentity(id=i, type="Thing", name=i))
         for i in ids

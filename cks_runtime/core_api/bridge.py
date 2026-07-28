@@ -86,16 +86,17 @@ class CoreBridge:
         unchanged as long as callers don't request extra constraints
         from them.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return RuntimeValidationResult(valid=True)
 
         if extra_constraints is not None:
-            result = self._implementation.validate(
+            result = impl.validate(
                 knowledge_structure,
                 extra_constraints=extra_constraints,
             )
         else:
-            result = self._implementation.validate(knowledge_structure)
+            result = impl.validate(knowledge_structure)
 
         if not isinstance(result, RuntimeValidationResult):
             raise TypeError(
@@ -118,10 +119,11 @@ class CoreBridge:
         Delegate semantic evolution.
         """
 
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return knowledge_structure
 
-        return self._implementation.evolve(
+        return impl.evolve(
             knowledge_structure,
             operation,
         )
@@ -138,12 +140,13 @@ class CoreBridge:
         Produce canonical serialization.
         """
 
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             raise RuntimeError(
                 "No Runtime Core implementation is attached."
             )
 
-        return self._implementation.serialize(
+        return impl.serialize(
             knowledge_structure,
         )
 
@@ -159,10 +162,11 @@ class CoreBridge:
         Produce a semantic explanation.
         """
 
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return {}
 
-        return self._implementation.explain(
+        return impl.explain(
             knowledge_structure,
         )
 
@@ -171,9 +175,10 @@ class CoreBridge:
     # ------------------------------------------------------------------
 
     def diff(self, source: Any, target: Any) -> list[Any]:
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return []
-        return self._implementation.diff(source, target)
+        return impl.diff(source, target)
 
     # ------------------------------------------------------------------
     # Field-level structural diff (optional capability)
@@ -196,9 +201,10 @@ class CoreBridge:
             field-level diffing. Propagated as-is, matching
             ``hash()``/``merge()``'s contract.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             raise RuntimeError("No Runtime Core implementation is attached.")
-        return self._implementation.field_diff(source, target)
+        return impl.field_diff(source, target)
 
     @property
     def supports_field_diff(self) -> bool:
@@ -206,10 +212,11 @@ class CoreBridge:
         Whether the attached Core implementation overrides
         ``field_diff()``. Mirrors ``supports_hash``/``supports_merge``.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return False
         return (
-            type(self._implementation).field_diff
+            type(impl).field_diff
             is not CoreInterface.field_diff
         )
 
@@ -230,9 +237,10 @@ class CoreBridge:
             field-level merge synthesis. Propagated as-is, matching
             ``field_diff()``'s contract.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             raise RuntimeError("No Runtime Core implementation is attached.")
-        return self._implementation.synthesize_merge(base_object, operations)
+        return impl.synthesize_merge(base_object, operations)
 
     @property
     def supports_synthesize_merge(self) -> bool:
@@ -240,10 +248,11 @@ class CoreBridge:
         Whether the attached Core implementation overrides
         ``synthesize_merge()``. Mirrors ``supports_field_diff``.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return False
         return (
-            type(self._implementation).synthesize_merge
+            type(impl).synthesize_merge
             is not CoreInterface.synthesize_merge
         )
 
@@ -278,9 +287,10 @@ class CoreBridge:
             The two branches changed the same identity to different,
             irreconcilable results.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             raise RuntimeError("No Runtime Core implementation is attached.")
-        return self._implementation.merge(
+        return impl.merge(
             base, branch_a, branch_b, resolutions=resolutions
         )
 
@@ -293,9 +303,10 @@ class CoreBridge:
         without a try/except when they want to fail fast instead of
         catching ``NotImplementedError``.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return False
-        return type(self._implementation).merge is not CoreInterface.merge
+        return type(impl).merge is not CoreInterface.merge
 
     # ------------------------------------------------------------------
     # Subgraph query (optional capability)
@@ -326,11 +337,12 @@ class CoreBridge:
             subgraph queries. Propagated as-is, matching
             ``hash()``/``merge()``'s contract.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             raise RuntimeError(
                 "No Runtime Core implementation is attached."
             )
-        return self._implementation.query_subgraph(
+        return impl.query_subgraph(
             knowledge_structure,
             seed_ids,
             depth,
@@ -347,10 +359,11 @@ class CoreBridge:
         Whether the attached Core implementation overrides
         ``query_subgraph()``. Mirrors ``supports_merge``.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return False
         return (
-            type(self._implementation).query_subgraph
+            type(impl).query_subgraph
             is not CoreInterface.query_subgraph
         )
 
@@ -371,11 +384,12 @@ class CoreBridge:
             hashing. Propagated as-is (not swallowed) so callers can
             distinguish "no Core" from "Core doesn't support this".
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             raise RuntimeError(
                 "No Runtime Core implementation is attached."
             )
-        return self._implementation.hash(knowledge_structure)
+        return impl.hash(knowledge_structure)
 
     @property
     def supports_hash(self) -> bool:
@@ -386,6 +400,7 @@ class CoreBridge:
         want to skip integrity verification entirely instead of
         catching ``NotImplementedError``.
         """
-        if not self.available:
+        impl = self._implementation
+        if impl is None:
             return False
-        return type(self._implementation).hash is not CoreInterface.hash
+        return type(impl).hash is not CoreInterface.hash

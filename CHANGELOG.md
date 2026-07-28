@@ -19,6 +19,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.19.0] - 2026-07-28
+
+### Added
+- **Index on `cks_object_embeddings.session_id`** — accelerates embedding lookups in multi-session scenarios (EXPLAIN QUERY PLAN confirms SEARCH... USING INDEX instead of SCAN).
+- **NumPy-vectorized `search_embeddings`** — all candidate vectors are scored in a single matrix-vector product, yielding ~10× speedup on typical workloads (5000 objects). `numpy>=1.26` added as a runtime dependency.
+- **`mypy.ini` with selective strict-mode** for 9 already-clean submodules (`core_api`, `diagnostics`, `dispatcher`, `events`, `execution`, `explainability`, `metrics`, `session`, `transaction`).
+- 7 new tests for `search_embeddings` covering ranking, top_k, session isolation, dimension mismatch, and similarity clamping.
+
+### Fixed
+- All 21 mypy errors resolved: type narrowing in `CoreBridge` (16 occurrences), generic `EventBus.subscribe/unsubscribe`, `VersionManager` invariants, and `MergeOperation` private method assertion.
+- One genuinely silent `except Exception` in `MergeOperation._field_level_resolutions` now logs the failure instead of swallowing it.
+- PEP 695 generic function syntax (`[T]`) adopted for `_retry_on_locked` and `_retry_on_transient_hf_error`, replacing module-level `TypeVar`.
+
+---
+
 ## [1.18.2] - 2026-07-27
 
 ### Changed

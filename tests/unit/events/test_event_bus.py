@@ -6,8 +6,8 @@ import pytest
 
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.events.runtime_event import (
-    SessionCreated,
     SessionClosed,
+    SessionCreated,
 )
 
 

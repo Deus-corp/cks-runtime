@@ -71,9 +71,10 @@ def test_embed_batch_retries_on_429_then_gives_up(client, monkeypatch):
         call_count["n"] += 1
         return _mock_http_error_response(429)
 
-    with patch("requests.post", side_effect=always_rate_limited):
-        with pytest.raises(requests.exceptions.HTTPError):
-            client.embed_batch(["hello"])
+    with patch("requests.post", side_effect=always_rate_limited), pytest.raises(
+        requests.exceptions.HTTPError
+    ):
+        client.embed_batch(["hello"])
 
     assert call_count["n"] == 3, "should retry up to the configured max before giving up"
 
@@ -86,9 +87,10 @@ def test_embed_batch_does_not_retry_on_client_error(client, monkeypatch):
         call_count["n"] += 1
         return _mock_http_error_response(400)
 
-    with patch("requests.post", side_effect=bad_request):
-        with pytest.raises(requests.exceptions.HTTPError):
-            client.embed_batch(["hello"])
+    with patch("requests.post", side_effect=bad_request), pytest.raises(
+        requests.exceptions.HTTPError
+    ):
+        client.embed_batch(["hello"])
 
     assert call_count["n"] == 1, "a 400 is the caller's fault and must not be retried"
 

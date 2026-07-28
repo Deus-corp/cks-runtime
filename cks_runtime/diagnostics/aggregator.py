@@ -10,8 +10,7 @@ Diagnostics are never modified after insertion.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from .diagnostic import (

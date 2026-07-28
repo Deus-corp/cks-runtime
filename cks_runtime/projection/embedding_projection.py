@@ -49,5 +49,5 @@ class EmbeddingProjection:
                 session_id,
                 new_version_id,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- event listener must not break other publish() subscribers; logged below
             logger.error("Failed to write outbox task: %s", exc)

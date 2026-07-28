@@ -6,11 +6,12 @@ Represents an immutable Runtime snapshot.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
 
 
@@ -69,7 +70,7 @@ class RuntimeVersion:
     # own contract) — so we deep-copy every field explicitly instead of
     # deferring to the default pickle-based reduction.
 
-    def __copy__(self) -> "RuntimeVersion":
+    def __copy__(self) -> RuntimeVersion:
         return type(self)(
             session_id=self.session_id,
             transaction_id=self.transaction_id,
@@ -81,7 +82,7 @@ class RuntimeVersion:
             patch=self.patch,
         )
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> "RuntimeVersion":
+    def __deepcopy__(self, memo: dict[int, Any]) -> RuntimeVersion:
         new = type(self)(
             session_id=self.session_id,
             transaction_id=self.transaction_id,

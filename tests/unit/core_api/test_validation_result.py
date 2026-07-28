@@ -31,7 +31,7 @@ def test_default_metadata_is_empty():
 
 def test_validation_result_is_frozen():
     result = RuntimeValidationResult.success()
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         result.valid = False
 
 

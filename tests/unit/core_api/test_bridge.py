@@ -5,13 +5,9 @@ from __future__ import annotations
 import pytest
 
 from cks_runtime.core_api.bridge import CoreBridge
+from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
-)
-from cks_runtime.core_api.interfaces import CoreInterface
-from cks_runtime.core_api.merge_conflict import (
-    RuntimeMergeConflict,
-    RuntimeMergeConflictError,
 )
 
 

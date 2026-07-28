@@ -1,13 +1,12 @@
-from datetime import datetime
-from datetime import UTC
+from datetime import UTC, datetime
 
 from cks_runtime.events.runtime_event import (
     RuntimeEvent,
-    SessionCreated,
     SessionClosed,
+    SessionCreated,
+    TransactionAborted,
     TransactionCommitted,
     TransactionRolledBack,
-    TransactionAborted,
     VersionCreated,
 )
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import cks
 import pytest
 
-import cks
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
@@ -15,6 +15,7 @@ from cks_runtime_plugins.cks_core.adapter import (
     CksCoreAdapter,
 )
 
+# ruff: noqa: RUF012
 
 @pytest.fixture
 def adapter() -> CksCoreAdapter:
@@ -137,7 +138,7 @@ def test_validate_calls_core(monkeypatch, adapter):
     class FakeValidationResult:
         is_valid = True
         diagnostics = ()
-        metadata = {}
+        metadata: dict = {}
 
     validate.return_value = FakeValidationResult()
     monkeypatch.setattr("cks.validate", validate)
@@ -155,7 +156,7 @@ def test_validate_forwards_extra_constraints(monkeypatch, adapter):
     class FakeValidationResult:
         is_valid = True
         diagnostics = ()
-        metadata = {}
+        metadata: dict = {}
 
     validate.return_value = FakeValidationResult()
     monkeypatch.setattr("cks.validate", validate)

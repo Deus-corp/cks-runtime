@@ -5,14 +5,14 @@ for new or changed Knowledge Objects.
 
 from __future__ import annotations
 
-import logging
-import time
-import threading
 import json
+import logging
+import threading
+import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
-from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class OutboxEmbeddingWorker:
         while self._running:
             try:
                 self._process_next_task()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- one bad iteration must not kill the worker thread; logged below
                 logger.error("Worker iteration error: %s", exc)
             time.sleep(self._poll_interval)
 
@@ -88,11 +88,11 @@ class OutboxEmbeddingWorker:
 
             self._storage.complete_outbox_task(task.task_id)
             logger.info("Outbox task %s completed.", task.task_id)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- any failure must route to the retry/backoff path below; logged
             logger.error("Outbox task %s failed: %s", task.task_id, exc)
             retry_count = task.retry_count + 1
             delay_seconds = min(2 ** retry_count, 3600)
-            next_retry = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
+            next_retry = (datetime.now(UTC) + timedelta(seconds=delay_seconds)).isoformat()
             self._storage.fail_outbox_task(
                 task.task_id, retry_count, str(exc), next_retry
             )

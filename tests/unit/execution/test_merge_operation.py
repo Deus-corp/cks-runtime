@@ -4,7 +4,8 @@ Tests for MergeOperation.
 
 import cks
 import pytest
-from cks.evolution import AddObject, RemoveObject, compose
+from cks.evolution import AddObject, RemoveObject
+
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import EvolveOperation, MergeOperation
@@ -48,7 +49,6 @@ def test_merge_operation_combines_non_conflicting_branches():
     runtime = Runtime(core=CksCoreAdapter())
 
     trunk = runtime.create_session(make_structure(["root"]))
-    fork_point = runtime.latest_version(trunk)  # None: nothing committed yet
 
     branch = runtime.create_branch(trunk)
     assert branch.parent_session_id == trunk.session_id
