@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.20.1] - 2026-07-28
+
+### Changed
+- Bumped `cks-core` dependency to `>=1.12.1` (includes fix for truncated `schema.py` and new test coverage).
+- Development status promoted to **Production/Stable** in PyPI classifiers.
+- Updated internal fallback version to `1.20.1`.
+
+---
+
 ## [1.20.0] - 2026-07-28
 
 ### Added
