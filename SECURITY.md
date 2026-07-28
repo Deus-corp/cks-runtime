@@ -2,14 +2,15 @@
 
 ## Supported Versions
 
-The current CKS Runtime reference implementation is under active development.
-
-Security fixes are provided for the latest released version.
+The CKS Runtime reference implementation is actively maintained.
+Security fixes are provided for the current stable release and the
+immediately preceding minor version.
 
 | Version          | Supported |
 | ---------------- | --------- |
-| 0.1.x            | ✅        |
-| Earlier versions | ❌        |
+| 1.20.x           | ✅        |
+| 1.19.x           | ✅        |
+| < 1.19           | ❌        |
 
 ---
 
