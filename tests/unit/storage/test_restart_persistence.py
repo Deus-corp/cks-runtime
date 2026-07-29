@@ -92,11 +92,8 @@ async def test_closed_session_stays_closed_after_runtime_restart():
 
         session_id = session.session_id
         await rt1.close_session(session_id)
-        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД.
-        # rt1.storage is a SyncStorageAdapter wrapping the real
-        # SQLiteStorage -- .wrapped reaches the underlying sync
-        # instance (and its raw sqlite3 connection) directly.
-        rt1.storage.wrapped._conn.close()
+        # Закрываем первый Runtime полностью, освобождая соединение с БД
+        await rt1.aclose()
 
         # Same-process: already unreachable before this fix.
         assert rt1.get_session(session_id) is None
