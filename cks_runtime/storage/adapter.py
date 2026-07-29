@@ -163,3 +163,22 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         object_id: str | None = None,
     ) -> list[RuntimeFieldOperation]:
         return await asyncio.to_thread(self._sync.list_operations, session_id, object_id)
+
+    # ------------------------------------------------------------------
+    # Embedding search
+    # ------------------------------------------------------------------
+
+    async def search_embeddings(
+        self,
+        query_embedding: bytes,
+        session_id: str,
+        top_k: int = 5,
+    ) -> list[tuple[str, float]]:
+        search = getattr(self._sync, "search_embeddings", None)
+        if search is None:
+            return []
+        return await asyncio.to_thread(search, query_embedding, session_id, top_k)
+
+    @property
+    def supports_embedding_search(self) -> bool:
+        return hasattr(self._sync, "search_embeddings")

@@ -19,6 +19,24 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.22.1] - 2026-07-29
+
+### Fixed
+- `SyncStorageAdapter.search_embeddings` — the 1.22.0 async migration left
+  `search_embeddings` (and a `supports_embedding_search` flag) off both
+  `AsyncRuntimeStorage` and `SyncStorageAdapter`. Callers that check
+  `hasattr(runtime.storage, "search_embeddings")` (e.g. cks-mcp's
+  `search_semantic`) would silently stop finding the method once
+  `runtime.storage` became a `SyncStorageAdapter` wrapping a
+  `SQLiteStorage`. Both are now present: `AsyncRuntimeStorage` gets an
+  empty-by-default `search_embeddings` plus `supports_embedding_search`
+  (same optional-subsystem convention as outbox/operation-log), and
+  `SyncStorageAdapter` dispatches to the wrapped sync backend's
+  `search_embeddings` via `asyncio.to_thread` when the backend supports
+  it.
+
+---
+
 ## [1.22.0] - 2026-07-29
 
 ### Added

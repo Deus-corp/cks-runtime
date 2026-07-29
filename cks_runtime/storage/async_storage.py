@@ -217,3 +217,29 @@ class AsyncRuntimeStorage(ABC):
     ) -> list[RuntimeFieldOperation]:
         """Return logged field-level operations for a session. Empty by default."""
         return []
+
+    #
+    # ------------------------------------------------------------------
+    # Embedding search (optional subsystem, same convention as outbox /
+    # operation log above)
+    # ------------------------------------------------------------------
+    #
+
+    async def search_embeddings(
+        self,
+        query_embedding: bytes,
+        session_id: str,
+        top_k: int = 5,
+    ) -> list[tuple[str, float]]:
+        """
+        Return (object_id, similarity_score) pairs for the top_k closest
+        embeddings to query_embedding within the given session, ordered
+        from most to least similar. Empty by default -- backends that
+        support vector similarity search override this.
+        """
+        return []
+
+    @property
+    def supports_embedding_search(self) -> bool:
+        """Whether this storage backend supports vector similarity search."""
+        return False
