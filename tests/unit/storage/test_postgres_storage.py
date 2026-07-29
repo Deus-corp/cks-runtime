@@ -17,6 +17,7 @@ import pytest
 import pytest_asyncio
 
 from cks_runtime.session.session import RuntimeSession
+
 try:
     from cks_runtime.storage.postgres_storage import PostgresStorage
 except ImportError:
