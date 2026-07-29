@@ -209,3 +209,11 @@ class AsyncRuntimeStorage(ABC):
     def supports_operation_log(self) -> bool:
         """Whether this storage backend supports the operation log."""
         return False
+
+    async def list_operations(
+        self,
+        session_id: str,
+        object_id: str | None = None,
+    ) -> list[RuntimeFieldOperation]:
+        """Return logged field-level operations for a session. Empty by default."""
+        return []

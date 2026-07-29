@@ -19,6 +19,31 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.22.0] - 2026-07-29
+
+### Added
+- **Full async runtime:** `Runtime`, `ExecutionPipeline`, `OperationExecutor`, `Dispatcher`, and all operations are now async end-to-end. Sessions, transactions, and versions are persisted via `await`.
+- **`PostgresStorage`** — production-grade PostgreSQL backend with connection pooling, JSONB storage, and CAS concurrency control.
+- **`AsyncRuntimeStorage` ABC** — async counterpart of `RuntimeStorage` for network databases.
+- **`SyncStorageAdapter`** — transparently wraps `InMemoryStorage`/`SQLiteStorage` for async runtime, using `asyncio.to_thread` to avoid blocking the event loop.
+- **`EventBus`** now supports `async` handlers; publish is `await`-ed.
+- **`OutboxEmbeddingWorker`** runs as an `asyncio.Task` instead of a thread.
+- **Shared `patch_codec`** — operator serialization used by both SQLite and Postgres backends.
+
+### Changed
+- `Runtime` construction is split: `Runtime()` does synchronous wiring; `await Runtime.create()` performs async startup (restore sessions, start outbox worker, connect Postgres pool).
+- `Operation.execute()` is now `async` across all subclasses.
+- `SQLiteStorage` delegates operator serialization to `patch_codec`.
+
+### Known Gap
+- `cks-mcp` is still synchronous and uses `SyncStorageAdapter`; full async integration is planned as follow‑up work.
+
+### Upgrade Notes
+- All existing synchronous callers (including `cks-mcp`) continue to work unchanged — `SyncStorageAdapter` wraps sync backends automatically.
+- Direct instantiation via `Runtime()` works without `await`, but sessions/versions won't be restored from storage at startup; use `await Runtime.create()` for full recovery.
+
+---
+
 ## [1.21.0] - 2026-07-29
 
 ### Added

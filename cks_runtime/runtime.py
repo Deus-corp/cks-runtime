@@ -39,6 +39,8 @@ from cks_runtime.session.session import (
 from cks_runtime.session.session_manager import (
     SessionManager,
 )
+from cks_runtime.storage.adapter import SyncStorageAdapter
+from cks_runtime.storage.async_storage import AsyncRuntimeStorage
 from cks_runtime.storage.memory_storage import (
     InMemoryStorage,
 )
@@ -60,6 +62,48 @@ from cks_runtime.versioning.version_manager import (
 )
 
 
+def _resolve_storage(
+    storage: RuntimeStorage | AsyncRuntimeStorage | None,
+    config: RuntimeConfig,
+) -> AsyncRuntimeStorage:
+    """
+    Resolve the storage backend Runtime will actually talk to.
+
+    Runtime is async end-to-end and always awaits an
+    ``AsyncRuntimeStorage``. Three cases:
+
+    - An ``AsyncRuntimeStorage`` was passed explicitly (e.g.
+      ``PostgresStorage``) -- use it as-is.
+    - A synchronous ``RuntimeStorage`` was passed explicitly, or none
+      was and ``config.storage_path`` selects the in-memory/SQLite
+      default -- wrap it in ``SyncStorageAdapter`` so every call is
+      still genuinely non-blocking (dispatched via
+      ``asyncio.to_thread``), not just type-compatible.
+    - ``config.storage_path`` is a ``postgres://``/``postgresql://``
+      DSN and no explicit ``storage`` was given -- this function only
+      resolves the *type* of default; the actual async connection
+      happens in ``Runtime.create()``, which is why this returns
+      ``None`` for that one case instead of connecting here (this
+      function is not itself async).
+    """
+    if storage is not None:
+        if isinstance(storage, AsyncRuntimeStorage):
+            return storage
+        return SyncStorageAdapter(storage)
+
+    if config.storage_path == ":memory:":
+        return SyncStorageAdapter(InMemoryStorage())
+
+    if config.storage_path.startswith(("postgres://", "postgresql://")):
+        raise ValueError(
+            "A postgres:// storage_path requires the async "
+            "Runtime.create(...) constructor, not Runtime(...) "
+            "directly -- connecting requires an awaited call."
+        )
+
+    return SyncStorageAdapter(SQLiteStorage(config.storage_path))
+
+
 class Runtime:
     """
     Canonical Runtime façade.
@@ -79,6 +123,20 @@ class Runtime:
         - knowledge interpretation.
 
     Semantic behaviour belongs to Core plugins.
+
+    Runtime is async end-to-end: every method that touches storage
+    (directly, or by way of the execution pipeline/operations) is a
+    coroutine. Construction is split in two because of this --
+    ``__init__`` does synchronous wiring only (no I/O), and the
+    ``async def create(...)`` classmethod does the awaited part
+    (restoring persisted sessions, starting the background outbox
+    worker, and -- for a ``postgres://`` storage_path -- opening the
+    connection pool). Use ``Runtime(...)`` directly only when you
+    already have a storage instance and don't need startup restore
+    (e.g. many unit tests construct a fresh in-memory Runtime and
+    don't care about ``_restore_from_storage``); everything else,
+    including any real deployment, should go through
+    ``await Runtime.create(...)``.
     """
 
     __slots__ = (
@@ -104,7 +162,7 @@ class Runtime:
         self,
         *,
         core: CoreInterface | None = None,
-        storage: RuntimeStorage | None = None,
+        storage: RuntimeStorage | AsyncRuntimeStorage | None = None,
         config: RuntimeConfig | None = None,
         embedding_client: EmbeddingClient | None = None,
     ) -> None:
@@ -127,13 +185,7 @@ class Runtime:
         # Infrastructure
         #
 
-        self._storage = (
-            storage
-            if storage is not None
-            else InMemoryStorage()
-            if self.config.storage_path == ":memory:"
-            else SQLiteStorage(self.config.storage_path)
-        )
+        self._storage = _resolve_storage(storage, self.config)
 
         #
         # Runtime subsystems
@@ -178,7 +230,11 @@ class Runtime:
             core_bridge=self._core_bridge,
             embedding_client=self._embedding_client,
         )
-        self._outbox_worker.start()
+        # NOTE: OutboxEmbeddingWorker.start() is now async (it creates
+        # an asyncio.Task, which requires a running event loop) and is
+        # therefore NOT called here -- see create()/astart() below.
+        # A Runtime constructed via bare Runtime(...) has no running
+        # outbox worker until one of those is awaited.
 
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
@@ -191,10 +247,56 @@ class Runtime:
             executor=self._executor,
         )
 
-        # ------------------------------------------------------------------
-        # Restore persisted sessions and versions at startup
-        # ------------------------------------------------------------------
-        self._restore_from_storage()
+    @classmethod
+    async def create(
+        cls,
+        *,
+        core: CoreInterface | None = None,
+        storage: RuntimeStorage | AsyncRuntimeStorage | None = None,
+        config: RuntimeConfig | None = None,
+        embedding_client: EmbeddingClient | None = None,
+    ) -> Runtime:
+        """
+        Construct a Runtime and complete its async startup:
+
+        - if ``storage`` is omitted and ``config.storage_path`` is a
+          ``postgres://``/``postgresql://`` DSN, opens a
+          ``PostgresStorage`` connection pool for it (``psycopg`` is
+          imported lazily here, so it stays an optional dependency for
+          callers on the in-memory/SQLite defaults);
+        - restores persisted sessions from storage
+          (``_restore_from_storage``);
+        - starts the background outbox embedding worker.
+
+        This is the constructor real deployments should use. Plain
+        ``Runtime(...)`` is still available for callers (many existing
+        unit tests) that don't need startup restore or the outbox
+        worker running.
+        """
+        resolved_config = config if config is not None else RuntimeConfig()
+
+        resolved_storage = storage
+        if resolved_storage is None and resolved_config.storage_path.startswith(
+            ("postgres://", "postgresql://")
+        ):
+            # Lazy import: psycopg is an optional dependency
+            # (``cks-runtime[postgres]``) and must not become a hard
+            # import for callers on the in-memory/SQLite defaults.
+            from cks_runtime.storage.postgres_storage import PostgresStorage
+
+            resolved_storage = await PostgresStorage.connect(resolved_config.storage_path)
+
+        runtime = cls(
+            core=core,
+            storage=resolved_storage,
+            config=resolved_config,
+            embedding_client=embedding_client,
+        )
+
+        await runtime._restore_from_storage()
+        await runtime._outbox_worker.start()
+
+        return runtime
 
     #
     # ------------------------------------------------------------------
@@ -216,7 +318,7 @@ class Runtime:
     @property
     def storage(
         self,
-    ) -> RuntimeStorage:
+    ) -> AsyncRuntimeStorage:
         """
         Runtime storage backend.
         """
@@ -267,7 +369,6 @@ class Runtime:
         Runtime operation executor.
         """
         return self._executor
-    
 
     @property
     def transactions(self) -> TransactionManager:
@@ -326,7 +427,7 @@ class Runtime:
     # ------------------------------------------------------------------
     #
 
-    def create_session(
+    async def create_session(
         self,
         knowledge_structure: Any,
     ) -> RuntimeSession:
@@ -338,14 +439,14 @@ class Runtime:
             knowledge_structure,
         )
 
-        self._storage.save_session(
+        await self._storage.save_session(
             session,
         )
 
         return session
 
 
-    def create_branch(
+    async def create_branch(
         self,
         session: RuntimeSession,
         *,
@@ -395,7 +496,7 @@ class Runtime:
             parent_version_id=fork_version_id,
         )
 
-        self._storage.save_session(
+        await self._storage.save_session(
             branch,
         )
 
@@ -425,7 +526,7 @@ class Runtime:
         return self._sessions.list_sessions()
 
 
-    def close_session(
+    async def close_session(
         self,
         session_id: str,
     ) -> None:
@@ -452,7 +553,7 @@ class Runtime:
         # the 'closed' field. This mirrors create_session/create_branch,
         # which persist immediately for the same reason.
         if session is not None:
-            self._storage.save_session(
+            await self._storage.save_session(
                 session,
             )
 
@@ -476,7 +577,7 @@ class Runtime:
         )
 
 
-    def commit_transaction(
+    async def commit_transaction(
         self,
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
@@ -484,12 +585,12 @@ class Runtime:
         Commit Runtime Transaction.
         """
 
-        return self._pipeline.commit(
+        return await self._pipeline.commit(
             transaction,
         )
 
 
-    def rollback_transaction(
+    async def rollback_transaction(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
@@ -497,12 +598,12 @@ class Runtime:
         Rollback Runtime Transaction.
         """
 
-        self._pipeline.rollback(
+        await self._pipeline.rollback(
             transaction,
         )
 
 
-    def abort_transaction(
+    async def abort_transaction(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
@@ -510,7 +611,7 @@ class Runtime:
         Abort Runtime Transaction.
         """
 
-        self._pipeline.abort(
+        await self._pipeline.abort(
             transaction,
         )
 
@@ -534,10 +635,27 @@ class Runtime:
         )
 
     # ------------------------------------------------------------------
+    # Shutdown
+    # ------------------------------------------------------------------
+
+    async def aclose(self) -> None:
+        """
+        Graceful shutdown: stop the outbox worker's background task
+        and close the storage backend if it owns a resource that needs
+        closing (e.g. ``PostgresStorage``'s connection pool). Safe to
+        call even when the worker was never started (bare
+        ``Runtime(...)`` construction).
+        """
+        await self._outbox_worker.stop()
+        close = getattr(self._storage, "close", None)
+        if close is not None:
+            await close()
+
+    # ------------------------------------------------------------------
     # Restore persisted sessions and versions at startup
     # ------------------------------------------------------------------
 
-    def _restore_from_storage(self) -> None:
+    async def _restore_from_storage(self) -> None:
         """
         Load all sessions from the attached storage and register them
         with the in-memory managers.
@@ -545,6 +663,6 @@ class Runtime:
         Version history is already restored by SQLiteStorage.load_session,
         so we only need to register the sessions here.
         """
-        stored_sessions = self._storage.list_sessions()
+        stored_sessions = await self._storage.list_sessions()
         for session in stored_sessions:
             self._sessions.restore(session)

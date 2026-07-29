@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-267%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-281%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
 CKS Runtime is the canonical execution environment for
@@ -16,6 +16,7 @@ Where **CKS Core** defines the semantics of knowledge,
 Runtime provides the infrastructure required to execute,
 manage, version, persist and expose Canonical Knowledge Structures
 without becoming a semantic authority itself.
+**Now fully async** with PostgreSQL support.
 
 ---
 
@@ -265,6 +266,20 @@ runtime.commit_transaction(tx3)
 
 ---
 
+## Storage Backends
+
+CKS Runtime supports pluggable storage backends through a unified async interface (`AsyncRuntimeStorage`):
+
+| Backend | Type | Status | Notes |
+|---------|------|--------|-------|
+| **InMemoryStorage** | Sync | ✅ Stable | For testing and ephemeral sessions |
+| **SQLiteStorage** | Sync | ✅ Stable | Persistent, single‑writer, WAL mode |
+| **PostgresStorage** | Async | ✅ Stable | Production‑grade, connection pooling, JSONB, concurrent writers |
+
+Sync backends (`InMemoryStorage`, `SQLiteStorage`) are automatically adapted to the async interface via `SyncStorageAdapter` (using `asyncio.to_thread`), so existing code works unchanged. Use `await Runtime.create(...)` for full async startup, or plain `Runtime(...)` for lightweight testing without persistence.
+
+---
+
 # Documentation
 
 The Runtime Standard consists of the following normative specifications.
@@ -301,7 +316,8 @@ Current implementation status (v1.5.0):
 | Version History | ✅ Complete |
 | Diagnostics | ✅ Complete |
 | Storage Abstraction | ✅ Complete |
-| Runtime API | ✅ Complete |
+| **Async Runtime** | ✅ Complete |
+| **PostgreSQL Backend** | ✅ Complete |
 | Core Integration (CoreBridge) | ✅ Complete |
 | Execution Engine (Operations + Dispatcher) | ✅ Complete |
 | Event System | ✅ Complete |
@@ -309,12 +325,10 @@ Current implementation status (v1.5.0):
 | Structural Diff | ✅ Complete |
 | Query Subgraph | ✅ Complete |
 | Persistent Storage (SQLite) | ✅ Complete |
-| Test Suite | ✅ 267+ tests passing |
+| Test Suite | ✅ 281+ tests passing |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
-
-Future work focuses on persistent storage and distributed sessions.
 
 Future work focuses on Phase 3 (Event System) as outlined in the
 [Roadmap](ROADMAP.md).

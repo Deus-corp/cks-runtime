@@ -130,13 +130,22 @@ class Operation(ABC):
         )
 
     @abstractmethod
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor: OperationExecutor,
     ) -> ExecutionResult:
         """
         Execute the Runtime Operation.
+
+        ``async`` uniformly across every subclass, even though most
+        never await anything: only ``MergeOperation``'s ADR-007
+        fast-path reads the operation log from storage. Python doesn't
+        allow a caller to ``await`` some subclasses' ``execute()`` and
+        call others directly when dispatch is polymorphic (as it is
+        in ``OperationExecutor.execute``/``Dispatcher.dispatch``), so
+        the signature has to be async everywhere for the one subclass
+        that needs it.
         """
 
 
@@ -202,7 +211,7 @@ class OperationExecutor:
 
         return self._storage
 
-    def execute(
+    async def execute(
         self,
         operation: Operation,
         session: RuntimeSession,
@@ -227,7 +236,7 @@ class OperationExecutor:
         """
         start = time.monotonic()
         try:
-            result = operation.execute(session, self)
+            result = await operation.execute(session, self)
         except Exception as exc:  # noqa: BLE001 -- plugin boundary; captured below, not swallowed
             result = ExecutionResult(
                 operation_id=operation.operation_id,

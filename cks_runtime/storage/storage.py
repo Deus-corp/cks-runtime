@@ -239,6 +239,23 @@ class RuntimeStorage(ABC):
         """Whether this storage backend supports the operation log."""
         return False
 
+    def list_operations(
+        self,
+        session_id: str,
+        object_id: str | None = None,
+    ) -> list[RuntimeFieldOperation]:
+        """
+        Return logged field-level operations for a session (optionally
+        filtered to one object_id), oldest first. Empty by default --
+        backends that support the operation log override this. Only
+        meaningful when ``supports_operation_log`` is true; callers
+        (``MergeOperation``'s ADR-007 fast path) already check that
+        before calling this, so the empty-list default never needs to
+        be distinguished from "not supported" by callers that skip the
+        guard.
+        """
+        return []
+
 
 @dataclass(frozen=True, slots=True)
 class OutboxTask:

@@ -50,7 +50,7 @@ class ExecutionPipeline:
     # ------------------------------------------------------------------
     #
 
-    def commit(
+    async def commit(
         self,
         transaction: RuntimeTransaction,
     ) -> RuntimeVersion:
@@ -69,14 +69,14 @@ class ExecutionPipeline:
         )
 
         if transaction.operations or transaction.requests:
-            self._execute_operations(transaction)
+            await self._execute_operations(transaction)
         else:
             validation = self._validate(transaction)
             self._collect_diagnostics(validation)
-            self._quality_gate(validation, transaction)
+            await self._quality_gate(validation, transaction)
 
-        version = self._create_version(transaction, initial_state)
-        self._persist(
+        version = await self._create_version(transaction, initial_state)
+        await self._persist(
             version,
             transaction,
             expected_version_id=expected_version_id,
@@ -84,7 +84,7 @@ class ExecutionPipeline:
         )
         self._finalize(transaction)
 
-        self._runtime.events.publish(
+        await self._runtime.events.publish(
             TransactionCommitted(
                 transaction_id=transaction.transaction_id,
                 session_id=transaction.session.session_id,
@@ -99,7 +99,7 @@ class ExecutionPipeline:
     # ------------------------------------------------------------------
     #
 
-    def rollback(
+    async def rollback(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
@@ -122,11 +122,11 @@ class ExecutionPipeline:
 
         self._runtime.transactions.rollback(transaction)
 
-        self._runtime.storage.save_session(
+        await self._runtime.storage.save_session(
             transaction.session,
         )
 
-        self._runtime.events.publish(
+        await self._runtime.events.publish(
             TransactionRolledBack(
                 transaction_id=transaction.transaction_id,
                 session_id=transaction.session.session_id,
@@ -139,7 +139,7 @@ class ExecutionPipeline:
     # ------------------------------------------------------------------
     #
 
-    def abort(
+    async def abort(
         self,
         transaction: RuntimeTransaction,
     ) -> None:
@@ -149,11 +149,11 @@ class ExecutionPipeline:
 
         self._runtime.transactions.abort(transaction)
 
-        self._runtime.storage.save_session(
+        await self._runtime.storage.save_session(
             transaction.session,
         )
 
-        self._runtime.events.publish(
+        await self._runtime.events.publish(
             TransactionAborted(
                 transaction_id=transaction.transaction_id,
                 session_id=transaction.session.session_id,
@@ -191,7 +191,7 @@ class ExecutionPipeline:
                 validation.diagnostics,
             )
 
-    def _quality_gate(
+    async def _quality_gate(
         self,
         validation: RuntimeValidationResult,
         transaction: RuntimeTransaction,
@@ -203,9 +203,9 @@ class ExecutionPipeline:
         if validation.valid:
             return
 
-        self.rollback(transaction)
+        await self.rollback(transaction)
 
-        self._runtime.events.publish(
+        await self._runtime.events.publish(
             ValidationFailed(
                 transaction_id=transaction.transaction_id,
                 session_id=transaction.session.session_id,
@@ -217,7 +217,7 @@ class ExecutionPipeline:
             "Runtime commit aborted because semantic validation failed."
         )
 
-    def _create_version(
+    async def _create_version(
         self,
         transaction: RuntimeTransaction,
         initial_state: Any,
@@ -232,7 +232,7 @@ class ExecutionPipeline:
             node_id=node_id,
         )
 
-        self._runtime.events.publish(
+        await self._runtime.events.publish(
             VersionCreated(
                 version_id=version.version_id,
                 session_id=transaction.session.session_id,
@@ -242,7 +242,7 @@ class ExecutionPipeline:
 
         return version
 
-    def _persist(
+    async def _persist(
         self,
         version: RuntimeVersion,
         transaction: RuntimeTransaction,
@@ -253,16 +253,16 @@ class ExecutionPipeline:
         Persist Runtime state.
         """
 
-        self._runtime.storage.save_version(version)
+        await self._runtime.storage.save_version(version)
 
-        self._runtime.storage.save_session(
+        await self._runtime.storage.save_session(
             transaction.session,
             expected_version_id=expected_version_id,
         )
 
-        self._record_operations(version, transaction, initial_state)
+        await self._record_operations(version, transaction, initial_state)
 
-    def _record_operations(
+    async def _record_operations(
         self,
         version: RuntimeVersion,
         transaction: RuntimeTransaction,
@@ -294,7 +294,7 @@ class ExecutionPipeline:
         if not operations:
             return
 
-        self._runtime.storage.record_operations(
+        await self._runtime.storage.record_operations(
             session_id=transaction.session.session_id,
             version_id=version.version_id,
             operations=operations,
@@ -313,14 +313,14 @@ class ExecutionPipeline:
         )
     
 
-    def _execute_operations(self, transaction) -> None:
+    async def _execute_operations(self, transaction) -> None:
         executor = self._runtime.executor
         dispatcher = getattr(self._runtime, 'dispatcher', None)
         session = transaction.session
 
         # 1. Готовые операции (старый путь)
         for op in transaction.operations:
-            result = executor.execute(op, session)
+            result = await executor.execute(op, session)
             # Record the result before any failure handling. Callers
             # (e.g. cks-mcp's validate_knowledge) inspect
             # transaction.results after catching the RuntimeError that
@@ -331,14 +331,14 @@ class ExecutionPipeline:
             # so recording first is safe on both the success and
             # failure paths.
             transaction.add_result(result)
-            self._handle_result(result, op.operation_id, transaction)
+            await self._handle_result(result, op.operation_id, transaction)
             self._apply_state_mutation(op, result, session)
 
         # 2. DispatchRequest (новый путь)
         if dispatcher is not None and transaction.requests:
             for req in transaction.requests:
                 context = ExecutionContext(session=session, executor=executor)
-                result = dispatcher.dispatch(req, context)
+                result = await dispatcher.dispatch(req, context)
                 # Mirrors the transaction.operations loop above: record
                 # the result and write back any state change *before*
                 # _handle_result can raise, and use result.operation
@@ -349,12 +349,12 @@ class ExecutionPipeline:
                 # merge/revert_version results instead of committing
                 # them to session.knowledge_structure.
                 transaction.add_result(result)
-                self._handle_result(result, req.operation_id, transaction)
+                await self._handle_result(result, req.operation_id, transaction)
                 self._apply_state_mutation(result.operation, result, session)
 
-    def _handle_result(self, result, operation_id, transaction):
+    async def _handle_result(self, result, operation_id, transaction):
         if result.status == OperationStatus.FAILED:
-            self.rollback(transaction)
+            await self.rollback(transaction)
             raise RuntimeError(f"Operation {operation_id} failed: {result.error}")
         if result.diagnostics:
             self._runtime.diagnostics.extend(result.diagnostics)

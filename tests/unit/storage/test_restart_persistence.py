@@ -6,14 +6,17 @@ import os
 import tempfile
 
 import cks
+import pytest
 
 from cks_runtime.config import RuntimeConfig
 from cks_runtime.operations.operation_types import ValidateOperation
 from cks_runtime.runtime import Runtime
 from cks_runtime_plugins.cks_core import CksCoreAdapter
 
+pytestmark = pytest.mark.asyncio
 
-def test_sessions_survive_runtime_restart():
+
+async def test_sessions_survive_runtime_restart():
     """Create a session with a version in one Runtime, then verify
     it is still accessible from a second Runtime attached to the same
     storage file."""
@@ -28,18 +31,16 @@ def test_sessions_survive_runtime_restart():
 
         # First Runtime: create session and commit a version
         config = RuntimeConfig(storage_path=path)
-        rt1 = Runtime(core=CksCoreAdapter(), config=config)
-        session = rt1.create_session(ks)
+        rt1 = await Runtime.create(core=CksCoreAdapter(), config=config)
+        session = await rt1.create_session(ks)
         tx = rt1.begin_transaction(session)
         tx.add_operation(ValidateOperation("v1", knowledge_structure=ks))
-        version = rt1.commit_transaction(tx)
+        version = await rt1.commit_transaction(tx)
         assert session.version_count == 1
-
-        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД
-        rt1._storage._conn.close()
+        await rt1.aclose()
 
         # Second Runtime: same storage, simulate restart
-        rt2 = Runtime(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
+        rt2 = await Runtime.create(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
 
         # Session must be found
         restored = rt2.get_session(session.session_id)
@@ -49,11 +50,12 @@ def test_sessions_survive_runtime_restart():
 
         # list_sessions must include it
         assert session.session_id in [s.session_id for s in rt2.list_sessions()]
+        await rt2.aclose()
     finally:
         os.unlink(path)
 
 
-def test_closed_session_stays_closed_after_runtime_restart():
+async def test_closed_session_stays_closed_after_runtime_restart():
     """
     Regression test: Runtime.close_session() used to only update the
     in-memory registry (via SessionManager.close_session(), which
@@ -82,25 +84,28 @@ def test_closed_session_stays_closed_after_runtime_restart():
         )
 
         config = RuntimeConfig(storage_path=path)
-        rt1 = Runtime(core=CksCoreAdapter(), config=config)
-        session = rt1.create_session(ks)
+        rt1 = await Runtime.create(core=CksCoreAdapter(), config=config)
+        session = await rt1.create_session(ks)
         tx = rt1.begin_transaction(session)
         tx.add_operation(ValidateOperation("v1", knowledge_structure=ks))
-        rt1.commit_transaction(tx)
+        await rt1.commit_transaction(tx)
 
         session_id = session.session_id
-        rt1.close_session(session_id)
+        await rt1.close_session(session_id)
+        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД.
+        # rt1.storage is a SyncStorageAdapter wrapping the real
+        # SQLiteStorage -- .wrapped reaches the underlying sync
+        # instance (and its raw sqlite3 connection) directly.
+        rt1.storage.wrapped._conn.close()
 
         # Same-process: already unreachable before this fix.
         assert rt1.get_session(session_id) is None
 
-        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД
-        rt1._storage._conn.close()
-
         # Simulate a restart: a fresh Runtime attached to the same storage file.
-        rt2 = Runtime(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
+        rt2 = await Runtime.create(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
 
         assert rt2.get_session(session_id) is None
         assert session_id not in [s.session_id for s in rt2.list_sessions()]
+        await rt2.aclose()
     finally:
         os.unlink(path)

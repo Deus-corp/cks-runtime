@@ -84,7 +84,7 @@ class Dispatcher:
         """
         return self._executor
 
-    def dispatch(
+    async def dispatch(
         self,
         request: DispatchRequest,
         context: ExecutionContext,
@@ -127,7 +127,7 @@ class Dispatcher:
         # Delegate execution.
         #
 
-        result = self.executor.execute(
+        result = await self.executor.execute(
             operation,
             context.session,
         )

@@ -5,14 +5,14 @@ for new or changed Knowledge Objects.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import threading
-import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
+from cks_runtime.storage.async_storage import AsyncRuntimeStorage
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +22,21 @@ class OutboxEmbeddingWorker:
     Background worker that reads tasks from the outbox, computes text
     representations for added/modified objects, generates embeddings,
     and stores them in cks_object_embeddings.
+
+    Runs as an ``asyncio.Task`` (not a thread): the poll loop and every
+    storage call are ``await``-ed directly against the runtime's own
+    ``AsyncRuntimeStorage``, so there is exactly one execution model in
+    play, not a background thread quietly calling into storage
+    alongside the event loop. ``EmbeddingClient.embed_batch`` is still
+    a blocking, synchronous call (a plain HTTP request under the
+    hood) -- that one call is dispatched via ``asyncio.to_thread`` so
+    it doesn't stall the loop for the duration of the request, without
+    requiring an async-native embedding client.
     """
 
     def __init__(
         self,
-        storage: Any,
+        storage: AsyncRuntimeStorage,
         core_bridge: Any,
         embedding_client: EmbeddingClient | None = None,
         poll_interval: float = 2.0,
@@ -36,16 +46,16 @@ class OutboxEmbeddingWorker:
         self._embedding_client = embedding_client or StubEmbeddingClient()
         self._poll_interval = poll_interval
         self._running = False
-        self._thread: threading.Thread | None = None
+        self._task: asyncio.Task[None] | None = None
 
-    def start(self) -> None:
+    async def start(self) -> None:
         if self._running:
             return
         if not getattr(self._storage, "supports_outbox", False):
             # No point polling forever: a backend that doesn't
             # implement the outbox (e.g. InMemoryStorage) will never
             # have anything queued for dequeue_next_outbox_task to
-            # find. Staying stopped avoids a background thread that
+            # find. Staying stopped avoids a background task that
             # spins on a no-op every poll_interval indefinitely.
             logger.info(
                 "%s does not support the projection outbox; "
@@ -54,26 +64,30 @@ class OutboxEmbeddingWorker:
             )
             return
         self._running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        self._task = asyncio.create_task(self._run())
         logger.info("OutboxEmbeddingWorker started.")
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         self._running = False
-        if self._thread is not None:
-            self._thread.join(timeout=5)
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
         logger.info("OutboxEmbeddingWorker stopped.")
 
-    def _run(self) -> None:
+    async def _run(self) -> None:
         while self._running:
             try:
-                self._process_next_task()
-            except Exception as exc:  # noqa: BLE001 -- one bad iteration must not kill the worker thread; logged below
+                await self._process_next_task()
+            except Exception as exc:  # noqa: BLE001 -- one bad iteration must not kill the worker task; logged below
                 logger.error("Worker iteration error: %s", exc)
-            time.sleep(self._poll_interval)
+            await asyncio.sleep(self._poll_interval)
 
-    def _process_next_task(self) -> None:
-        task = self._storage.dequeue_next_outbox_task()
+    async def _process_next_task(self) -> None:
+        task = await self._storage.dequeue_next_outbox_task()
         if task is None:
             return
 
@@ -82,22 +96,22 @@ class OutboxEmbeddingWorker:
                 payload = json.loads(task.payload)
                 prev_version_id = payload.get("previous_version_id")
                 new_version_id = payload.get("new_version_id")
-                self._execute_task(task.session_id, prev_version_id, new_version_id)
+                await self._execute_task(task.session_id, prev_version_id, new_version_id)
             else:
                 raise ValueError(f"Unknown task type: {task.task_type}")
 
-            self._storage.complete_outbox_task(task.task_id)
+            await self._storage.complete_outbox_task(task.task_id)
             logger.info("Outbox task %s completed.", task.task_id)
         except Exception as exc:  # noqa: BLE001 -- any failure must route to the retry/backoff path below; logged
             logger.error("Outbox task %s failed: %s", task.task_id, exc)
             retry_count = task.retry_count + 1
             delay_seconds = min(2 ** retry_count, 3600)
             next_retry = (datetime.now(UTC) + timedelta(seconds=delay_seconds)).isoformat()
-            self._storage.fail_outbox_task(
+            await self._storage.fail_outbox_task(
                 task.task_id, retry_count, str(exc), next_retry
             )
 
-    def _execute_task(
+    async def _execute_task(
         self,
         session_id: str,
         prev_version_id: str | None,
@@ -105,7 +119,7 @@ class OutboxEmbeddingWorker:
     ) -> None:
         # Load versions
         # Load session to reconstruct version state (handles delta versions)
-        session = self._storage.load_session(session_id)
+        session = await self._storage.load_session(session_id)
         if session is None:
             raise ValueError(f"Session {session_id} not found")
 
@@ -167,17 +181,22 @@ class OutboxEmbeddingWorker:
 
         if ids_to_remove:
             for object_id in ids_to_remove:
-                self._storage.delete_object_embeddings(object_id, session_id)
+                await self._storage.delete_object_embeddings(object_id, session_id)
 
         if not objects_to_embed:
             return
 
-        # Generate embeddings using the configured client
+        # Generate embeddings using the configured client. embed_batch
+        # is a blocking call (synchronous HTTP request under the hood)
+        # -- offloaded via to_thread so it doesn't stall the event loop
+        # for the duration of the request.
         texts = [self._format_for_embedding(obj) for obj in objects_to_embed]
-        embeddings = self._embedding_client.embed_batch(texts, normalize=True)
+        embeddings = await asyncio.to_thread(
+            self._embedding_client.embed_batch, texts, normalize=True
+        )
 
         for obj, embedding in zip(objects_to_embed, embeddings):
-            self._storage.save_object_embeddings(obj.identity.id, session_id, embedding)
+            await self._storage.save_object_embeddings(obj.identity.id, session_id, embedding)
 
     @staticmethod
     def _format_for_embedding(obj: Any) -> str:

@@ -6,10 +6,10 @@ to the outbox table for asynchronous embedding generation.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.events.runtime_event import VersionCreated
+from cks_runtime.storage.async_storage import AsyncRuntimeStorage
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class EmbeddingProjection:
     or changed Knowledge Objects.
     """
 
-    def __init__(self, event_bus: EventBus, storage: Any) -> None:
+    def __init__(self, event_bus: EventBus, storage: AsyncRuntimeStorage) -> None:
         self._event_bus = event_bus
         self._storage = storage
 
@@ -29,7 +29,7 @@ class EmbeddingProjection:
         self._event_bus.subscribe(VersionCreated, self._on_version_created)
         logger.info("EmbeddingProjection started, listening for VersionCreated events.")
 
-    def _on_version_created(self, event: VersionCreated) -> None:
+    async def _on_version_created(self, event: VersionCreated) -> None:
         """Callback: write a task to the outbox."""
         session_id = event.session_id
         # previous_version_id is left as None here; the worker now
@@ -39,7 +39,7 @@ class EmbeddingProjection:
         new_version_id = event.version_id
 
         try:
-            self._storage.enqueue_outbox_task(
+            await self._storage.enqueue_outbox_task(
                 event.session_id,
                 previous_version_id,
                 event.version_id,

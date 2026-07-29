@@ -11,6 +11,8 @@ from cks_runtime.operations.operation_types import DiffOperation, EvolveOperatio
 from cks_runtime.runtime import Runtime
 from cks_runtime_plugins.cks_core import CksCoreAdapter
 
+pytestmark = pytest.mark.asyncio
+
 
 def make_structure(ids: list[str]) -> cks.KnowledgeStructure:
     objects = [
@@ -20,7 +22,7 @@ def make_structure(ids: list[str]) -> cks.KnowledgeStructure:
     return cks.KnowledgeStructure(objects)
 
 
-def _evolve(runtime: Runtime, session, new_id: str):
+async def _evolve(runtime: Runtime, session, new_id: str):
     obj = cks.KnowledgeObject(cks.ObjectIdentity(id=new_id, type="Thing", name=new_id))
     tx = runtime.begin_transaction(session)
     tx.add_operation(
@@ -30,18 +32,18 @@ def _evolve(runtime: Runtime, session, new_id: str):
             evolution=[AddObject(obj)],
         )
     )
-    return runtime.commit_transaction(tx)
+    return await runtime.commit_transaction(tx)
 
 
-def test_diff_operation_against_target_structure():
-    runtime = Runtime(core=CksCoreAdapter())
-    session = runtime.create_session(make_structure(["a"]))
+async def test_diff_operation_against_target_structure():
+    runtime = await Runtime.create(core=CksCoreAdapter())
+    session = await runtime.create_session(make_structure(["a"]))
 
     target = make_structure(["a", "b"])
 
     tx = runtime.begin_transaction(session)
     tx.add_operation(DiffOperation("diff", target_structure=target))
-    runtime.commit_transaction(tx)
+    await runtime.commit_transaction(tx)
 
     assert len(tx.results) == 1
     result = tx.results[0]
@@ -51,12 +53,12 @@ def test_diff_operation_against_target_structure():
     assert reconstructed.root_hash == target.root_hash
 
 
-def test_diff_operation_requires_a_target():
-    runtime = Runtime(core=CksCoreAdapter())
-    session = runtime.create_session(make_structure(["a"]))
+async def test_diff_operation_requires_a_target():
+    runtime = await Runtime.create(core=CksCoreAdapter())
+    session = await runtime.create_session(make_structure(["a"]))
 
     tx = runtime.begin_transaction(session)
     tx.add_operation(DiffOperation("diff"))
 
     with pytest.raises(RuntimeError, match="failed"):
-        runtime.commit_transaction(tx)
+        await runtime.commit_transaction(tx)

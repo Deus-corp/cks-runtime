@@ -20,6 +20,8 @@ from cks_runtime.session.session import (
     RuntimeSession,
 )
 
+pytestmark = pytest.mark.asyncio
+
 
 class _FakeCoreAdapter:
     """Minimal Core Adapter stub."""
@@ -36,7 +38,7 @@ class _FakeCoreAdapter:
 class _SuccessfulOperation(Operation):
     """Operation that always succeeds."""
 
-    def execute(
+    async def execute(
         self,
         session,
         executor,
@@ -54,7 +56,7 @@ class _SuccessfulOperation(Operation):
 class _DiagnosticOperation(Operation):
     """Operation that succeeds while emitting diagnostics."""
 
-    def execute(
+    async def execute(
         self,
         session,
         executor,
@@ -78,7 +80,7 @@ class _DiagnosticOperation(Operation):
 class _FailingOperation(Operation):
     """Operation that raises an exception."""
 
-    def execute(
+    async def execute(
         self,
         session,
         executor,
@@ -105,14 +107,14 @@ def session():
     )
 
 
-def test_executor_exposes_core_adapter(
+async def test_executor_exposes_core_adapter(
     executor,
 ):
 
     assert executor.core is not None
 
 
-def test_execute_success(
+async def test_execute_success(
     executor,
     session,
 ):
@@ -121,7 +123,7 @@ def test_execute_success(
         "op-1",
     )
 
-    result = executor.execute(
+    result = await executor.execute(
         operation,
         session,
     )
@@ -148,7 +150,7 @@ def test_execute_success(
     ) == 0
 
 
-def test_execute_failure(
+async def test_execute_failure(
     executor,
     session,
 ):
@@ -157,7 +159,7 @@ def test_execute_failure(
         "op-2",
     )
 
-    result = executor.execute(
+    result = await executor.execute(
         operation,
         session,
     )
@@ -194,7 +196,7 @@ def test_execute_failure(
     assert diagnostic.message == "simulated failure"
 
 
-def test_executor_does_not_append_diagnostics_to_session(
+async def test_executor_does_not_append_diagnostics_to_session(
     executor,
     session,
 ):
@@ -204,7 +206,7 @@ def test_executor_does_not_append_diagnostics_to_session(
 
     before = len(session.diagnostics)
 
-    result = executor.execute(operation, session)
+    result = await executor.execute(operation, session)
 
     # Диагностики должны быть в результате операции
     assert result.succeeded
@@ -215,7 +217,7 @@ def test_executor_does_not_append_diagnostics_to_session(
     assert after == before
 
 
-def test_success_without_diagnostics_does_not_modify_session(
+async def test_success_without_diagnostics_does_not_modify_session(
     executor,
     session,
 ):
@@ -228,7 +230,7 @@ def test_success_without_diagnostics_does_not_modify_session(
         session.diagnostics,
     )
 
-    executor.execute(
+    await executor.execute(
         operation,
         session,
     )

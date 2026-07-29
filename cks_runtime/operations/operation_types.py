@@ -35,7 +35,7 @@ class ValidateOperation(Operation):
         self.knowledge_structure = knowledge_structure
         self.extra_constraints = extra_constraints
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -69,7 +69,7 @@ class EvolveOperation(Operation):
         self.knowledge_structure = knowledge_structure
         self.evolution = evolution
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -96,7 +96,7 @@ class SerializeOperation(Operation):
         super().__init__(operation_id, metadata=metadata)
         self.knowledge_structure = knowledge_structure
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -123,7 +123,7 @@ class ExplainOperation(Operation):
         super().__init__(operation_id, metadata=metadata)
         self.knowledge_structure = knowledge_structure
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -177,7 +177,7 @@ class QuerySubgraphOperation(Operation):
         self.type_weights = type_weights
         self.compact_mode = compact_mode
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -220,7 +220,7 @@ class ListVersionsOperation(Operation):
     """List all versions in the current session history."""
     operation_id: str = "list_versions"
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -255,7 +255,7 @@ class RevertVersionOperation(Operation):
         super().__init__(operation_id, metadata=metadata)
         self.target_version_id = target_version_id
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -295,7 +295,7 @@ class DiffOperation(Operation):
         self.target_version_id = target_version_id
         self.target_structure = target_structure
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -387,7 +387,7 @@ class MergeOperation(Operation):
         self.base_structure = base_structure
         self.resolutions = resolutions
 
-    def execute(
+    async def execute(
         self,
         session: RuntimeSession,
         executor,
@@ -473,7 +473,7 @@ class MergeOperation(Operation):
             # identities -- if so, synthesize resolutions for those
             # and retry once. Explicit self.resolutions still wins
             # over an auto-computed one for the same id.
-            auto = self._field_level_resolutions(
+            auto = await self._field_level_resolutions(
                 exc.conflicts, session, base_version_id, executor
             )
             if not auto:
@@ -508,7 +508,7 @@ class MergeOperation(Operation):
             payload=merged,
         )
 
-    def _field_level_resolutions(
+    async def _field_level_resolutions(
         self,
         conflicts: list[Any],
         session: RuntimeSession,
@@ -552,12 +552,12 @@ class MergeOperation(Operation):
 
             a_ops = [
                 op
-                for op in storage.list_operations(session.session_id, object_id=oid)
+                for op in await storage.list_operations(session.session_id, object_id=oid)
                 if op.version_id in a_versions
             ]
             b_ops = [
                 op
-                for op in storage.list_operations(
+                for op in await storage.list_operations(
                     self.source_session.session_id, object_id=oid
                 )
                 if op.version_id in b_versions

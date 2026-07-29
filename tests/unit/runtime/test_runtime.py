@@ -11,12 +11,14 @@ from cks_runtime.operations.operation_types import (
 )
 from cks_runtime.versioning.version import RuntimeVersion
 
+pytestmark = pytest.mark.asyncio
 
-def test_runtime_create_session():
+
+async def test_runtime_create_session():
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     assert session.knowledge_structure == {}
 
@@ -25,25 +27,25 @@ def test_runtime_create_session():
     ) is session
 
 
-def test_runtime_list_sessions():
+async def test_runtime_list_sessions():
 
     runtime = Runtime()
 
-    runtime.create_session({})
-    runtime.create_session({})
+    await runtime.create_session({})
+    await runtime.create_session({})
 
     assert len(
         runtime.list_sessions()
     ) == 2
 
 
-def test_runtime_close_session():
+async def test_runtime_close_session():
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
-    runtime.close_session(
+    await runtime.close_session(
         session.session_id,
     )
 
@@ -52,11 +54,11 @@ def test_runtime_close_session():
     ) is None
 
 
-def test_runtime_begin_transaction():
+async def test_runtime_begin_transaction():
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     tx = runtime.begin_transaction(
         session,
@@ -65,17 +67,17 @@ def test_runtime_begin_transaction():
     assert session.active_transaction is tx
 
 
-def test_runtime_commit_transaction():
+async def test_runtime_commit_transaction():
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     tx = runtime.begin_transaction(
         session,
     )
 
-    version = runtime.commit_transaction(
+    version = await runtime.commit_transaction(
         tx,
     )
 
@@ -91,54 +93,54 @@ def test_runtime_commit_transaction():
     ) is version
 
 
-def test_runtime_rollback_transaction():
+async def test_runtime_rollback_transaction():
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     tx = runtime.begin_transaction(
         session,
     )
 
-    runtime.rollback_transaction(tx)
+    await runtime.rollback_transaction(tx)
 
     assert session.active_transaction is None
 
 
-def test_runtime_abort_transaction():
+async def test_runtime_abort_transaction():
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     tx = runtime.begin_transaction(
         session,
     )
 
-    runtime.abort_transaction(tx)
+    await runtime.abort_transaction(tx)
 
     assert session.active_transaction is None
 
 
-def test_runtime_has_execution_pipeline():
+async def test_runtime_has_execution_pipeline():
 
     runtime = Runtime()
 
     assert runtime.pipeline is not None
 
 
-def test_runtime_commit_delegates_to_pipeline(monkeypatch):
+async def test_runtime_commit_delegates_to_pipeline(monkeypatch):
 
     runtime = Runtime()
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     tx = runtime.begin_transaction(session)
 
     called = False
 
-    def fake_commit(transaction):
+    async def fake_commit(transaction):
         nonlocal called
 
         called = True
@@ -156,7 +158,7 @@ def test_runtime_commit_delegates_to_pipeline(monkeypatch):
         fake_commit,
     )
 
-    runtime.commit_transaction(tx)
+    await runtime.commit_transaction(tx)
 
     assert called is True
 
@@ -187,82 +189,82 @@ class FakeCore(CoreInterface):
 
 
 # Новые тесты
-def test_commit_with_validate_operation_success():
+async def test_commit_with_validate_operation_success():
     """Успешная валидация через ValidateOperation должна создавать версию."""
     core = FakeCore(valid=True)
     runtime = Runtime(core=core)
-    session = runtime.create_session({"test": True})
+    session = await runtime.create_session({"test": True})
     tx = runtime.begin_transaction(session)
     tx.add_operation(ValidateOperation("op1", knowledge_structure=session.knowledge_structure))
 
-    version = runtime.commit_transaction(tx)
+    version = await runtime.commit_transaction(tx)
     assert isinstance(version, RuntimeVersion)
     assert session.active_transaction is None
     assert runtime.latest_version(session) is version
 
 
-def test_commit_with_validate_operation_failure():
+async def test_commit_with_validate_operation_failure():
     """
     Невалидная структура должна вызывать ошибку при коммите.
     """
     core = FakeCore(valid=False)
     runtime = Runtime(core=core)
-    session = runtime.create_session({"invalid": True})
+    session = await runtime.create_session({"invalid": True})
     tx = runtime.begin_transaction(session)
     tx.add_operation(ValidateOperation("op1", knowledge_structure=session.knowledge_structure))
 
     with pytest.raises(RuntimeError, match="Operation op1 failed"):
-        runtime.commit_transaction(tx)
+        await runtime.commit_transaction(tx)
 
     # Сессия не должна быть изменена
     assert session.active_transaction is None
     assert runtime.latest_version(session) is None
 
 
-def test_commit_with_serialize_operation():
+async def test_commit_with_serialize_operation():
     """Операция сериализации должна выполняться без ошибок."""
     core = FakeCore(valid=True)
     runtime = Runtime(core=core)
-    session = runtime.create_session({"data": "test"})
+    session = await runtime.create_session({"data": "test"})
     tx = runtime.begin_transaction(session)
     tx.add_operation(SerializeOperation("op2", knowledge_structure=session.knowledge_structure))
 
-    version = runtime.commit_transaction(tx)
+    version = await runtime.commit_transaction(tx)
     assert version is not None
 
 
-def test_commit_with_explain_operation():
+async def test_commit_with_explain_operation():
     """Операция объяснения должна выполняться без ошибок."""
     core = FakeCore(valid=True)
     runtime = Runtime(core=core)
-    session = runtime.create_session({"x": 1})
+    session = await runtime.create_session({"x": 1})
     tx = runtime.begin_transaction(session)
     tx.add_operation(ExplainOperation("op3", knowledge_structure=session.knowledge_structure))
 
-    version = runtime.commit_transaction(tx)
+    version = await runtime.commit_transaction(tx)
     assert version is not None
 
 
-def test_commit_with_multiple_operations():
+async def test_commit_with_multiple_operations():
     """Несколько операций в транзакции должны выполняться последовательно."""
     core = FakeCore(valid=True)
     runtime = Runtime(core=core)
-    session = runtime.create_session({"a": 1})
+    session = await runtime.create_session({"a": 1})
     tx = runtime.begin_transaction(session)
     tx.add_operation(ValidateOperation("v", knowledge_structure=session.knowledge_structure))
     tx.add_operation(SerializeOperation("s", knowledge_structure=session.knowledge_structure))
 
-    version = runtime.commit_transaction(tx)
+    version = await runtime.commit_transaction(tx)
     assert version is not None
     # Дополнительно можно проверить, что диагностики собраны, но тут FakeCore их не возвращает.
 
 
-def test_commit_with_dispatcher_request():
+async def test_commit_with_dispatcher_request():
     from cks_runtime.dispatcher.dispatcher import DispatchRequest
     runtime = Runtime(core=FakeCore(valid=True))
     # регистрируем операцию
     runtime.operation_registry.register(ValidateOperation)
-    session = runtime.create_session({"x": 1})
+    session = await runtime.create_session({"x": 1})
     tx = runtime.begin_transaction(session)
     # создаём запрос с нужными параметрами
     req = DispatchRequest(
@@ -272,12 +274,12 @@ def test_commit_with_dispatcher_request():
     tx.add_request(req)
     # Патч: диспетчер должен выполнить операцию, поэтому мокаем метод,
     # чтобы он возвращал успешный результат
-    def fake_dispatch(req, context):
+    async def fake_dispatch(req, context):
         return ExecutionResult(
             operation_id=req.operation_id,
             status=OperationStatus.COMPLETED,
         )
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(runtime.dispatcher, "dispatch", fake_dispatch)
-    version = runtime.commit_transaction(tx)
+    version = await runtime.commit_transaction(tx)
     assert version is not None

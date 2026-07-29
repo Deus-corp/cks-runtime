@@ -20,6 +20,8 @@ from cks_runtime.versioning.version import (
 )
 from cks_runtime_plugins.cks_core import CksCoreAdapter
 
+pytestmark = pytest.mark.asyncio
+
 
 class ValidCore(CoreInterface):
 
@@ -93,13 +95,13 @@ def create_runtime(
         core=core,
     )
 
-def test_pipeline_commit_with_valid_core():
+async def test_pipeline_commit_with_valid_core():
 
     runtime = create_runtime(
         ValidCore(),
     )
 
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
 
     transaction = runtime.begin_transaction(
         session,
@@ -109,7 +111,7 @@ def test_pipeline_commit_with_valid_core():
         runtime,
     )
 
-    version = pipeline.commit(
+    version = await pipeline.commit(
         transaction,
     )
 
@@ -135,33 +137,33 @@ class EvolvingCore(CoreInterface):
     def diff(self, source, target):
         return []
 
-def test_commit_persists_evolve_result_into_version():
+async def test_commit_persists_evolve_result_into_version():
     runtime = create_runtime(EvolvingCore())
     original_structure = {"objects": ["obj-1"]}
-    session = runtime.create_session(original_structure)
+    session = await runtime.create_session(original_structure)
     transaction = runtime.begin_transaction(session)
     transaction.add_operation(
         EvolveOperation("evolve", knowledge_structure=original_structure, evolution=[])
     )
-    version = runtime.commit_transaction(transaction)
+    version = await runtime.commit_transaction(transaction)
     assert version.knowledge_structure != original_structure
     assert version.knowledge_structure["evolved"] is True
     assert session.knowledge_structure["evolved"] is True
 
-def test_commit_does_not_mutate_session_for_readonly_operations():
+async def test_commit_does_not_mutate_session_for_readonly_operations():
     from cks_runtime.operations.operation_types import ValidateOperation
     runtime = create_runtime(EvolvingCore())
     original_structure = {"objects": ["obj-1"]}
-    session = runtime.create_session(original_structure)
+    session = await runtime.create_session(original_structure)
     transaction = runtime.begin_transaction(session)
     transaction.add_operation(
         ValidateOperation("validate", knowledge_structure=original_structure)
     )
-    runtime.commit_transaction(transaction)
+    await runtime.commit_transaction(transaction)
     assert session.knowledge_structure == original_structure
 
 
-def test_commit_validate_operation_respects_extra_constraints_end_to_end():
+async def test_commit_validate_operation_respects_extra_constraints_end_to_end():
     """
     Full-stack regression test: ValidateOperation -> OperationExecutor
     -> CoreBridge -> the real CksCoreAdapter -> cks.validate(). Proves
@@ -194,18 +196,18 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
             return []
 
     runtime = create_runtime(ExtraConstraintsAwareCore())
-    session = runtime.create_session({"objects": []})
+    session = await runtime.create_session({"objects": []})
 
     # Without extra_constraints: passes.
     tx1 = runtime.begin_transaction(session)
     tx1.add_operation(
         EvolveOperation("noop", knowledge_structure={"objects": []}, evolution=[])
     )
-    runtime.commit_transaction(tx1)
+    await runtime.commit_transaction(tx1)
 
     from cks_runtime.operations.operation_types import ValidateOperation
 
-    session2 = runtime.create_session({"objects": []})
+    session2 = await runtime.create_session({"objects": []})
     tx2 = runtime.begin_transaction(session2)
     tx2.add_operation(
         ValidateOperation("validate", knowledge_structure={"objects": []})
@@ -216,7 +218,7 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
 
     # With extra_constraints: the fake Core reports invalid, so
     # ValidateOperation returns FAILED, and commit must raise.
-    session3 = runtime.create_session({"objects": []})
+    session3 = await runtime.create_session({"objects": []})
     tx3 = runtime.begin_transaction(session3)
     tx3.add_operation(
         ValidateOperation(
@@ -226,25 +228,25 @@ def test_commit_validate_operation_respects_extra_constraints_end_to_end():
         )
     )
     with pytest.raises(RuntimeError, match="Operation validate failed"):
-        runtime.commit_transaction(tx3)
+        await runtime.commit_transaction(tx3)
     # The session must not be modified after a failed commit
     assert session3.diagnostics == []
 
 
-def test_commit_publishes_transaction_committed_event():
+async def test_commit_publishes_transaction_committed_event():
     runtime = create_runtime(ValidCore())
-    session = runtime.create_session({})
+    session = await runtime.create_session({})
     transaction = runtime.begin_transaction(session)
     pipeline = ExecutionPipeline(runtime)
 
-    pipeline.commit(transaction)
+    await pipeline.commit(transaction)
 
     history = runtime.events.history()
     assert any(isinstance(e, TransactionCommitted) for e in history)
     assert any(isinstance(e, VersionCreated) for e in history)
 
 
-def test_failed_operation_result_is_recorded_on_transaction():
+async def test_failed_operation_result_is_recorded_on_transaction():
     """
     Regression test: previously, transaction.add_result(result) ran
     *after* _handle_result(result, ...), but _handle_result raises
@@ -297,14 +299,14 @@ def test_failed_operation_result_is_recorded_on_transaction():
             return []
 
     runtime = create_runtime(DiagnosingInvalidCore())
-    session = runtime.create_session({"objects": []})
+    session = await runtime.create_session({"objects": []})
     tx = runtime.begin_transaction(session)
     tx.add_operation(
         ValidateOperation("validate", knowledge_structure={"objects": []})
     )
 
     with pytest.raises(RuntimeError, match="Operation validate failed"):
-        runtime.commit_transaction(tx)
+        await runtime.commit_transaction(tx)
 
     assert len(tx.results) == 1
     failed_result = tx.results[-1]
@@ -315,7 +317,7 @@ def test_failed_operation_result_is_recorded_on_transaction():
     )
 
 
-def test_commit_records_operations_when_core_and_storage_support_it():
+async def test_commit_records_operations_when_core_and_storage_support_it():
     """
     Integration test for ADR-007 Part 1: when both the Core and the
     storage backend support field-level diffing and operation logging,
@@ -336,7 +338,7 @@ def test_commit_records_operations_when_core_and_storage_support_it():
     ks = cks.parse(
         '{"objects":[{"identity":{"id":"obj-1","type":"Test","name":"t"},"structure":{"status":"draft"}}]}'
     )
-    session = runtime.create_session(ks)
+    session = await runtime.create_session(ks)
 
     # Evolve: add a new object, which changes the structure
     tx = runtime.begin_transaction(session)
@@ -351,7 +353,7 @@ def test_commit_records_operations_when_core_and_storage_support_it():
             evolution=[AddObject(new_obj)],
         )
     )
-    runtime.commit_transaction(tx)
+    await runtime.commit_transaction(tx)
 
     # Verify the operation log was populated.
     logged = storage.list_operations(session.session_id)
