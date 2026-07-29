@@ -90,11 +90,12 @@ def test_closed_session_stays_closed_after_runtime_restart():
 
         session_id = session.session_id
         rt1.close_session(session_id)
-        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД
-        rt1._storage._conn.close()
 
         # Same-process: already unreachable before this fix.
         assert rt1.get_session(session_id) is None
+
+        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД
+        rt1._storage._conn.close()
 
         # Simulate a restart: a fresh Runtime attached to the same storage file.
         rt2 = Runtime(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
