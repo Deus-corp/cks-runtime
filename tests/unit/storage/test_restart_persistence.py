@@ -35,6 +35,9 @@ def test_sessions_survive_runtime_restart():
         version = rt1.commit_transaction(tx)
         assert session.version_count == 1
 
+        # Закрываем соединение первого Runtime, чтобы второй мог открыть тот же файл БД
+        rt1._storage._conn.close()
+
         # Second Runtime: same storage, simulate restart
         rt2 = Runtime(core=CksCoreAdapter(), config=RuntimeConfig(storage_path=path))
 
