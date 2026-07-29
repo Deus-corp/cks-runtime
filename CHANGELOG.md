@@ -19,6 +19,22 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.21.0] - 2026-07-29
+
+### Added
+- **PostgreSQL storage backend** (`PostgresStorage`, async) — schema, session/version CRUD, CAS concurrency control using JSONB and `IS NOT DISTINCT FROM`. Requires `psycopg[binary,pool]>=3.1` (optional extra `postgres`).
+- **`AsyncRuntimeStorage` ABC** — awaitable counterpart of `RuntimeStorage` for network databases.
+- **`patch_codec`** — shared patch serialization used by both SQLite and Postgres backends, eliminating code duplication.
+- **Conformance tests** for the Postgres backend (14 tests, including a real concurrent-CAS race via `asyncio.gather`). Skipped by default unless `CKS_TEST_POSTGRES_DSN` is set.
+
+### Changed
+- `SQLiteStorage` now uses `patch_codec` for operator serialization instead of its own private copies.
+
+### Known Gap
+- `PostgresStorage` is not yet wireable into the synchronous `Runtime`; a bridge (async-native `Runtime` or sync adapter) is planned as follow‑up work.
+
+---
+
 ## [1.20.3] - 2026-07-29
 
 ### Changed

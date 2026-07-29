@@ -15,11 +15,10 @@ from collections.abc import Callable
 
 import cks
 import numpy as np
-from cks.core import CanonicalRelation, KnowledgeObject, ObjectIdentity
-from cks.evolution import AddObject, AddRelation, RemoveObject, RemoveRelation
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
+from cks_runtime.storage.patch_codec import deserialize_operators, serialize_operators
 from cks_runtime.storage.storage import (
     ConcurrentModificationError,
     OutboxTask,
@@ -56,80 +55,6 @@ def _retry_on_locked[T](fn: Callable[[], T]) -> T:
             time.sleep(_WRITE_RETRY_BASE_DELAY_SECONDS * (2**attempt))
     assert last_exc is not None
     raise last_exc
-
-
-# ---------------------------------------------------------------------------
-# Helpers for serializing/deserializing patches (list of StructuralOperators)
-# ---------------------------------------------------------------------------
-
-def _serialize_operators(operators: list) -> list[dict]:
-    """Convert a list of StructuralOperator instances to JSON-serializable dicts."""
-    result = []
-    for op in operators:
-        if isinstance(op, AddObject):
-            obj = op._obj
-            result.append({
-                "type": "add_object",
-                "identity": {
-                    "id": obj.identity.id,
-                    "type": obj.identity.type,
-                    "name": obj.identity.name,
-                },
-                "structure": dict(obj.structure),
-            })
-        elif isinstance(op, AddRelation):
-            rel = op._relation
-            result.append({
-                "type": "add_relation",
-                "identity": {
-                    "id": rel.identity.id,
-                    "type": rel.identity.type,
-                    "name": rel.identity.name,
-                },
-                "participants": list(rel.participants),
-                "relation_type": rel.relation_type,
-                "structure": dict(rel.structure),
-            })
-        elif isinstance(op, RemoveObject):
-            result.append({
-                "type": "remove_object",
-                "object_id": op._object_id,
-            })
-        elif isinstance(op, RemoveRelation):
-            result.append({
-                "type": "remove_relation",
-                "relation_id": op._relation_id,
-            })
-        else:
-            raise TypeError(f"Unknown operator type: {type(op)}")
-    return result
-
-
-def _deserialize_operators(data: list[dict]) -> list:
-    """Reconstruct StructuralOperators from JSON dicts."""
-    operators = []
-    for item in data:
-        op_type = item["type"]
-        if op_type == "add_object":
-            identity = ObjectIdentity(**item["identity"])
-            obj = KnowledgeObject(identity=identity, structure=item.get("structure", {}))
-            operators.append(AddObject(obj))
-        elif op_type == "add_relation":
-            identity = ObjectIdentity(**item["identity"])
-            rel = CanonicalRelation(
-                identity=identity,
-                participants=item["participants"],
-                relation_type=item["relation_type"],
-                structure=item.get("structure", {}),
-            )
-            operators.append(AddRelation(rel))
-        elif op_type == "remove_object":
-            operators.append(RemoveObject(item["object_id"]))
-        elif op_type == "remove_relation":
-            operators.append(RemoveRelation(item["relation_id"]))
-        else:
-            raise ValueError(f"Unknown operator type: {op_type}")
-    return operators
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +264,7 @@ class SQLiteStorage(RuntimeStorage):
         for (version_json,) in version_rows:
             vdata = json.loads(version_json)
             ks_v = cks.parse(vdata["knowledge_structure"]) if vdata["knowledge_structure"] else None
-            patch_v = _deserialize_operators(vdata["patch"]) if vdata.get("patch") else None
+            patch_v = deserialize_operators(vdata["patch"]) if vdata.get("patch") else None
             created_at = datetime.fromisoformat(vdata["created_at"])
             version = RuntimeVersion(
                 session_id=vdata["session_id"],
@@ -385,7 +310,7 @@ class SQLiteStorage(RuntimeStorage):
             patch_json = None
         else:
             ks_json = None
-            patch_json = _serialize_operators(version.patch) if version.patch else None
+            patch_json = serialize_operators(version.patch) if version.patch else None
         data = {
             "version_id": version.version_id,
             "session_id": version.session_id,
@@ -420,7 +345,7 @@ class SQLiteStorage(RuntimeStorage):
             return None
         data = json.loads(row[0])
         ks = cks.parse(data["knowledge_structure"]) if data["knowledge_structure"] else None
-        patch = _deserialize_operators(data["patch"]) if data["patch"] else None
+        patch = deserialize_operators(data["patch"]) if data["patch"] else None
         from datetime import datetime
         created_at = datetime.fromisoformat(data["created_at"])
         version = RuntimeVersion(
@@ -447,7 +372,7 @@ class SQLiteStorage(RuntimeStorage):
         for (data_str,) in rows:
             data = json.loads(data_str)
             ks = cks.parse(data["knowledge_structure"]) if data["knowledge_structure"] else None
-            patch = _deserialize_operators(data["patch"]) if data.get("patch") else None
+            patch = deserialize_operators(data["patch"]) if data.get("patch") else None
             from datetime import datetime
             created_at = datetime.fromisoformat(data["created_at"])
             version = RuntimeVersion(
