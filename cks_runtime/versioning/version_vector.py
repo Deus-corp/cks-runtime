@@ -75,12 +75,13 @@ class VersionVector:
         Whether this vector has seen at least as much as ``other``
         from every node ``other`` knows about.
 
-        An empty ``other`` is dominated trivially (nothing to have
-        missed). An empty ``self`` dominates only an equally empty
-        ``other`` -- it is never treated as "ahead" of a vector that
-        actually has entries. Two empty vectors do NOT dominate each
-        other, so that the existing three-way merge always runs for
-        sessions that have no version-vector history yet.
+        An empty ``self`` never dominates anything, including an
+        equally empty ``other`` -- it is never treated as "ahead" of
+        any vector, empty or not. Two empty vectors therefore do NOT
+        dominate each other, so that the existing three-way merge
+        always runs for sessions that have no version-vector history
+        yet (see ``MergeOperation.execute``, which relies on exactly
+        this to decide when the no-op/fast-forward paths apply).
         """
         if not self.clocks:
             return False

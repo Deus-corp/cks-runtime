@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.20.3] - 2026-07-29
+
+### Changed
+- Clarified `VersionVector.dominates()` docstring: empty vector never dominates anything, matching `MergeOperation.execute` semantics.
+- Bumped `cks-core` dependency to `>=1.13.1`.
+
+---
+
 ## [1.20.2] - 2026-07-28
 
 ### Changed
