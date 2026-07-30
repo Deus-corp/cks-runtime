@@ -170,6 +170,7 @@ The current Reference Runtime provides:
 - **Indexed & Vectorized Embeddings** – `search_embeddings` uses NumPy matrix operations for ~10× faster similarity search, with a database index for multi-session scalability.
 - **PostgreSQL Storage Backend** — production-grade, async connection pooling, JSONB payloads, outbox with `SELECT ... FOR UPDATE SKIP LOCKED`, and pgvector-powered semantic search with HNSW index.
 - **Shared Patch Codec** — consistent serialization/deserialization of structural operators across SQLite and Postgres backends.
+- **Session Garbage Collector** – background task that automatically archives stale closed sessions, keeping storage compact in long-running deployments. Configurable retention window and sweep interval.
 
 ---
 
@@ -320,6 +321,7 @@ Current implementation status:
 | Storage Abstraction | ✅ Complete |
 | **Async Runtime** | ✅ Complete |
 | **PostgreSQL Backend** | ✅ Complete |
+| **Session Garbage Collector** | ✅ Complete |
 | Core Integration (CoreBridge) | ✅ Complete |
 | Execution Engine (Operations + Dispatcher) | ✅ Complete |
 | Event System | ✅ Complete |
