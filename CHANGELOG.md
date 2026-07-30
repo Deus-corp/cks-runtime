@@ -19,6 +19,27 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.23.0] - 2026-07-30
+
+### Added
+- **PostgreSQL storage backend** (`PostgresStorage`, async) — sessions, versions, outbox (with `SELECT ... FOR UPDATE SKIP LOCKED`), operation log, and pgvector-based embeddings with HNSW index.
+- **Outbox support** for Postgres — background task processing via `cks_outbox_tasks` table with atomic claim, retry with exponential backoff, and stale lease recovery.
+- **pgvector embeddings** — native `vector` type with HNSW index for sub-millisecond similarity search on millions of rows. Dimension is auto-detected and validated on every insert.
+- **`patch_codec` module** — shared serialization/deserialization of structural operators (patches) used by both SQLite and Postgres backends.
+- **`AsyncRuntimeStorage` enhancements** — added `search_embeddings`, `supports_embedding_search`, `list_operations` to the async interface.
+- **`SyncStorageAdapter`** now proxies `search_embeddings` via `asyncio.to_thread`.
+
+### Fixed
+- **BUG-01 (data loss):** SQLite `cks_object_embeddings` table now uses composite primary key `(object_id, session_id)` instead of `object_id` alone, preventing cross-session embedding overwrites. Safe migration for existing databases included.
+- **BUG-03 (N+1 queries):** `SQLiteStorage.list_sessions` now loads all sessions and versions in a single LEFT JOIN query instead of one query per session.
+- **BUG-05 (version index):** Temporarily reverted `_version_id_index` cache in `RuntimeSession` due to slots incompatibility; linear search retained. Proper O(1) lookup will be reintroduced in a future release.
+- **OPT-01:** `InMemoryStorage.list_sessions` no longer creates a temporary tuple just for deepcopy.
+
+### Known Gap
+- `PostgresStorage` is not yet wireable into the synchronous `Runtime`; a bridge (async-native `Runtime` or sync adapter) is planned as follow‑up work. Use `await Runtime.create(...)` with a `postgres://` DSN for full functionality.
+
+---
+
 ## [1.22.1] - 2026-07-29
 
 ### Fixed

@@ -105,13 +105,7 @@ class InMemoryStorage(RuntimeStorage):
         Return every persisted RuntimeSession.
         """
 
-        return tuple(
-            deepcopy(
-                tuple(
-                    self._sessions.values(),
-                )
-            )
-        )
+        return tuple(deepcopy(s) for s in self._sessions.values())
 
     #
     # ------------------------------------------------------------------
@@ -170,13 +164,7 @@ class InMemoryStorage(RuntimeStorage):
         Return every persisted RuntimeVersion.
         """
 
-        return tuple(
-            deepcopy(
-                tuple(
-                    self._versions.values(),
-                )
-            )
-        )
+        return tuple(deepcopy(v) for v in self._versions.values())
 
     #
     # ------------------------------------------------------------------

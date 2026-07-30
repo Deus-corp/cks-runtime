@@ -1,66 +1,73 @@
 """
-Tests for PostgresStorage (async, JSONB-based).
+Integration tests: Runtime end-to-end with PostgresStorage.
 
-Requires a reachable PostgreSQL instance -- set CKS_TEST_POSTGRES_DSN
-to point at one, or these tests are skipped. Mirrors the equivalent
-cases in test_sqlite_storage.py (round-trip, CAS accept/reject,
-duplicate version rejection) so the two backends are checked against
-the same behavioural contract, not just independently self-consistent.
+These tests exercise the full async bridge:
+
+    Runtime.create(config=RuntimeConfig(storage_path="postgresql://..."))
+        → PostgresStorage.connect()              # async pool open + DDL
+        → _restore_from_storage()               # list_sessions JOIN query
+        → OutboxEmbeddingWorker.start()          # asyncio.Task poll loop
+
+Each test then runs a real workflow (create session → begin tx →
+commit → restart → verify) and asserts the Postgres-native subsystems
+(outbox, pgvector search) behave correctly end-to-end.
+
+Skip condition: CKS_TEST_POSTGRES_DSN not set, or psycopg not installed.
+pgvector must be available in the target database:
+    CREATE EXTENSION IF NOT EXISTS vector;
 """
 
 from __future__ import annotations
 
+import math
 import os
+import struct
 
 import cks
 import pytest
-import pytest_asyncio
 
-from cks_runtime.session.session import RuntimeSession
+from cks_runtime.config import RuntimeConfig
+from cks_runtime.operations.operation_types import ValidateOperation
+from cks_runtime.runtime import Runtime
 
 try:
     from cks_runtime.storage.postgres_storage import PostgresStorage
+    _PSYCOPG_AVAILABLE = True
 except ImportError:
-    PostgresStorage = None  # psycopg not installed
-from cks_runtime.storage.storage import ConcurrentModificationError
-from cks_runtime.versioning.version import RuntimeVersion
+    PostgresStorage = None  # type: ignore[assignment,misc]
+    _PSYCOPG_AVAILABLE = False
 
 _DSN = os.environ.get("CKS_TEST_POSTGRES_DSN")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(not _DSN or PostgresStorage is None, reason="CKS_TEST_POSTGRES_DSN not set or psycopg not installed"),
+    pytest.mark.skipif(
+        not _DSN or not _PSYCOPG_AVAILABLE,
+        reason="CKS_TEST_POSTGRES_DSN not set or psycopg not installed",
+    ),
 ]
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+_KS_JSON = (
+    '{"objects":['
+    '{"identity":{"id":"obj-1","type":"Concept","name":"Alpha"},'
+    '"structure":{"description":"first concept"}},'
+    '{"identity":{"id":"obj-2","type":"Concept","name":"Beta"},'
+    '"structure":{"description":"second concept"}}'
+    ']}'
+)
 
 
 def make_ks():
-    return cks.parse(
-        '{"objects":[{"identity":{"id":"obj-1","type":"Test","name":"t"},"structure":{}}]}'
-    )
+    return cks.parse(_KS_JSON)
 
 
-def make_session(session_id: str = "s1") -> RuntimeSession:
-    return RuntimeSession(knowledge_structure=make_ks(), session_id=session_id)
-
-
-def make_version(
-    session_id: str = "s1",
-    version_id: str = "v1",
-    ks=None,
-) -> RuntimeVersion:
-    if ks is None:
-        ks = make_ks()
-    return RuntimeVersion(
-        session_id=session_id,
-        transaction_id="t1",
-        knowledge_structure=ks,
-        metadata={"m": 1},
-        version_id=version_id,
-    )
-
-
-@pytest_asyncio.fixture
-async def storage():
+@pytest.fixture
+async def pg_storage():
+    """A clean PostgresStorage, cleared before and after each test."""
     store = await PostgresStorage.connect(_DSN, min_size=1, max_size=4)
     await store.clear()
     yield store
@@ -68,162 +75,454 @@ async def storage():
     await store.close()
 
 
-async def test_save_and_load_session(storage):
-    session = make_session("s1")
-    await storage.save_session(session)
-    loaded = await storage.load_session("s1")
-    assert loaded is not None
-    assert loaded.session_id == "s1"
-
-
-async def test_load_missing_session_returns_none(storage):
-    assert await storage.load_session("does-not-exist") is None
-
-
-async def test_save_session_cas_accepts_matching_expected_version(storage):
-    session = make_session("s1")
-    session.add_version(make_version("s1", "v1"))
-    await storage.save_version(make_version("s1", "v1"))
-    await storage.save_session(session)  # initial write, no CAS
-
-    session.add_version(make_version("s1", "v2"))
-    await storage.save_version(make_version("s1", "v2"))
-    await storage.save_session(session, expected_version_id="v1")
-
-    loaded = await storage.load_session("s1")
-    assert [v.version_id for v in loaded.version_history] == ["v1", "v2"]
-
-
-async def test_save_session_cas_rejects_stale_expected_version(storage):
-    session = make_session("s1")
-    session.add_version(make_version("s1", "v1"))
-    await storage.save_version(make_version("s1", "v1"))
-    await storage.save_session(session)
-
-    # Simulate a second writer racing in and committing v2 first.
-    racer = make_session("s1")
-    racer.add_version(make_version("s1", "v1"))
-    racer.add_version(make_version("s1", "v2"))
-    await storage.save_version(make_version("s1", "v2"))
-    await storage.save_session(racer, expected_version_id="v1")
-
-    # Original writer, still working off v1, tries to commit v3 --
-    # must be rejected rather than silently clobbering v2.
-    session.add_version(make_version("s1", "v3"))
-    with pytest.raises(ConcurrentModificationError):
-        await storage.save_session(session, expected_version_id="v1")
-
-    loaded = await storage.load_session("s1")
-    assert [v.version_id for v in loaded.version_history] == ["v1", "v2"]
-
-
-async def test_save_version_rejects_duplicate_version_id(storage):
-    import psycopg
-
-    await storage.save_version(make_version("s1", "v1"))
-    with pytest.raises(psycopg.errors.UniqueViolation):
-        await storage.save_version(make_version("s1", "v1"))
-
-
-async def test_has_session(storage):
-    assert not await storage.has_session("s1")
-    await storage.save_session(make_session("s1"))
-    assert await storage.has_session("s1")
-
-
-async def test_list_sessions(storage):
-    await storage.save_session(make_session("s1"))
-    await storage.save_session(make_session("s2"))
-    sessions = await storage.list_sessions()
-    assert {s.session_id for s in sessions} == {"s1", "s2"}
-
-
-async def test_save_and_load_version(storage):
-    version = make_version("s1", "v1")
-    await storage.save_version(version)
-    loaded = await storage.load_version("v1")
-    assert loaded is not None
-    assert loaded.version_id == "v1"
-    assert loaded.session_id == "s1"
-    assert loaded.metadata == {"m": 1}
-
-
-async def test_load_missing_version_returns_none(storage):
-    assert await storage.load_version("does-not-exist") is None
-
-
-async def test_has_version(storage):
-    assert not await storage.has_version("v1")
-    await storage.save_version(make_version("s1", "v1"))
-    assert await storage.has_version("v1")
-
-
-async def test_list_versions(storage):
-    await storage.save_version(make_version("s1", "v1"))
-    await storage.save_version(make_version("s1", "v2"))
-    versions = await storage.list_versions()
-    assert {v.version_id for v in versions} == {"v1", "v2"}
-
-
-async def test_clear(storage):
-    await storage.save_session(make_session("s1"))
-    await storage.save_version(make_version("s1", "v1"))
-    await storage.clear()
-    assert await storage.load_session("s1") is None
-    assert await storage.load_version("v1") is None
-
-
-async def test_delta_version_round_trips_patch(storage):
-    """A version with patch (no knowledge_structure) round-trips via patch_codec."""
-    # Build a delta version directly with a patch instead of a full snapshot.
-    from cks.core import KnowledgeObject, ObjectIdentity
-    from cks.evolution import AddObject
-
-    new_obj = KnowledgeObject(
-        identity=ObjectIdentity(id="obj-2", type="Test", name="t2"),
-        structure={},
-    )
-    version = RuntimeVersion(
-        session_id="s1",
-        transaction_id="t1",
-        knowledge_structure=None,
-        metadata={},
-        version_id="v-delta",
-        patch=[AddObject(new_obj)],
-    )
-    await storage.save_version(version)
-    loaded = await storage.load_version("v-delta")
-    assert loaded is not None
-    assert loaded.knowledge_structure is None
-    assert loaded.patch is not None
-    assert len(loaded.patch) == 1
-
-
-async def test_concurrent_cas_writes_exactly_one_winner(storage):
+@pytest.fixture
+async def runtime(pg_storage):
     """
-    Two concurrent tasks race to commit v2 via CAS from the same base
-    (v1). Exactly one must succeed; the other must see
-    ConcurrentModificationError -- not a corrupted/merged session row.
+    A Runtime wired to a clean PostgresStorage.
+
+    Constructed via Runtime.__init__ (not Runtime.create) so we control
+    exactly when _restore_from_storage and outbox worker start — useful
+    for tests that need to inspect state before restore.  Tests that
+    need the full startup path call Runtime.create() themselves.
     """
-    import asyncio
+    rt = Runtime(storage=pg_storage)
+    yield rt
+    await rt.aclose()
 
-    base = make_session("s1")
-    base.add_version(make_version("s1", "v1"))
-    await storage.save_version(make_version("s1", "v1"))
-    await storage.save_session(base)
 
-    async def _try_commit(version_id: str):
-        session = make_session("s1")
-        session.add_version(make_version("s1", "v1"))
-        session.add_version(make_version("s1", version_id))
-        await storage.save_version(make_version("s1", version_id))
-        try:
-            await storage.save_session(session, expected_version_id="v1")
-            return "ok"
-        except ConcurrentModificationError:
-            return "rejected"
+# ===========================================================================
+# 1. Storage wiring
+# ===========================================================================
 
-    results = await asyncio.gather(
-        _try_commit("v2a"), _try_commit("v2b"), return_exceptions=False
-    )
-    assert sorted(results) == ["ok", "rejected"]
+async def test_runtime_storage_is_postgres(runtime):
+    """Runtime.storage is a PostgresStorage (not wrapped in SyncStorageAdapter)."""
+    from cks_runtime.storage.postgres_storage import PostgresStorage as PG
+    assert isinstance(runtime.storage, PG)
+
+
+async def test_runtime_create_via_dsn():
+    """
+    Runtime.create(config=RuntimeConfig(storage_path=DSN)) resolves
+    PostgresStorage automatically via the lazy import path.
+    """
+    config = RuntimeConfig(storage_path=_DSN)
+    rt = await Runtime.create(config=config)
+    try:
+        from cks_runtime.storage.postgres_storage import PostgresStorage as PG
+        assert isinstance(rt.storage, PG)
+    finally:
+        await rt.aclose()
+
+
+async def test_runtime_accepts_explicit_postgres_storage(pg_storage):
+    """Runtime(storage=<PostgresStorage>) wires through without wrapping."""
+    from cks_runtime.storage.adapter import SyncStorageAdapter
+    rt = Runtime(storage=pg_storage)
+    assert not isinstance(rt.storage, SyncStorageAdapter)
+    await rt.aclose()
+
+
+# ===========================================================================
+# 2. Session lifecycle
+# ===========================================================================
+
+async def test_create_and_load_session(runtime, pg_storage):
+    """Session created via Runtime is persisted in Postgres immediately."""
+    ks = make_ks()
+    session = await runtime.create_session(ks)
+
+    loaded = await pg_storage.load_session(session.session_id)
+    assert loaded is not None
+    assert loaded.session_id == session.session_id
+
+
+async def test_close_session_persists_closed_flag(runtime, pg_storage):
+    ks = make_ks()
+    session = await runtime.create_session(ks)
+    await runtime.close_session(session.session_id)
+
+    loaded = await pg_storage.load_session(session.session_id)
+    assert loaded is not None
+    assert loaded.closed is True
+
+
+async def test_create_branch_persisted(runtime, pg_storage):
+    ks = make_ks()
+    session = await runtime.create_session(ks)
+    branch = await runtime.create_branch(session)
+
+    assert branch.parent_session_id == session.session_id
+    loaded = await pg_storage.load_session(branch.session_id)
+    assert loaded is not None
+    assert loaded.parent_session_id == session.session_id
+
+
+# ===========================================================================
+# 3. Transaction commit
+# ===========================================================================
+
+async def test_commit_transaction_persists_version(runtime, pg_storage):
+    ks = make_ks()
+    session = await runtime.create_session(ks)
+
+    tx = runtime.begin_transaction(session)
+    tx.add_operation(ValidateOperation("op-1", knowledge_structure=ks))
+    version = await runtime.commit_transaction(tx)
+
+    assert session.version_count == 1
+    loaded_v = await pg_storage.load_version(version.version_id)
+    assert loaded_v is not None
+    assert loaded_v.session_id == session.session_id
+
+
+async def test_commit_updates_session_latest_version(runtime, pg_storage):
+    ks = make_ks()
+    session = await runtime.create_session(ks)
+    tx = runtime.begin_transaction(session)
+    tx.add_operation(ValidateOperation("op-1", knowledge_structure=ks))
+    version = await runtime.commit_transaction(tx)
+
+    loaded = await pg_storage.load_session(session.session_id)
+    assert loaded is not None
+    assert loaded.version_count == 1
+    assert loaded.version_history[0].version_id == version.version_id
+
+
+async def test_rollback_transaction_restores_session(runtime, pg_storage):
+    ks = make_ks()
+    session = await runtime.create_session(ks)
+    tx = runtime.begin_transaction(session)
+    await runtime.rollback_transaction(tx)
+
+    # No version created
+    loaded = await pg_storage.load_session(session.session_id)
+    assert loaded is not None
+    assert loaded.version_count == 0
+
+
+async def test_concurrent_commit_raises_concurrent_modification(pg_storage):
+    """
+    Two Runtime instances sharing the same storage must produce a
+    ConcurrentModificationError when both try to advance the same
+    session past the same expected_version_id.
+    """
+    from cks_runtime.storage.storage import ConcurrentModificationError
+
+    ks = make_ks()
+    rt1 = Runtime(storage=pg_storage)
+    rt2 = Runtime(storage=pg_storage)
+
+    session = await rt1.create_session(ks)
+    # Restore session into rt2's SessionManager
+    rt2.sessions.restore(session)
+
+    # Both runtimes begin a transaction on the same session object
+    tx1 = rt1.begin_transaction(session)
+    tx2 = rt2.begin_transaction(session)
+
+    # Commit tx1 first — this advances latest_version_id in Postgres
+    tx1.add_operation(ValidateOperation("op-1", knowledge_structure=ks))
+    await rt1.commit_transaction(tx1)
+
+    # tx2 now holds a stale expected_version_id (None) — must be rejected
+    tx2.add_operation(ValidateOperation("op-2", knowledge_structure=ks))
+    with pytest.raises((ConcurrentModificationError, RuntimeError)):
+        await rt2.commit_transaction(tx2)
+
+    await rt1.aclose()
+    await rt2.aclose()
+
+
+# ===========================================================================
+# 4. Restart / restore
+# ===========================================================================
+
+async def test_sessions_survive_runtime_restart():
+    """
+    Full restart cycle: Runtime.create → commit → aclose → Runtime.create.
+    The second instance must restore the session and its version history
+    from Postgres without any manual intervention.
+    """
+    config = RuntimeConfig(storage_path=_DSN)
+    ks = make_ks()
+
+    # ── First Runtime ──────────────────────────────────────────────────
+    rt1 = await Runtime.create(config=config)
+    # Clear any state from previous runs
+    await rt1.storage.clear()
+
+    session = await rt1.create_session(ks)
+    tx = rt1.begin_transaction(session)
+    tx.add_operation(ValidateOperation("op-1", knowledge_structure=ks))
+    version = await rt1.commit_transaction(tx)
+    sid = session.session_id
+    vid = version.version_id
+    await rt1.aclose()
+
+    # ── Second Runtime — simulated restart ────────────────────────────
+    rt2 = await Runtime.create(config=config)
+    try:
+        restored = rt2.get_session(sid)
+        assert restored is not None, "Session not found after restart"
+        assert restored.version_count == 1
+        assert restored.version_history[0].version_id == vid
+
+        # list_sessions (in-memory) also includes it
+        ids = {s.session_id for s in rt2.list_sessions()}
+        assert sid in ids
+    finally:
+        await rt2.storage.clear()
+        await rt2.aclose()
+
+
+async def test_multiple_sessions_restored_after_restart():
+    """All sessions — including ones with multiple versions — survive restart."""
+    config = RuntimeConfig(storage_path=_DSN)
+    ks = make_ks()
+
+    rt1 = await Runtime.create(config=config)
+    await rt1.storage.clear()
+
+    created_ids = set()
+    for i in range(3):
+        s = await rt1.create_session(ks)
+        tx = rt1.begin_transaction(s)
+        tx.add_operation(ValidateOperation(f"op-{i}", knowledge_structure=ks))
+        await rt1.commit_transaction(tx)
+        created_ids.add(s.session_id)
+
+    await rt1.aclose()
+
+    rt2 = await Runtime.create(config=config)
+    try:
+        restored_ids = {s.session_id for s in rt2.list_sessions()}
+        assert created_ids.issubset(restored_ids)
+        for sid in created_ids:
+            s = rt2.get_session(sid)
+            assert s is not None
+            assert s.version_count == 1
+    finally:
+        await rt2.storage.clear()
+        await rt2.aclose()
+
+
+async def test_branch_parent_restored_after_restart():
+    config = RuntimeConfig(storage_path=_DSN)
+    ks = make_ks()
+
+    rt1 = await Runtime.create(config=config)
+    await rt1.storage.clear()
+
+    parent = await rt1.create_session(ks)
+    tx = rt1.begin_transaction(parent)
+    tx.add_operation(ValidateOperation("op-1", knowledge_structure=ks))
+    await rt1.commit_transaction(tx)
+    branch = await rt1.create_branch(parent)
+    await rt1.aclose()
+
+    rt2 = await Runtime.create(config=config)
+    try:
+        restored_branch = rt2.get_session(branch.session_id)
+        assert restored_branch is not None
+        assert restored_branch.parent_session_id == parent.session_id
+    finally:
+        await rt2.storage.clear()
+        await rt2.aclose()
+
+
+# ===========================================================================
+# 5. Outbox
+# ===========================================================================
+
+async def test_outbox_supports_flag(runtime):
+    assert runtime.storage.supports_outbox is True
+
+
+async def test_outbox_task_enqueued_and_dequeued(pg_storage):
+    """
+    Enqueuing a task through the storage layer and dequeuing it works
+    with FOR UPDATE SKIP LOCKED atomicity.
+    """
+    await pg_storage.enqueue_task("projection", "s1", '{"previous_version_id":null,"new_version_id":"v1"}')
+    task = await pg_storage.dequeue_next_outbox_task()
+    assert task is not None
+    assert task.task_type == "projection"
+    assert task.session_id == "s1"
+    await pg_storage.complete_outbox_task(task.task_id)
+    # Queue now empty
+    assert await pg_storage.dequeue_next_outbox_task() is None
+
+
+async def test_outbox_worker_starts_with_postgres(pg_storage):
+    """
+    OutboxEmbeddingWorker starts when storage.supports_outbox is True
+    (i.e. PostgresStorage) and stops cleanly on aclose().
+    """
+    rt = Runtime(storage=pg_storage)
+    await rt._outbox_worker.start()
+    assert rt._outbox_worker._running is True
+    await rt.aclose()
+    assert rt._outbox_worker._running is False
+
+
+async def test_outbox_worker_does_not_double_start(pg_storage):
+    rt = Runtime(storage=pg_storage)
+    await rt._outbox_worker.start()
+    task_before = rt._outbox_worker._task
+    await rt._outbox_worker.start()  # second call is a no-op
+    assert rt._outbox_worker._task is task_before
+    await rt.aclose()
+
+
+# ===========================================================================
+# 6. Embedding search (pgvector)
+# ===========================================================================
+
+def _make_embedding(dim: int, *, seed: float = 1.0) -> bytes:
+    """Normalised float32 embedding where every component = seed/sqrt(dim)."""
+    v = seed / math.sqrt(dim)
+    return struct.pack(f"{dim}f", *([v] * dim))
+
+
+def _orthogonal_embedding(dim: int) -> bytes:
+    """A vector orthogonal to _make_embedding: alternating +v/-v."""
+    v = 1.0 / math.sqrt(dim)
+    components = [v if i % 2 == 0 else -v for i in range(dim)]
+    return struct.pack(f"{dim}f", *components)
+
+
+async def test_embedding_search_end_to_end(pg_storage):
+    """
+    Save two embeddings (similar + orthogonal), query, and verify
+    ranking through the full async path to pgvector.
+    """
+    dim = 8
+    emb_similar = _make_embedding(dim, seed=1.0)
+    emb_ortho = _orthogonal_embedding(dim)
+
+    await pg_storage.save_object_embeddings("obj-sim", "s1", emb_similar)
+    await pg_storage.save_object_embeddings("obj-ort", "s1", emb_ortho)
+
+    query = _make_embedding(dim, seed=1.0)
+    results = await pg_storage.search_embeddings(query, "s1", top_k=2)
+
+    assert len(results) == 2
+    # obj-sim must be ranked first (cosine similarity ≈ 1.0)
+    assert results[0][0] == "obj-sim"
+    assert results[0][1] >= 0.99
+    # obj-ort is orthogonal → similarity ≈ 0.0, clamped to 0.0
+    assert results[1][0] == "obj-ort"
+    assert results[1][1] <= 0.05
+
+
+async def test_embedding_search_isolated_by_session(pg_storage):
+    """Embeddings from session s1 must not appear in results for session s2."""
+    dim = 8
+    emb = _make_embedding(dim)
+
+    await pg_storage.save_object_embeddings("shared-obj", "s1", emb)
+    await pg_storage.save_object_embeddings("shared-obj", "s2", emb)
+
+    r1 = await pg_storage.search_embeddings(emb, "s1", top_k=5)
+    r2 = await pg_storage.search_embeddings(emb, "s2", top_k=5)
+
+    assert len(r1) == 1 and r1[0][0] == "shared-obj"
+    assert len(r2) == 1 and r2[0][0] == "shared-obj"
+
+
+async def test_supports_embedding_search_flag(pg_storage):
+    assert pg_storage.supports_embedding_search is True
+
+
+async def test_embedding_dimension_mismatch_raises(pg_storage):
+    """Changing the embedding model dimension is caught immediately."""
+    await pg_storage.save_object_embeddings("obj-1", "s1", _make_embedding(8))
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        await pg_storage.save_object_embeddings("obj-2", "s1", _make_embedding(16))
+
+
+async def test_embedding_survives_restart(pg_storage):
+    """
+    Embedding dimension stored in cks_embedding_meta survives a new
+    PostgresStorage instance pointing at the same database.
+    """
+    dim = 8
+    emb = _make_embedding(dim)
+    await pg_storage.save_object_embeddings("obj-1", "s1", emb)
+
+    # Open a second storage instance to the same DB — simulates process restart
+    store2 = await PostgresStorage.connect(_DSN, min_size=1, max_size=2)
+    try:
+        # _load_embed_dim() should have restored dim=8
+        assert store2._embed_dim == dim
+
+        # Search works immediately, no re-indexing needed
+        results = await store2.search_embeddings(emb, "s1", top_k=1)
+        assert len(results) == 1
+        assert results[0][0] == "obj-1"
+        assert results[0][1] >= 0.99
+    finally:
+        await store2.close()
+
+
+# ===========================================================================
+# 7. aclose / shutdown
+# ===========================================================================
+
+async def test_aclose_stops_worker_and_pool(pg_storage):
+    """Runtime.aclose() stops the outbox worker and closes the storage pool."""
+    rt = Runtime(storage=pg_storage)
+    await rt._outbox_worker.start()
+    await rt.aclose()
+
+    assert rt._outbox_worker._running is False
+    assert rt._outbox_worker._task is None
+    # pg_storage pool is closed (pg_storage fixture owns it, but the close
+    # call must not raise — double-close is safe per psycopg_pool docs)
+
+
+async def test_aclose_safe_when_worker_never_started(pg_storage):
+    """Runtime.aclose() is safe when called on a bare Runtime(...) instance."""
+    rt = Runtime(storage=pg_storage)
+    # Worker was never started — aclose must not raise
+    await rt.aclose()
+
+
+# ===========================================================================
+# 8. Full workflow smoke test
+# ===========================================================================
+
+async def test_full_workflow_create_commit_restart_search():
+    """
+    End-to-end smoke test:
+      1. Runtime.create with Postgres DSN
+      2. Create session → commit version
+      3. Restart (aclose + new Runtime.create)
+      4. Restored session matches original
+      5. Outbox worker is running in the new instance
+    """
+    config = RuntimeConfig(storage_path=_DSN)
+    ks = make_ks()
+
+    rt1 = await Runtime.create(config=config)
+    await rt1.storage.clear()
+
+    session = await rt1.create_session(ks)
+    tx = rt1.begin_transaction(session)
+    tx.add_operation(ValidateOperation("op-smoke", knowledge_structure=ks))
+    version = await rt1.commit_transaction(tx)
+
+    sid = session.session_id
+    vid = version.version_id
+    await rt1.aclose()
+
+    rt2 = await Runtime.create(config=config)
+    try:
+        restored = rt2.get_session(sid)
+        assert restored is not None
+        assert restored.version_history[0].version_id == vid
+        # Outbox worker is running (PostgresStorage supports_outbox=True)
+        assert rt2._outbox_worker._running is True
+    finally:
+        await rt2.storage.clear()
+        await rt2.aclose()

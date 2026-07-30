@@ -128,16 +128,30 @@ class SQLiteStorage(RuntimeStorage):
             WHERE status IN ('PENDING', 'FAILED', 'IN_PROGRESS')
             """
         )
+        # BUG-01 fix: PRIMARY KEY must be (object_id, session_id) — not
+        # just object_id.  object_id is only unique within one session;
+        # two different sessions can have an object with the same id
+        # (e.g. "earth", "user-1").  With a plain `object_id PRIMARY KEY`
+        # an INSERT OR REPLACE for session-B silently overwrites the row
+        # for session-A, causing data-loss and wrong similarity results.
+        #
+        # SQLite cannot ALTER TABLE to change a PRIMARY KEY constraint, so
+        # we use the standard rename→recreate→copy→drop migration when the
+        # old single-column PK is detected at startup.  The detection check
+        # is cheap (one PRAGMA read) and is a no-op on a fresh or already-
+        # migrated database.
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cks_object_embeddings (
-                object_id TEXT PRIMARY KEY,
+                object_id  TEXT NOT NULL,
                 session_id TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                embedding  BLOB NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (object_id, session_id)
             )
             """
         )
+        self._migrate_embeddings_pk_if_needed()
         self._conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_object_embeddings_session
@@ -164,6 +178,77 @@ class SQLiteStorage(RuntimeStorage):
             ON cks_operation_log(session_id, object_id)
             """
         )
+        self._conn.commit()
+
+    def _migrate_embeddings_pk_if_needed(self) -> None:
+        """
+        Detect and fix the legacy single-column PRIMARY KEY on
+        ``cks_object_embeddings``.
+
+        Old schema (pre-BUG-01-fix):
+            PRIMARY KEY (object_id)          ← wrong: cross-session collision
+
+        New schema:
+            PRIMARY KEY (object_id, session_id)  ← correct
+
+        SQLite doesn't support ALTER TABLE … DROP CONSTRAINT, so the
+        only migration path is rename → recreate → copy → drop.  The
+        detection is fast (one PRAGMA read) and the migration only runs
+        once on first startup after the upgrade.
+        """
+        # PRAGMA index_list returns one row per index; the implicit
+        # PRIMARY KEY on a WITHOUT ROWID or a plain INTEGER PK table
+        # shows up as "pk" origin in index_info.  For a TEXT PRIMARY KEY
+        # SQLite generates an index named "sqlite_autoindex_<table>_1"
+        # with exactly one column.  We detect the old schema by counting
+        # the columns in that autoindex: 1 → old single-column PK (needs
+        # migration); 2 → already the composite PK (no-op).
+        pk_col_count = self._conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM pragma_index_info(
+                (SELECT name FROM pragma_index_list('cks_object_embeddings')
+                 WHERE origin = 'pk'
+                 LIMIT 1)
+            )
+            """
+        ).fetchone()[0]
+
+        if pk_col_count != 1:
+            # Either already the composite PK (2 cols) or a fresh table
+            # with no rows yet — nothing to do.
+            return
+
+        # Old single-column PK detected: migrate.
+        self._conn.execute(
+            "ALTER TABLE cks_object_embeddings RENAME TO cks_object_embeddings_old"
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE cks_object_embeddings (
+                object_id  TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                embedding  BLOB NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (object_id, session_id)
+            )
+            """
+        )
+        # Copy existing rows.  On the (unlikely) event that the old table
+        # already has two rows with the same object_id for different
+        # sessions (impossible under the old buggy schema because the PK
+        # would have blocked it), INSERT OR REPLACE keeps the latest one
+        # rather than raising — deterministic and safe.
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO cks_object_embeddings
+                (object_id, session_id, embedding, updated_at)
+            SELECT object_id, session_id, embedding,
+                   COALESCE(updated_at, datetime('now'))
+            FROM cks_object_embeddings_old
+            """
+        )
+        self._conn.execute("DROP TABLE cks_object_embeddings_old")
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -511,8 +596,16 @@ class SQLiteStorage(RuntimeStorage):
 
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
         def _write() -> None:
+            # PRIMARY KEY is now (object_id, session_id), so this
+            # INSERT OR REPLACE only replaces a row for the *same*
+            # (object_id, session_id) pair — never a row from a
+            # different session that happens to share the object_id.
             self._conn.execute(
-                "INSERT OR REPLACE INTO cks_object_embeddings (object_id, session_id, embedding) VALUES (?, ?, ?)",
+                """
+                INSERT OR REPLACE INTO cks_object_embeddings
+                    (object_id, session_id, embedding, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                """,
                 (object_id, session_id, embedding),
             )
             self._conn.commit()
