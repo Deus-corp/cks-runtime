@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
@@ -255,6 +256,18 @@ class RuntimeStorage(ABC):
         guard.
         """
         return []
+
+
+    def list_sessions_modified_before(
+        self,
+        cutoff: Any,  # datetime
+        limit: int = 1000,
+    ) -> list[Any]:
+        """Return sessions with modified_at < cutoff. Empty by default."""
+        return []
+
+    def archive_session(self, session: Any) -> None:
+        """Archive a session and remove it from active storage. No-op by default."""
 
 
 @dataclass(frozen=True, slots=True)

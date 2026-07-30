@@ -12,6 +12,7 @@ import json
 import sqlite3
 import time
 from collections.abc import Callable
+from datetime import datetime
 
 import cks
 import numpy as np
@@ -76,7 +77,8 @@ class SQLiteStorage(RuntimeStorage):
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
-                latest_version_id TEXT
+                latest_version_id TEXT,
+                modified_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
         )
@@ -86,6 +88,30 @@ class SQLiteStorage(RuntimeStorage):
         session_cols = [row[1] for row in cur.fetchall()]
         if "latest_version_id" not in session_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN latest_version_id TEXT")
+        # Add modified_at for GC policy (added in cks-runtime 1.23.1).
+        if "modified_at" not in session_cols:
+            self._conn.execute(
+                "ALTER TABLE sessions ADD COLUMN modified_at TEXT "
+                "NOT NULL DEFAULT (datetime('now'))"
+            )
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sessions_modified_at
+            ON sessions(modified_at)
+            """
+        )
+        # Archive table: closed / evicted sessions preserved for audit.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS archive_sessions (
+                session_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                latest_version_id TEXT,
+                modified_at TEXT,
+                archived_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS versions (
@@ -283,8 +309,9 @@ class SQLiteStorage(RuntimeStorage):
                 # No CAS requested (initial create, rollback, abort):
                 # unconditional write, same as before.
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO sessions (session_id, data, latest_version_id) "
-                    "VALUES (?, ?, ?)",
+                    "INSERT OR REPLACE INTO sessions "
+                    "(session_id, data, latest_version_id, modified_at) "
+                    "VALUES (?, ?, ?, datetime('now'))",
                     (session.session_id, payload, new_latest_version_id),
                 )
                 self._conn.commit()
@@ -292,7 +319,7 @@ class SQLiteStorage(RuntimeStorage):
 
             cur = self._conn.execute(
                 """
-                UPDATE sessions SET data = ?, latest_version_id = ?
+                UPDATE sessions SET data = ?, latest_version_id = ?, modified_at = datetime('now')
                 WHERE session_id = ? AND latest_version_id IS ?
                 """,
                 (payload, new_latest_version_id, session.session_id, expected_version_id),
@@ -311,7 +338,8 @@ class SQLiteStorage(RuntimeStorage):
                 if exists is not None:
                     raise ConcurrentModificationError(session.session_id)
                 self._conn.execute(
-                    "INSERT INTO sessions (session_id, data, latest_version_id) VALUES (?, ?, ?)",
+                    "INSERT INTO sessions (session_id, data, latest_version_id, modified_at) "
+                    "VALUES (?, ?, ?, datetime('now'))",
                     (session.session_id, payload, new_latest_version_id),
                 )
             self._conn.commit()
@@ -384,6 +412,66 @@ class SQLiteStorage(RuntimeStorage):
             if session is not None:
                 sessions.append(session)
         return tuple(sessions)
+
+
+    def list_sessions_modified_before(
+        self,
+        cutoff: datetime,
+        limit: int = 1000,
+    ) -> list[RuntimeSession]:
+        """
+        Return sessions whose ``modified_at`` timestamp is older than
+        *cutoff*.  Used by the GC policy to find eviction candidates.
+        Results are ordered oldest-first so batch processing makes
+        steady progress even when the result set exceeds *limit*.
+        """
+        rows = self._conn.execute(
+            "SELECT session_id FROM sessions "
+            "WHERE modified_at < ? "
+            "ORDER BY modified_at ASC "
+            "LIMIT ?",
+            (cutoff.isoformat(), limit),
+        ).fetchall()
+        sessions = []
+        for (sid,) in rows:
+            session = self.load_session(sid)
+            if session is not None:
+                sessions.append(session)
+        return sessions
+
+    def archive_session(self, session: RuntimeSession) -> None:
+        """
+        Copy *session* to ``archive_sessions`` and remove it from the
+        active ``sessions`` table together with all of its versions and
+        embeddings.  The archived row is a verbatim copy of the live
+        row at the moment of archival, so it can be inspected later
+        without re-serializing the session.
+        """
+
+        def _write() -> None:
+            # Copy to archive
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO archive_sessions
+                    (session_id, data, latest_version_id, modified_at, archived_at)
+                SELECT session_id, data, latest_version_id, modified_at, datetime('now')
+                FROM sessions
+                WHERE session_id = ?
+                """,
+                (session.session_id,),
+            )
+            # Cascade-delete dependent rows
+            self._conn.execute(
+                "DELETE FROM cks_object_embeddings WHERE session_id = ?",
+                (session.session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM sessions WHERE session_id = ?",
+                (session.session_id,),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
 
     # ------------------------------------------------------------------
     # Versions

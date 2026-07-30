@@ -28,6 +28,7 @@ so they are imported from ``storage.py`` rather than duplicated.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
@@ -243,3 +244,15 @@ class AsyncRuntimeStorage(ABC):
     def supports_embedding_search(self) -> bool:
         """Whether this storage backend supports vector similarity search."""
         return False
+
+
+    async def list_sessions_modified_before(
+        self,
+        cutoff: Any,
+        limit: int = 1000,
+    ) -> list[Any]:
+        """Return sessions with modified_at < cutoff. Empty by default."""
+        return []
+
+    async def archive_session(self, session: Any) -> None:
+        """Archive a session and remove it from active storage. No-op by default."""

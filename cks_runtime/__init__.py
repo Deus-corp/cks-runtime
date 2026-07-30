@@ -10,11 +10,13 @@ high-level Runtime façade and its configuration object.
 from __future__ import annotations
 
 from .config import RuntimeConfig
+from .gc.garbage_collector import GarbageCollector
 from .runtime import Runtime
 
 __version__ = RuntimeConfig().runtime_version
 
 __all__ = (
+    "GarbageCollector",
     "Runtime",
     "RuntimeConfig",
     "__version__",

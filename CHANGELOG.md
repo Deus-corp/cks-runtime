@@ -19,6 +19,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.24.0] - 2026-07-30
+
+### Added
+- **Session Garbage Collector** – background `asyncio.Task` that periodically evicts stale closed sessions from storage, keeping the active sessions table compact in long-running deployments. Configured via `RuntimeConfig.gc_retention` (default 24h), `gc_sweep_interval` (default 10 min), and `gc_batch_size` (default 100). Open sessions are never evicted.
+- **GC storage methods** for both SQLite and Postgres: `list_sessions_modified_before` and `archive_session`. Archived sessions are moved to an `archive_sessions` table for audit purposes.
+- **`modified_at` column** on the `sessions` table, automatically maintained by `save_session`. Online migration for existing databases.
+- **`GarbageCollector`** exported from `cks_runtime` top-level package.
+
+### Changed
+- `Runtime.create()` now starts the GC background task (when enabled).
+- `Runtime.aclose()` now stops the GC background task gracefully.
+
+---
+
 ## [1.23.1] - 2026-07-30
 
 ### Changed

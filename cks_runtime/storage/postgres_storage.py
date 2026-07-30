@@ -114,7 +114,8 @@ _DDL_SESSIONS = """
     CREATE TABLE IF NOT EXISTS sessions (
         session_id        TEXT PRIMARY KEY,
         data              JSONB NOT NULL,
-        latest_version_id TEXT
+        latest_version_id TEXT,
+        modified_at       TIMESTAMPTZ NOT NULL DEFAULT now()
     )
 """
 
@@ -205,6 +206,24 @@ _DDL_EMBEDDINGS_SHELL = """
     )
 """
 
+_CREATE_SESSIONS_MODIFIED_AT_INDEX = """
+    CREATE INDEX IF NOT EXISTS idx_sessions_modified_at ON sessions(modified_at)
+"""
+
+_CREATE_ARCHIVE_SESSIONS_TABLE = """
+    CREATE TABLE IF NOT EXISTS archive_sessions (
+        session_id        TEXT PRIMARY KEY,
+        data              JSONB NOT NULL,
+        latest_version_id TEXT,
+        modified_at       TIMESTAMPTZ,
+        archived_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+"""
+
+_MIGRATE_SESSIONS_MODIFIED_AT = """
+    ALTER TABLE sessions ADD COLUMN modified_at TIMESTAMPTZ NOT NULL DEFAULT now()
+"""
+
 
 class PostgresStorage(AsyncRuntimeStorage):
     """
@@ -276,6 +295,12 @@ class PostgresStorage(AsyncRuntimeStorage):
             await conn.execute(_DDL_EMBED_META)
             await conn.execute(_DDL_EMBEDDINGS_SHELL)
             await conn.commit()
+            await conn.execute(_CREATE_ARCHIVE_SESSIONS_TABLE)
+            await conn.execute(_CREATE_SESSIONS_MODIFIED_AT_INDEX)
+            try:
+                await conn.execute(_MIGRATE_SESSIONS_MODIFIED_AT)
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
         # Restore cached dimension from DB (survives restarts)
         await self._load_embed_dim()
 
@@ -309,11 +334,12 @@ class PostgresStorage(AsyncRuntimeStorage):
                 if expected_version_id is None:
                     await conn.execute(
                         """
-                        INSERT INTO sessions (session_id, data, latest_version_id)
-                        VALUES (%s, %s, %s)
+                        INSERT INTO sessions (session_id, data, latest_version_id, modified_at)
+                        VALUES (%s, %s, %s, now())
                         ON CONFLICT (session_id) DO UPDATE
                         SET data = EXCLUDED.data,
-                            latest_version_id = EXCLUDED.latest_version_id
+                            latest_version_id = EXCLUDED.latest_version_id,
+                            modified_at = now()
                         """,
                         (session.session_id, Jsonb(data), new_latest),
                     )
@@ -322,7 +348,8 @@ class PostgresStorage(AsyncRuntimeStorage):
 
                 cur = await conn.execute(
                     """
-                    UPDATE sessions SET data = %s, latest_version_id = %s
+                    UPDATE sessions
+                    SET data = %s, latest_version_id = %s, modified_at = now()
                     WHERE session_id = %s
                       AND latest_version_id IS NOT DISTINCT FROM %s
                     """,
@@ -339,8 +366,8 @@ class PostgresStorage(AsyncRuntimeStorage):
                         raise ConcurrentModificationError(session.session_id)
                     await conn.execute(
                         """
-                        INSERT INTO sessions (session_id, data, latest_version_id)
-                        VALUES (%s, %s, %s)
+                        INSERT INTO sessions (session_id, data, latest_version_id, modified_at)
+                        VALUES (%s, %s, %s, now())
                         """,
                         (session.session_id, Jsonb(data), new_latest),
                     )
@@ -417,6 +444,53 @@ class PostgresStorage(AsyncRuntimeStorage):
                 sessions[session_id].add_version(_version_from_row(vdata))
 
         return tuple(sessions.values())
+
+
+    async def list_sessions_modified_before(
+        self,
+        cutoff: datetime,
+        limit: int = 1000,
+    ) -> list[RuntimeSession]:
+        async with self._pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT session_id FROM sessions "
+                    "WHERE modified_at < %s "
+                    "ORDER BY modified_at ASC "
+                    "LIMIT %s",
+                    (cutoff, limit),
+                )
+            ).fetchall()
+        sessions = []
+        for (sid,) in rows:
+            session = await self.load_session(sid)
+            if session is not None:
+                sessions.append(session)
+        return sessions
+
+    async def archive_session(self, session: RuntimeSession) -> None:
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO archive_sessions
+                    (session_id, data, latest_version_id, modified_at, archived_at)
+                SELECT session_id, data, latest_version_id, modified_at, now()
+                FROM sessions
+                WHERE session_id = %s
+                ON CONFLICT (session_id) DO UPDATE
+                SET archived_at = now()
+                """,
+                (session.session_id,),
+            )
+            await conn.execute(
+                "DELETE FROM cks_object_embeddings WHERE session_id = %s",
+                (session.session_id,),
+            )
+            await conn.execute(
+                "DELETE FROM sessions WHERE session_id = %s",
+                (session.session_id,),
+            )
+            await conn.commit()
 
     # ------------------------------------------------------------------
     # Versions

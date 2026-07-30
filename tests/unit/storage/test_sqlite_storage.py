@@ -4,6 +4,7 @@ Tests for SQLiteStorage (JSON-based).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 
@@ -92,6 +93,15 @@ def make_version(
     )
 
 
+def _ks_equal(ks_a, ks_b) -> bool:
+    """Compare two KnowledgeStructures ignoring the serialized_at timestamp."""
+    def _strip(ks) -> dict:
+        d = json.loads(cks.serialize(ks))
+        d.get("_cks_metadata", {}).pop("serialized_at", None)
+        return d
+    return _strip(ks_a) == _strip(ks_b)
+
+
 def test_save_and_load_session(storage):
     session = make_session("s1")
     storage.save_session(session)
@@ -99,7 +109,7 @@ def test_save_and_load_session(storage):
     assert loaded is not None
     assert loaded.session_id == "s1"
     # Compare serialized forms to avoid deep structure issues
-    assert cks.serialize(loaded.knowledge_structure) == cks.serialize(make_ks())
+    assert _ks_equal(loaded.knowledge_structure, make_ks())
 
 
 def test_load_missing_session_returns_none(storage):
@@ -175,7 +185,7 @@ def test_save_and_load_version(storage):
     assert loaded is not None
     assert loaded.version_id == "v1"
     assert loaded.session_id == "s1"
-    assert cks.serialize(loaded.knowledge_structure) == cks.serialize(make_ks())
+    assert _ks_equal(loaded.knowledge_structure, make_ks())
 
 
 def test_load_missing_version_returns_none(storage):

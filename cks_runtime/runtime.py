@@ -26,6 +26,7 @@ from cks_runtime.dispatcher.dispatcher import Dispatcher
 from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.execution.operation_executor import OperationExecutor
+from cks_runtime.gc.garbage_collector import GarbageCollector
 from cks_runtime.metrics.collector import MetricsCollector
 from cks_runtime.operations.operation_registry import OperationRegistry
 from cks_runtime.pipeline.execution_pipeline import (
@@ -147,6 +148,7 @@ class Runtime:
         "_embedding_projection",
         "_events",
         "_executor",
+        "_gc",
         "_metrics",
         "_outbox_worker",
         "_pipeline",
@@ -236,6 +238,18 @@ class Runtime:
         # A Runtime constructed via bare Runtime(...) has no running
         # outbox worker until one of those is awaited.
 
+        # Garbage collector: evicts stale closed sessions from storage.
+        # Disabled when config.gc_retention is None.
+        # Also started lazily in create() — requires a running event loop.
+        self._gc: GarbageCollector | None = None
+        if self.config.gc_retention is not None:
+            self._gc = GarbageCollector(
+                self._storage,
+                retention=self.config.gc_retention,
+                sweep_interval=self.config.gc_sweep_interval,
+                batch_size=self.config.gc_batch_size,
+            )
+
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
             core_adapter=self._core_bridge, metrics=self._metrics, storage=self._storage
@@ -295,6 +309,9 @@ class Runtime:
 
         await runtime._restore_from_storage()
         await runtime._outbox_worker.start()
+
+        if runtime._gc is not None:
+            await runtime._gc.start()
 
         return runtime
 
@@ -647,6 +664,10 @@ class Runtime:
         ``Runtime(...)`` construction).
         """
         await self._outbox_worker.stop()
+
+        if self._gc is not None:
+            await self._gc.stop()
+
         close = getattr(self._storage, "close", None)
         if close is not None:
             await close()
