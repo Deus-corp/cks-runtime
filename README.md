@@ -168,6 +168,8 @@ The current Reference Runtime provides:
 - **Query Subgraph** – k‑hop neighbourhood extraction with type filters and budget/ranking, delegated to cks-core's query_subgraph()
 - **Persistent Storage** – SQLite-backed storage via `SQLiteStorage`, surviving server restarts. Configurable through `RuntimeConfig.storage_path`.
 - **Indexed & Vectorized Embeddings** – `search_embeddings` uses NumPy matrix operations for ~10× faster similarity search, with a database index for multi-session scalability.
+- **PostgreSQL Storage Backend** — production-grade, async connection pooling, JSONB payloads, outbox with `SELECT ... FOR UPDATE SKIP LOCKED`, and pgvector-powered semantic search with HNSW index.
+- **Shared Patch Codec** — consistent serialization/deserialization of structural operators across SQLite and Postgres backends.
 
 ---
 
@@ -274,7 +276,7 @@ CKS Runtime supports pluggable storage backends through a unified async interfac
 |---------|------|--------|-------|
 | **InMemoryStorage** | Sync | ✅ Stable | For testing and ephemeral sessions |
 | **SQLiteStorage** | Sync | ✅ Stable | Persistent, single‑writer, WAL mode |
-| **PostgresStorage** | Async | ✅ Stable | Production‑grade, connection pooling, JSONB, concurrent writers |
+| **PostgresStorage** | Async | ✅ Stable | Production‑grade, connection pooling, JSONB, outbox, pgvector embeddings with HNSW index |
 
 Sync backends (`InMemoryStorage`, `SQLiteStorage`) are automatically adapted to the async interface via `SyncStorageAdapter` (using `asyncio.to_thread`), so existing code works unchanged. Use `await Runtime.create(...)` for full async startup, or plain `Runtime(...)` for lightweight testing without persistence.
 
@@ -306,7 +308,7 @@ Supporting documents include:
 
 ## Project Status
 
-Current implementation status (v1.5.0):
+Current implementation status:
 
 | Component | Status |
 |----------|--------|
@@ -330,8 +332,7 @@ Current implementation status (v1.5.0):
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
 
-Future work focuses on Phase 3 (Event System) as outlined in the
-[Roadmap](ROADMAP.md).
+Future work focuses on distributed sessions, advanced caching, and async integration with `cks-mcp`.
 
 ---
 
