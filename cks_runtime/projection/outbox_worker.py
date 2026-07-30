@@ -163,11 +163,11 @@ class OutboxEmbeddingWorker:
             from cks.evolution import AddObject, RemoveObject
             for op in patch:
                 if isinstance(op, AddObject):
-                    obj = new_structure.get(op._obj.identity.id)
+                    obj = new_structure.get(op.object_id)
                     if obj is not None:
                         objects_to_embed.append(obj)
                 elif isinstance(op, RemoveObject):
-                    ids_to_remove.append(op._object_id)
+                    ids_to_remove.append(op.object_id)
         else:
             # No diff — embed all objects
             objects_to_embed = list(new_structure.objects)

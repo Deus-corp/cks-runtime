@@ -19,6 +19,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.23.1] - 2026-07-30
+
+### Changed
+- `OutboxEmbeddingWorker` now uses public properties (`op.object_id`) instead of private attributes, compatible with `cks-core>=1.14.0`.
+- Bumped `cks-core` dependency to `>=1.14.0`.
+
+---
+
 ## [1.23.0] - 2026-07-30
 
 ### Added
