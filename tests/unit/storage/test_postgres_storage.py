@@ -72,8 +72,10 @@ async def pg_storage():
     store = await PostgresStorage.connect(_DSN, min_size=1, max_size=4)
     await store.clear()
     yield store
-    await store.clear()
-    await store.close()
+    # After a test that closes the pool (e.g. test_aclose_*), the pool
+    # is already closed and clear() would fail with PoolClosed.
+    if not store._pool.closed:
+        await store.clear()
 
 
 @pytest_asyncio.fixture
@@ -208,30 +210,32 @@ async def test_concurrent_commit_raises_concurrent_modification(pg_storage):
     session past the same expected_version_id.
     """
     from cks_runtime.storage.storage import ConcurrentModificationError
+    from cks_runtime.operations.operation_types import ValidateOperation
 
     ks = make_ks()
     rt1 = Runtime(storage=pg_storage)
+    session1 = await rt1.create_session(ks)
+
+    # Commit first version via rt1
+    tx = rt1.begin_transaction(session1)
+    tx.add_operation(ValidateOperation("v1", knowledge_structure=ks))
+    await rt1.commit_transaction(tx)
+
+    # Create a second, independent session object with the same id
+    session2 = await pg_storage.load_session(session1.session_id)
     rt2 = Runtime(storage=pg_storage)
+    rt2.sessions.restore(session2)
 
-    session = await rt1.create_session(ks)
-    # Restore session into rt2's SessionManager
-    rt2.sessions.restore(session)
+    # Both try to commit v2 from the same base (v1)
+    tx1 = rt1.begin_transaction(session1)
+    tx2 = rt2.begin_transaction(session2)
 
-    # Both runtimes begin a transaction on the same session object
-    tx1 = rt1.begin_transaction(session)
-    tx2 = rt2.begin_transaction(session)
-
-    # Commit tx1 first — this advances latest_version_id in Postgres
-    tx1.add_operation(ValidateOperation("op-1", knowledge_structure=ks))
+    tx1.add_operation(ValidateOperation("v2a", knowledge_structure=session1.knowledge_structure))
     await rt1.commit_transaction(tx1)
 
-    # tx2 now holds a stale expected_version_id (None) — must be rejected
-    tx2.add_operation(ValidateOperation("op-2", knowledge_structure=ks))
-    with pytest.raises((ConcurrentModificationError, RuntimeError)):
+    tx2.add_operation(ValidateOperation("v2b", knowledge_structure=session2.knowledge_structure))
+    with pytest.raises(ConcurrentModificationError):
         await rt2.commit_transaction(tx2)
-
-    await rt1.aclose()
-    await rt2.aclose()
 
 
 # ===========================================================================
