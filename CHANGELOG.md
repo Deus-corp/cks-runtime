@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.25.2] - 2026-07-31
+
+### Changed
+- Bumped `cks-core` dependency to `>=1.16.0` (inference confidence conflict constraint, RecordInference operator).
+
+---
+
 ## [1.25.1] - 2026-07-31
 
 ### Fixed
