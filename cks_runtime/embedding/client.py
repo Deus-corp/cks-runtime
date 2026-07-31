@@ -114,6 +114,53 @@ class StubEmbeddingClient(EmbeddingClient):
         return embeddings
 
 
+class FastEmbedEmbeddingClient(EmbeddingClient):
+    """
+    Local embedding client backed by fastembed (ONNX Runtime, CPU-only).
+
+    Unlike HuggingFaceEmbeddingClient, this needs no API token and makes
+    no per-query network calls: the model is downloaded once on first
+    use and cached on disk.
+    """
+    _DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+    def __init__(self, model_name: str | None = None, cache_dir: str | None = None) -> None:
+        import os
+        self._model_name = model_name or os.environ.get("CKS_EMBEDDING_MODEL") or self._DEFAULT_MODEL
+        self._cache_dir = cache_dir or os.environ.get("CKS_EMBEDDING_CACHE_DIR")
+        self._model: Any = None
+        self._dimension: int | None = None
+
+    def _ensure_model(self) -> Any:
+        if self._model is None:
+            try:
+                from fastembed import TextEmbedding
+            except ImportError as exc:
+                raise RuntimeError(
+                    "fastembed is not installed. Install it with "
+                    "`pip install fastembed` (or `pip install cks-runtime[fastembed]`) "
+                    "to use local, token-free embeddings."
+                ) from exc
+            self._model = TextEmbedding(model_name=self._model_name, cache_dir=self._cache_dir)
+        return self._model
+
+    @property
+    def dimension(self) -> int:
+        if self._dimension is None:
+            probe = self.embed_batch(["probe"], normalize=False)[0]
+            self._dimension = len(probe) // 4
+        return self._dimension
+
+    def embed_batch(self, texts: list[str], *, normalize: bool = False) -> list[bytes]:
+        model = self._ensure_model()
+        result = []
+        for vec in model.embed(texts):
+            result.append(struct.pack(f"{len(vec)}f", *(float(v) for v in vec)))
+        if normalize:
+            result = [_normalize_vector(e) for e in result]
+        return result
+
+
 class OpenAIEmbeddingClient(EmbeddingClient):
     """
     OpenAI embedding client. Requires OPENAI_API_KEY env var.

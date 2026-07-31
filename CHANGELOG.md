@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.25.0] - 2026-07-31
+
+### Added
+- **`FastEmbedEmbeddingClient`** – local, token-free embedding client backed by fastembed (ONNX Runtime). No API key or network calls required. Opt-in via `pip install cks-runtime[fastembed]`.
+
+---
+
 ## [1.24.0] - 2026-07-30
 
 ### Added

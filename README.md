@@ -171,6 +171,7 @@ The current Reference Runtime provides:
 - **PostgreSQL Storage Backend** — production-grade, async connection pooling, JSONB payloads, outbox with `SELECT ... FOR UPDATE SKIP LOCKED`, and pgvector-powered semantic search with HNSW index.
 - **Shared Patch Codec** — consistent serialization/deserialization of structural operators across SQLite and Postgres backends.
 - **Session Garbage Collector** – background task that automatically archives stale closed sessions, keeping storage compact in long-running deployments. Configurable retention window and sweep interval.
+- **Local embeddings via fastembed** – offline, token-free semantic search with `FastEmbedEmbeddingClient` (`pip install cks-runtime[fastembed]`).
 
 ---
 

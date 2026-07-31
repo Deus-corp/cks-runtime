@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cks-runtime"
-version = "1.24.0"
+version = "1.25.0"
 
 description = "Canonical Runtime for the Canonical Knowledge Structure ecosystem"
 
@@ -57,6 +57,9 @@ include = [
 postgres = [
     "psycopg[binary,pool]>=3.1",
     "pgvector>=0.3.0",
+]
+fastembed = [
+    "fastembed>=0.3",
 ]
 dev = [
     "pytest>=8.0",
