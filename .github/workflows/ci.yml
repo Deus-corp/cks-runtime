@@ -44,7 +44,9 @@ jobs:
         run: pip install -e ".[dev,postgres]"
 
       - name: Ruff
-        run: ruff check .
+        run: |
+          pip install ruff
+          ruff check .
 
       - name: mypy
         run: mypy cks_runtime
