@@ -209,8 +209,8 @@ async def test_concurrent_commit_raises_concurrent_modification(pg_storage):
     ConcurrentModificationError when both try to advance the same
     session past the same expected_version_id.
     """
-    from cks_runtime.storage.storage import ConcurrentModificationError
     from cks_runtime.operations.operation_types import ValidateOperation
+    from cks_runtime.storage.storage import ConcurrentModificationError
 
     ks = make_ks()
     rt1 = Runtime(storage=pg_storage)
