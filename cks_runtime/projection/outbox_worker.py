@@ -195,7 +195,11 @@ class OutboxEmbeddingWorker:
             self._embedding_client.embed_batch, texts, normalize=True
         )
 
-        for obj, embedding in zip(objects_to_embed, embeddings):
+        # strict=True: if embed_batch ever returns a different number
+        # of vectors than texts sent (e.g. a partial provider failure),
+        # fail loudly here instead of silently dropping the trailing
+        # objects from the embedding index with no error signal.
+        for obj, embedding in zip(objects_to_embed, embeddings, strict=True):
             await self._storage.save_object_embeddings(obj.identity.id, session_id, embedding)
 
     @staticmethod

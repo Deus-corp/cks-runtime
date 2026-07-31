@@ -33,6 +33,19 @@ class RuntimeSession:
     #: version when branching.
     parent_version_id: str | None = None
 
+    def __post_init__(self) -> None:
+        # VersionManager.create() computes `index % snapshot_interval`
+        # to decide whether a version is a snapshot or a delta. A
+        # value <= 0 doesn't raise here -- it raises later, as a bare
+        # ZeroDivisionError (0) or as version indices that never land
+        # on a snapshot boundary (negative), on whatever commit
+        # happens to trip it. Failing fast at construction gives a
+        # clear error at the point the bad value was actually set.
+        if self.snapshot_interval <= 0:
+            raise ValueError(
+                f"snapshot_interval must be >= 1, got {self.snapshot_interval!r}."
+            )
+
     @property
     def is_active(self) -> bool:
         return not self.closed

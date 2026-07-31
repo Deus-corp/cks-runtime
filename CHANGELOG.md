@@ -19,6 +19,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.25.1] - 2026-07-31
+
+### Fixed
+- **Postgres `executemany`** – `record_operations` now calls `cursor.executemany` instead of the non-existent `connection.executemany`.
+- **Public properties in `patch_codec`** – switched from `cks-core` private attributes to public operator properties (`.obj`, `.object_id`).
+- **`zip(..., strict=True)` in `outbox_worker`** – prevents silent data loss when the list of texts and embeddings diverge.
+- **`snapshot_interval` validation** – `RuntimeSession` now enforces a positive interval.
+- **Graceful failure in `Dispatcher`** – malformed parameters no longer crash the dispatcher; a readable error is returned instead.
+
+### Changed
+- **Single version source** – `pyproject.toml`, `config.py`, and `CITATION.cff` are now synchronised through `_version.py`.
+- **CI with real PostgreSQL** – Postgres integration tests are no longer skipped; a full Postgres + pgvector service is spun up in CI.
+
+---
+
 ## [1.25.0] - 2026-07-31
 
 ### Added

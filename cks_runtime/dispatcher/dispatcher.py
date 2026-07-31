@@ -99,9 +99,6 @@ class Dispatcher:
                 **request.parameters,
             )
         except KeyError:
-            operation = None
-
-        if operation is None:
             diagnostic = Diagnostic(
                 message=(
                     f"Operation '{request.operation_id}' "
@@ -121,6 +118,35 @@ class Dispatcher:
                 error=LookupError(
                     f"Unknown operation '{request.operation_id}'."
                 ),
+            )
+        except TypeError as exc:
+            # request.parameters comes from outside the process (an
+            # API/MCP request body, typically) -- a missing, extra, or
+            # misspelled key raises TypeError from the Operation's
+            # __init__. Without this, the exception propagates straight
+            # out of dispatch(), which means _handle_result never runs
+            # and the transaction is never rolled back -- unlike every
+            # other failure mode in this method, which reaches
+            # _handle_result via a FAILED ExecutionResult and rolls back
+            # cleanly.
+            diagnostic = Diagnostic(
+                message=(
+                    f"Operation '{request.operation_id}' could not be "
+                    f"constructed from the given parameters: {exc}"
+                ),
+                source=DiagnosticSource.RUNTIME,
+                severity=DiagnosticSeverity.ERROR,
+                metadata={
+                    "operation_id": request.operation_id,
+                    "parameters": dict(request.parameters),
+                },
+            )
+
+            return ExecutionResult(
+                operation_id=request.operation_id,
+                status=OperationStatus.FAILED,
+                diagnostics=(diagnostic,),
+                error=exc,
             )
 
         #

@@ -18,9 +18,8 @@ url: "https://github.com/Deus-corp/cks-runtime"
 
 license: "MIT"
 
-version: "1.24.0"
-
-date-released: "2026-07-15"
+version: "1.25.1"
+date-released: "2026-07-31"
 
 abstract: >
   CKS Runtime is the reference operational environment for
@@ -42,12 +41,3 @@ keywords:
   - reference implementation
 
 language: "en"
-
-preferred-citation:
-  type: software
-  authors:
-    - family-names: "Hruznov"
-      given-names: "Vladyslav"
-  title: "CKS Runtime"
-  version: "1.25.0"
-  url: "https://github.com/Deus-corp/cks-runtime"

@@ -705,14 +705,20 @@ class PostgresStorage(AsyncRuntimeStorage):
 
         async def _write() -> None:
             async with self._pool.connection() as conn:
-                await conn.executemany(
-                    """
-                    INSERT INTO cks_operation_log
-                        (session_id, version_id, object_id, op_type, field_key, field_value)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    rows,
-                )
+                # psycopg3's AsyncConnection has no executemany -- only
+                # AsyncCursor does. Calling conn.executemany(...)
+                # directly raises AttributeError on every call, which
+                # went unnoticed because the postgres test suite is
+                # skipped whenever CKS_TEST_POSTGRES_DSN isn't set.
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        """
+                        INSERT INTO cks_operation_log
+                            (session_id, version_id, object_id, op_type, field_key, field_value)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        rows,
+                    )
                 await conn.commit()
 
         await _retry_on_transient(_write)

@@ -69,3 +69,51 @@ async def test_dispatch_unknown_operation_returns_error(registry, executor, sess
 
     assert result.status == OperationStatus.FAILED
     assert isinstance(result.error, LookupError)
+
+
+class _StrictOperation(Operation):
+    """
+    Unlike _SuccessfulOperation above, __init__ does not swallow
+    arbitrary kwargs -- this is what most real Operation subclasses in
+    cks_runtime.operations.operation_types look like, and is needed to
+    exercise what happens when request.parameters doesn't match.
+    """
+
+    operation_id: str = "strict_op"
+
+    def __init__(self, operation_id: str = "strict_op", *, required_field: str) -> None:
+        super().__init__(operation_id)
+        self.required_field = required_field
+
+    async def execute(self, session, executor) -> ExecutionResult:
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+        )
+
+
+async def test_dispatch_malformed_parameters_returns_error_instead_of_raising(
+    executor, session
+):
+    """
+    request.parameters typically comes from outside the process (an
+    API/MCP request body) -- a misspelled or missing key raises
+    TypeError from the Operation's __init__. This used to propagate
+    straight out of dispatch() uncaught, unlike the unknown-operation
+    case just above, which means ExecutionPipeline's rollback (see
+    _handle_result) never ran. Must come back as a graceful FAILED
+    result instead, the same as any other dispatch failure.
+    """
+    registry = OperationRegistry()
+    registry.register(_StrictOperation)
+    dispatcher = Dispatcher(registry=registry, executor=executor)
+    context = ExecutionContext(session=session, executor=executor)
+
+    # Typo'd keyword, and the real required_field is missing entirely.
+    request = DispatchRequest(operation_id="strict_op", parameters={"wrong_field": "x"})
+    result = await dispatcher.dispatch(request, context)
+
+    assert result.status == OperationStatus.FAILED
+    assert isinstance(result.error, TypeError)
+    assert result.diagnostics
+    assert "strict_op" in result.diagnostics[0].message

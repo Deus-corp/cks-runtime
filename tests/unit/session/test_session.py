@@ -94,3 +94,23 @@ def test_close_is_idempotent():
     assert session.closed is True
 
     assert session.is_active is False
+
+
+def test_snapshot_interval_zero_rejected():
+    """
+    snapshot_interval=0 used to be accepted silently, then crash with
+    a bare ZeroDivisionError inside VersionManager.create() on the
+    session's *second* commit (`index % snapshot_interval`). Validated
+    at construction now, so the error is immediate and clear.
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="snapshot_interval"):
+        RuntimeSession(knowledge_structure={}, snapshot_interval=0)
+
+
+def test_snapshot_interval_negative_rejected():
+    import pytest
+
+    with pytest.raises(ValueError, match="snapshot_interval"):
+        RuntimeSession(knowledge_structure={}, snapshot_interval=-1)

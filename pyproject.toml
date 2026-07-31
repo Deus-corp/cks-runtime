@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cks-runtime"
-version = "1.25.0"
+dynamic = ["version"]
 
 description = "Canonical Runtime for the Canonical Knowledge Structure ecosystem"
 
@@ -19,7 +19,7 @@ license = { text = "MIT" }
 requires-python = ">=3.12"
 
 dependencies = [
-    "cks-core>=1.14.0",
+    "cks-core>=1.15.1",
     "numpy>=1.26",
 ]
 
@@ -45,6 +45,9 @@ classifiers = [
 Homepage = "https://github.com/Deus-corp/cks-runtime"
 Repository = "https://github.com/Deus-corp/cks-runtime"
 Issues = "https://github.com/Deus-corp/cks-runtime/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "cks_runtime._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]

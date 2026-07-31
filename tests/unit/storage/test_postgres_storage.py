@@ -25,6 +25,7 @@ import struct
 
 import cks
 import pytest
+import pytest_asyncio
 
 from cks_runtime.config import RuntimeConfig
 from cks_runtime.operations.operation_types import ValidateOperation
@@ -65,7 +66,7 @@ def make_ks():
     return cks.parse(_KS_JSON)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def pg_storage():
     """A clean PostgresStorage, cleared before and after each test."""
     store = await PostgresStorage.connect(_DSN, min_size=1, max_size=4)
@@ -75,7 +76,7 @@ async def pg_storage():
     await store.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def runtime(pg_storage):
     """
     A Runtime wired to a clean PostgresStorage.

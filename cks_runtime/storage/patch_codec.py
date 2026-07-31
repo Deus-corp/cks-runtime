@@ -26,7 +26,7 @@ def serialize_operators(operators: list) -> list[dict]:
     result = []
     for op in operators:
         if isinstance(op, AddObject):
-            obj = op._obj
+            obj = op.obj
             result.append({
                 "type": "add_object",
                 "identity": {
@@ -37,7 +37,7 @@ def serialize_operators(operators: list) -> list[dict]:
                 "structure": dict(obj.structure),
             })
         elif isinstance(op, AddRelation):
-            rel = op._relation
+            rel = op.relation
             result.append({
                 "type": "add_relation",
                 "identity": {
@@ -52,12 +52,12 @@ def serialize_operators(operators: list) -> list[dict]:
         elif isinstance(op, RemoveObject):
             result.append({
                 "type": "remove_object",
-                "object_id": op._object_id,
+                "object_id": op.object_id,
             })
         elif isinstance(op, RemoveRelation):
             result.append({
                 "type": "remove_relation",
-                "relation_id": op._relation_id,
+                "relation_id": op.relation_id,
             })
         else:
             raise TypeError(f"Unknown operator type: {type(op)}")

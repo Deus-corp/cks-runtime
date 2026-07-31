@@ -17,18 +17,11 @@ from importlib.metadata import PackageNotFoundError, version
 
 
 def _runtime_version() -> str:
-    """
-    Return the installed Runtime version.
-
-    Falls back to a development version when the
-    package metadata is unavailable (for example,
-    during local development before installation).
-    """
-
     try:
         return version("cks-runtime")
     except PackageNotFoundError:
-        return "1.25.0"
+        from ._version import __version__
+        return __version__
 
 
 @dataclass(slots=True)
