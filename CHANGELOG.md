@@ -19,6 +19,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.27.2] - 2026-08-01
+
+### Added
+- **Bootstrap of unknown sessions** – `GossipAdapter.apply_remote_session` now accepts remote sessions that have no local counterpart yet. The remote state is deep-copied into a new `RuntimeSession`, registered, and persisted with a fresh `node_id`.
+- **Peer discovery** – new `discovery.py` module with a `PeerDiscovery` abstract protocol and `HTTPPeerDiscovery` in `http_transport.py`. `GossipServer` exposes a `/gossip/peers` endpoint; `GossipService` merges discovered peers into the `PeerScheduler` after each successful gossip round.
+
+### Fixed
+- `apply_remote_session` no longer returns `False` for unknown sessions – they are now bootstrapped and accepted.
+- `test_unknown_local_session_returns_false` replaced with four new tests covering bootstrap behaviour, structurally-equivalent snapshots, and error handling.
+
+---
+
 ## [1.27.1] - 2026-08-01
 
 ### Fixed

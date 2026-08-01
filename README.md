@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-389%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-401%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
 CKS Runtime is the canonical execution environment for
@@ -166,6 +166,7 @@ The current Reference Runtime provides:
 - **Structural Diff** – compact change computation between versions
 - Three‑way merge of knowledge structures via `cks-core`'s `merge()` function
 - **Query Subgraph** – k‑hop neighbourhood extraction with type filters and budget/ranking, delegated to cks-core's query_subgraph()
+- **Gossip Replication (ADR-008)** — experimental peer-to-peer session exchange: replica identity, HMAC-signed envelopes, replay protection, peer discovery, and a background anti-entropy service (`GossipService`). HTTP transport via `aiohttp` (`pip install cks-runtime[gossip]`).
 - **Persistent Storage** – SQLite-backed storage via `SQLiteStorage`, surviving server restarts. Configurable through `RuntimeConfig.storage_path`.
 - **Indexed & Vectorized Embeddings** – `search_embeddings` uses NumPy matrix operations for ~10× faster similarity search, with a database index for multi-session scalability.
 - **PostgreSQL Storage Backend** — production-grade, async connection pooling, JSONB payloads, outbox with `SELECT ... FOR UPDATE SKIP LOCKED`, and pgvector-powered semantic search with HNSW index.
@@ -330,12 +331,13 @@ Current implementation status:
 | Structural Diff | ✅ Complete |
 | Query Subgraph | ✅ Complete |
 | Persistent Storage (SQLite) | ✅ Complete |
-| Test Suite | ✅ 389+ tests passing |
+| **Gossip Replication (ADR-008)** | 🚧 In Progress |
+| Test Suite | ✅ 401+ tests passing |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
 
-Future work focuses on distributed sessions, advanced caching, and async integration with `cks-mcp`.
+Future work focuses on completing gossip replication (peer bootstrapping, full HTTP integration tests), advanced caching, and async integration with `cks-mcp`.
 
 ---
 

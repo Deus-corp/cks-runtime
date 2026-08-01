@@ -5,12 +5,15 @@ docstring for why the original field-operation-replay design couldn't
 work.
 
 Two independent ``Runtime`` instances (each its own CksCoreAdapter +
-in-memory storage) simulate two replicas. A session is registered
-under the *same* session_id in both -- via ``SessionManager.restore``,
-not ``create_session`` (which always mints a fresh id) -- to simulate
-two replicas that already both track one logical distributed session,
-matching ``GossipAdapter``'s documented scope (it reconciles a session
-that already exists locally; it does not bootstrap a brand-new one).
+in-memory storage) simulate two replicas. For the reconciliation
+tests (``TestApplyRemoteSession``, ``TestGossipExchange``), a session
+is registered under the *same* session_id in both -- via
+``SessionManager.restore``, not ``create_session`` (which always
+mints a fresh id) -- to simulate two replicas that already both track
+one logical distributed session. The bootstrap tests are the
+exception: they exercise the *other* documented scope, adopting a
+session_id one replica has never seen at all (see
+``_bootstrap_remote_session`` in ``cks_runtime/gossip/adapter.py``).
 """
 
 from __future__ import annotations
@@ -175,14 +178,89 @@ class TestGetLocalVector:
 
 
 class TestApplyRemoteSession:
-    async def test_unknown_local_session_returns_false(self):
+    async def test_unknown_local_session_bootstraps_it(self):
+        """
+        ADR-008's bootstrap gap: a session this replica has never
+        tracked before is no longer rejected -- it's adopted as a new
+        local session, registered the same way a session restored
+        from local storage at startup would be.
+        """
         runtime = await Runtime.create(core=CksCoreAdapter())
         adapter = GossipAdapter(runtime, "r1")
         remote = RuntimeSession(
             knowledge_structure=make_structure(["root"]), session_id="ghost"
         )
         result = await adapter.apply_remote_session(remote)
-        assert result is False
+
+        assert result is True
+        local = runtime.get_session("ghost")
+        assert local is not None
+        assert {o.identity.id for o in local.knowledge_structure.objects} == {"root"}
+        # Committed as a real local Version, not just an in-memory write.
+        assert len(local.version_history) >= 1
+
+    async def test_bootstrap_mints_a_fresh_local_node_id(self):
+        """
+        The bootstrapped session must not inherit the remote's
+        node_id -- a later local commit has to bump *this* replica's
+        own clock, not silently masquerade as another commit from the
+        remote's node_id (see _bootstrap_remote_session's docstring).
+        """
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        adapter = GossipAdapter(runtime, "r1")
+        remote_node_id = str(uuid4())
+        remote = RuntimeSession(
+            knowledge_structure=make_structure(["root"]),
+            session_id="ghost",
+            metadata={"node_id": remote_node_id},
+        )
+        await adapter.apply_remote_session(remote)
+
+        local = runtime.get_session("ghost")
+        assert local.metadata["node_id"] != remote_node_id
+
+    async def test_bootstrap_preserves_the_remotes_already_committed_vector(self):
+        """
+        A remote session that already has commit history behind it
+        (a non-empty VersionVector) must hand that history to the
+        bootstrapped local session unchanged -- otherwise a
+        subsequent gossip round from a third replica that already
+        saw the original remote's commits would look like a genuine
+        conflict instead of something this replica just hasn't heard
+        about yet.
+        """
+        runtime_source = await Runtime.create(core=CksCoreAdapter())
+        source_session = await runtime_source.create_session(make_structure(["root"]))
+        await _evolve(runtime_source, source_session, [_add("a")])
+        remote_vector = VersionVector.from_metadata(source_session.metadata)
+        assert remote_vector.clocks  # sanity: the source really did commit
+
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        adapter = GossipAdapter(runtime, "r1")
+        await adapter.apply_remote_session(source_session)
+
+        local = runtime.get_session(source_session.session_id)
+        local_vector = VersionVector.from_metadata(local.metadata)
+        assert local_vector.dominates(remote_vector)
+        for node_id, clock in remote_vector.clocks.items():
+            assert local_vector.clocks[node_id] >= clock
+
+    async def test_bootstrap_is_persisted_to_storage(self):
+        """
+        Not just an in-memory registration -- a restart (or another
+        code path reading straight from storage) must see it too,
+        matching every other place Runtime persists a session it
+        just registered (create_session, create_branch).
+        """
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        adapter = GossipAdapter(runtime, "r1")
+        remote = RuntimeSession(
+            knowledge_structure=make_structure(["root"]), session_id="ghost"
+        )
+        await adapter.apply_remote_session(remote)
+
+        stored = await runtime.storage.load_session("ghost")
+        assert stored is not None
 
     async def test_no_op_when_local_already_dominates(self):
         runtime_a, runtime_b, session_id = await _paired_replicas()

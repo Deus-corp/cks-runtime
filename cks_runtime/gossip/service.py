@@ -18,6 +18,15 @@ adapter (full source available and reused for the pattern) over a
 *set* of tracked ``RuntimeSession``\\ s -- gossip here is per-session,
 unlike that project's single global store, so one round talks to one
 peer about however many sessions this replica is tracking.
+
+Also, optionally, folds in peer discovery (``discovery.py``): after a
+successful round with a peer, that same peer is asked which other
+peers it knows about (piggy-backing discovery on a round that already
+proved the peer reachable, rather than a separate scheduled activity
+of its own), and any newly learned addresses are merged into
+``scheduler``. Omitting ``discovery`` (the default) leaves peer
+membership exactly as static as before this feature existed --
+nothing about the core anti-entropy loop depends on it.
 """
 
 from __future__ import annotations
@@ -27,6 +36,11 @@ import contextlib
 import logging
 
 from cks_runtime.gossip.adapter import GossipAdapter
+from cks_runtime.gossip.discovery import (
+    PeerDiscovery,
+    PeerDiscoveryError,
+    merge_discovered_peers,
+)
 from cks_runtime.gossip.filter import GossipFilter
 from cks_runtime.gossip.scheduling import PeerScheduler
 from cks_runtime.gossip.transport import (
@@ -51,6 +65,15 @@ class GossipService:
     directly for a single explicit round (e.g. from a test, or a
     caller that wants to control timing itself rather than run a free
     background loop).
+
+    ``discovery``, when supplied, is consulted once per round after a
+    successful exchange (see ``gossip_round``) to grow ``scheduler``'s
+    peer set beyond whatever it was configured with -- ADR-008's own
+    "Peer discovery" follow-up item. ``self_address`` (this replica's
+    own externally-reachable address) is passed through to
+    ``merge_discovered_peers`` so a peer's answer that happens to
+    include this replica's own address is never scheduled against
+    itself.
     """
 
     def __init__(
@@ -63,6 +86,8 @@ class GossipService:
         session_ids: list[str] | None = None,
         gossip_filter: GossipFilter | None = None,
         interval_s: float = DEFAULT_INTERVAL_S,
+        discovery: PeerDiscovery | None = None,
+        self_address: str | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError(f"interval_s must be > 0, got {interval_s!r}.")
@@ -74,6 +99,8 @@ class GossipService:
         self._session_ids: list[str] = list(session_ids) if session_ids else []
         self._filter = gossip_filter if gossip_filter is not None else GossipFilter()
         self.interval_s = interval_s
+        self._discovery = discovery
+        self._self_address = self_address
 
         self._seq_no = 0
         self._running = False
@@ -118,6 +145,14 @@ class GossipService:
         actually down will fail identically for every session, so
         there's nothing to learn from retrying it several times in
         one round.
+
+        When ``discovery`` was supplied and every tracked session
+        exchanged cleanly (or there were none to begin with -- a
+        freshly bootstrapping replica with no sessions yet should
+        still be able to grow its peer list), that same peer is also
+        asked which other peers it knows about (see ``_discover_from``).
+        A peer that failed session gossip this round is never also
+        asked for peers -- it already needed backing off.
         """
         peer = self._scheduler.choose_peer()
         if peer is None:
@@ -147,7 +182,38 @@ class GossipService:
             else:
                 self._scheduler.record_success(peer)
 
+        if self._discovery is not None:
+            await self._discover_from(peer)
+
         return peer
+
+    async def _discover_from(self, peer: str) -> None:
+        """
+        Ask ``peer`` which other peers it knows about (peer-exchange,
+        ``discovery.py``) and merge any new addresses into
+        ``scheduler``.
+
+        Best-effort and strictly additive, matching how
+        ``fetch_operations_since``/the operation log are opt-in
+        accelerants elsewhere in this package: a peer that doesn't
+        support discovery (an older deployment, or a
+        ``GossipTransport``/``PeerDiscovery`` pairing where discovery
+        was never wired up on its end) must not stop session gossip
+        from working, so a ``PeerDiscoveryError`` here is logged and
+        swallowed rather than propagated out of ``gossip_round``.
+        """
+        assert self._discovery is not None
+        try:
+            discovered = await self._discovery.fetch_peers(peer)
+        except PeerDiscoveryError as exc:
+            logger.warning("GossipService: peer discovery via %s failed: %s", peer, exc)
+            return
+
+        newly_added = merge_discovered_peers(
+            self._scheduler, discovered, self_address=self._self_address
+        )
+        if newly_added:
+            logger.info("GossipService: discovered new peers via %s: %s", peer, newly_added)
 
     # ------------------------------------------------------------------
     # Background loop

@@ -16,6 +16,14 @@ gossiped opaque dict payloads into a CRDT genome store, this one
 exchanges signed ``RuntimeSession`` snapshots through
 ``GossipAdapter.apply_remote_session``.
 
+Also hosts ``HTTPPeerDiscovery`` and ``GossipServer``'s
+``/gossip/peers`` route -- the HTTP side of the peer-exchange protocol
+``discovery.py`` defines. Kept in this module rather than a dedicated
+``http_discovery.py`` because it shares ``GossipServer`` (one aiohttp
+``Application``, one running server per replica) and
+``HTTPGossipTransport``'s connection-pooling ``ClientSession`` pattern
+almost verbatim; splitting it out would only duplicate both.
+
 Requires the ``aiohttp`` extra (``pip install cks-runtime[gossip]``);
 importing this module without it raises ``ImportError`` with that
 hint, matching how ``postgres_storage.py`` is only ever imported
@@ -25,6 +33,7 @@ lazily, on demand, so the base install stays dependency-light.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable
 from typing import Any
 
 try:
@@ -37,6 +46,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
     ) from exc
 
 from cks_runtime.gossip.adapter import GossipAdapter
+from cks_runtime.gossip.discovery import PeerDiscovery, PeerDiscoveryError
 from cks_runtime.gossip.envelope import GossipEnvelope
 from cks_runtime.gossip.filter import GossipFilter
 from cks_runtime.gossip.transport import GossipTransport, GossipTransportError
@@ -104,6 +114,58 @@ class HTTPGossipTransport(GossipTransport):
         self._session = None
 
 
+class HTTPPeerDiscovery(PeerDiscovery):
+    """
+    Client side of the peer-exchange protocol (``discovery.py``):
+    ``GET {peer}/gossip/peers``, expecting ``{"peers": [...]}`` back.
+
+    Mirrors ``HTTPGossipTransport`` exactly (lazily opened, pooled
+    ``aiohttp.ClientSession``; same error-wrapping shape) -- kept as a
+    separate class rather than a second method on
+    ``HTTPGossipTransport`` because the two exchanges are independent
+    protocols (see this module's docstring) that a caller may want to
+    use, retry, or close on different schedules.
+    """
+
+    def __init__(self, *, request_timeout_s: float = DEFAULT_REQUEST_TIMEOUT_S) -> None:
+        self._request_timeout_s = request_timeout_s
+        self._session: aiohttp.ClientSession | None = None
+
+    async def _client_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def fetch_peers(self, peer: str) -> list[str]:
+        session = await self._client_session()
+        url = f"{peer.rstrip('/')}/gossip/peers"
+        timeout = aiohttp.ClientTimeout(total=self._request_timeout_s)
+
+        try:
+            async with session.get(url, timeout=timeout) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    raise PeerDiscoveryError(
+                        f"peer {peer!r} returned HTTP {response.status}: {body[:200]!r}"
+                    )
+                data: Any = await response.json()
+        except aiohttp.ClientError as exc:
+            raise PeerDiscoveryError(f"failed to reach peer {peer!r}: {exc}") from exc
+        except TimeoutError as exc:
+            raise PeerDiscoveryError(f"timed out reaching peer {peer!r}") from exc
+
+        peers = data.get("peers") if isinstance(data, dict) else None
+        if not isinstance(peers, list):
+            raise PeerDiscoveryError(f"malformed peer list from peer {peer!r}: {data!r}")
+        return [str(p) for p in peers]
+
+    async def close(self) -> None:
+        """Release the pooled ``ClientSession``, if one was opened."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+        self._session = None
+
+
 class GossipServer:
     """
     Server side: receives a peer's envelope, applies it locally
@@ -118,6 +180,19 @@ class GossipServer:
     the transport-facing half of gossip for one replica, matching
     ADR-006's Adapter pattern: mechanism lives here, merge policy
     stays in ``GossipAdapter``.
+
+    Also serves ``GET /gossip/peers`` -- the server side of the
+    peer-exchange protocol ``discovery.py`` defines -- when
+    ``known_peers`` is supplied: a callable (evaluated fresh on every
+    request, so it can return a live ``PeerScheduler.peers`` snapshot)
+    or a plain, fixed iterable. Omitted (the default), the route still
+    exists but always reports an empty peer list; it is never an
+    error for a caller not to have wired peer discovery up.
+    ``self_address``, when given, is always included in that list --
+    this is what lets a replica be *discovered* by others even if it
+    was never listed in anyone's own static configuration, matching
+    the reachable-through-a-seed model peer-exchange protocols rely
+    on.
     """
 
     def __init__(
@@ -128,12 +203,16 @@ class GossipServer:
         host: str = "0.0.0.0",
         port: int,
         gossip_filter: GossipFilter | None = None,
+        known_peers: Callable[[], Iterable[str]] | Iterable[str] | None = None,
+        self_address: str | None = None,
     ) -> None:
         self._adapter = adapter
         self._secret = secret
         self._host = host
         self._port = port
         self._filter = gossip_filter if gossip_filter is not None else GossipFilter()
+        self._known_peers = known_peers
+        self._self_address = self_address
 
         self._reply_seq_no = 0
         self._running = False
@@ -157,6 +236,7 @@ class GossipServer:
     def build_app(self) -> web.Application:
         app = web.Application()
         app.router.add_post("/gossip/{session_id}", self._handle_gossip)
+        app.router.add_get("/gossip/peers", self._handle_peers)
         app.router.add_get("/health", self._handle_health)
         return app
 
@@ -209,6 +289,32 @@ class GossipServer:
                 "replica_id": self._adapter.replica_id,
             }
         )
+
+    async def _handle_peers(self, request: web.Request) -> web.Response:
+        """
+        Serve this replica's known peer addresses (peer-exchange,
+        ``discovery.py``). Deliberately unauthenticated and unsigned,
+        unlike ``/gossip/{session_id}`` -- a peer *address* is not
+        sensitive the way a session snapshot is, and requiring a
+        signed request here would mean a brand-new replica (which by
+        definition hasn't exchanged a session yet) could never
+        discover anyone. Matches ADR-008's Non-Goals ("Not solving
+        Byzantine or malicious peers... assumes cooperating agents
+        within one deployment") exactly as the rest of this package
+        already does.
+        """
+        if self._known_peers is None:
+            peers: Iterable[str] = ()
+        elif callable(self._known_peers):
+            peers = self._known_peers()
+        else:
+            peers = self._known_peers
+
+        peer_list = list(dict.fromkeys(peers))  # de-duplicate, preserve order
+        if self._self_address is not None and self._self_address not in peer_list:
+            peer_list.insert(0, self._self_address)
+
+        return web.json_response({"peers": peer_list})
 
     async def _handle_gossip(self, request: web.Request) -> web.Response:
         session_id = request.match_info["session_id"]
