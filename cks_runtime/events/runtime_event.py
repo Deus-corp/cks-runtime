@@ -143,3 +143,10 @@ class ValidationFailed(RuntimeEvent):
     transaction_id: str = ""
     session_id: str = ""
     message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GossipConflictDetected(RuntimeEvent):
+    """Published when merging gossiped operations results in a conflict."""
+    source_replica_id: str = ""
+    conflicts: list[Any] = field(default_factory=list)

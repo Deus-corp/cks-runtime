@@ -13,6 +13,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from datetime import datetime
+from uuid import uuid4
 
 import cks
 import numpy as np
@@ -202,6 +203,14 @@ class SQLiteStorage(RuntimeStorage):
             """
             CREATE INDEX IF NOT EXISTS idx_operation_log_object
             ON cks_operation_log(session_id, object_id)
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_runtime_identity (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                replica_id TEXT NOT NULL
+            )
             """
         )
         self._conn.commit()
@@ -756,30 +765,38 @@ class SQLiteStorage(RuntimeStorage):
         self,
         session_id: str,
         object_id: str | None = None,
+        version_id: str | None = None,
     ) -> list[RuntimeFieldOperation]:
         """
         Return logged field-level operations for a session (optionally
-        filtered to a single object_id), oldest first.
+        filtered to a single object_id and/or a single version_id),
+        oldest first.
 
         Foundational read path for the merge fast-path sketched in
         ADR-007 (not yet consumed by MergeOperation there); also used
-        directly by tests to assert what a commit logged.
+        directly by tests to assert what a commit logged. The
+        ``version_id`` filter (ADR-008) additionally backs
+        ``RuntimeStorage.fetch_operations_since()``'s generic base-class
+        implementation, which needs one version's operations at a time
+        rather than a whole session's.
         """
+        clauses = ["session_id = ?"]
+        params: list[str] = [session_id]
         if object_id is not None:
-            query = (
-                "SELECT object_id, op_type, field_key, field_value, version_id "
-                "FROM cks_operation_log WHERE session_id = ? AND object_id = ? "
-                "ORDER BY op_id"
-            )
-            params: tuple = (session_id, object_id)
-        else:
-            query = (
-                "SELECT object_id, op_type, field_key, field_value, version_id "
-                "FROM cks_operation_log WHERE session_id = ? ORDER BY op_id"
-            )
-            params = (session_id,)
+            clauses.append("object_id = ?")
+            params.append(object_id)
+        if version_id is not None:
+            clauses.append("version_id = ?")
+            params.append(version_id)
 
-        rows = self._conn.execute(query, params).fetchall()
+        query = (
+            "SELECT object_id, op_type, field_key, field_value, version_id "
+            "FROM cks_operation_log WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY op_id"
+        )
+
+        rows = self._conn.execute(query, tuple(params)).fetchall()
         return [
             RuntimeFieldOperation(
                 object_id=row[0],
@@ -864,3 +881,46 @@ class SQLiteStorage(RuntimeStorage):
         # matching the previous sorted(..., reverse=True) behaviour.
         order = np.argsort(-similarities, kind="stable")[:top_k]
         return [(object_ids[i], float(similarities[i])) for i in order]
+
+    # ------------------------------------------------------------------
+    # Distributed replication (ADR-008)
+    # ------------------------------------------------------------------
+
+    def get_or_create_replica_id(self) -> str | None:
+        """
+        Return this database's durable replica identity, generating
+        and persisting one under the single-row ``cks_runtime_identity``
+        table on first call.
+
+        The ``id = 1`` CHECK constraint keeps the table single-row by
+        construction: a second ``INSERT`` racing this one violates the
+        primary key and is caught below, so a concurrent first call
+        from two callers converges on whichever row committed first
+        rather than raising or silently creating two identities.
+        """
+
+        def _get_or_create() -> str:
+            row = self._conn.execute(
+                "SELECT replica_id FROM cks_runtime_identity WHERE id = 1"
+            ).fetchone()
+            if row is not None:
+                return str(row[0])
+
+            candidate = str(uuid4())
+            try:
+                self._conn.execute(
+                    "INSERT INTO cks_runtime_identity (id, replica_id) VALUES (1, ?)",
+                    (candidate,),
+                )
+                self._conn.commit()
+                return candidate
+            except sqlite3.IntegrityError:
+                # Another caller won the race; read back what it wrote.
+                self._conn.rollback()
+                row = self._conn.execute(
+                    "SELECT replica_id FROM cks_runtime_identity WHERE id = 1"
+                ).fetchone()
+                assert row is not None
+                return str(row[0])
+
+        return _retry_on_locked(_get_or_create)

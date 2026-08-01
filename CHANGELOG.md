@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.26.0] - 2026-08-01
+
+### Added
+- **`GossipAdapter`** – applies remote operations from another replica, using the storage layer's `fetch_operations_since` and the existing `MergeOperation`. (ADR-008)
+- **`GossipConflictDetected` event** – published when a merge conflict is detected during gossip.
+- **`gossip_exchange()`** – in-process helper to exchange operations between two replicas for testing.
+
+---
+
 ## [1.25.2] - 2026-07-31
 
 ### Changed

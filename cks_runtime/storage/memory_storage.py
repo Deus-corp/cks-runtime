@@ -10,6 +10,7 @@ objects and is primarily intended for testing.
 from __future__ import annotations
 
 from copy import deepcopy
+from uuid import uuid4
 
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.storage import RuntimeStorage
@@ -31,6 +32,7 @@ class InMemoryStorage(RuntimeStorage):
     def __init__(self) -> None:
         self._sessions: dict[str, RuntimeSession] = {}
         self._versions: dict[str, RuntimeVersion] = {}
+        self._replica_id: str | None = None
 
     #
     # ------------------------------------------------------------------
@@ -179,3 +181,26 @@ class InMemoryStorage(RuntimeStorage):
 
         self._sessions.clear()
         self._versions.clear()
+        self._replica_id = None
+
+    #
+    # ------------------------------------------------------------------
+    # Distributed replication (ADR-008)
+    # ------------------------------------------------------------------
+    #
+
+    def get_or_create_replica_id(self) -> str | None:
+        """
+        Return this instance's replica identity, generating one on
+        first call. "Persisted" only for the lifetime of this
+        InMemoryStorage instance -- there is no process to restart
+        into, so per-instance stability is all "durable" can mean
+        here. Independent of operation-log support (deliberately
+        absent from this backend, see ``test_operation_log_is_unsupported_by_default``):
+        a replica_id with no operation log to gossip is inert but
+        harmless, matching every other optional capability's
+        independence from the others in this class.
+        """
+        if self._replica_id is None:
+            self._replica_id = str(uuid4())
+        return self._replica_id

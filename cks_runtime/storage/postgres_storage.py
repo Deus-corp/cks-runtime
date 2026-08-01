@@ -60,6 +60,7 @@ import struct
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 import cks
 import psycopg
@@ -179,6 +180,17 @@ _DDL_OPLOG_IDX = """
 """
 
 # ---------------------------------------------------------------------------
+# DDL — runtime identity (ADR-008)
+# ---------------------------------------------------------------------------
+
+_DDL_IDENTITY = """
+    CREATE TABLE IF NOT EXISTS cks_runtime_identity (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        replica_id TEXT NOT NULL
+    )
+"""
+
+# ---------------------------------------------------------------------------
 # DDL — embedding metadata (dimension registry)
 # ---------------------------------------------------------------------------
 
@@ -291,6 +303,8 @@ class PostgresStorage(AsyncRuntimeStorage):
             # Operation log
             await conn.execute(_DDL_OPLOG)
             await conn.execute(_DDL_OPLOG_IDX)
+            # Runtime identity (ADR-008)
+            await conn.execute(_DDL_IDENTITY)
             # Embedding metadata + shell table
             await conn.execute(_DDL_EMBED_META)
             await conn.execute(_DDL_EMBEDDINGS_SHELL)
@@ -727,26 +741,26 @@ class PostgresStorage(AsyncRuntimeStorage):
         self,
         session_id: str,
         object_id: str | None = None,
+        version_id: str | None = None,
     ) -> list[RuntimeFieldOperation]:
+        clauses = ["session_id = %s"]
+        params: list[str] = [session_id]
         if object_id is not None:
-            query = """
-                SELECT object_id, op_type, field_key, field_value, version_id
-                FROM cks_operation_log
-                WHERE session_id = %s AND object_id = %s
-                ORDER BY op_id
-            """
-            params: tuple = (session_id, object_id)
-        else:
-            query = """
-                SELECT object_id, op_type, field_key, field_value, version_id
-                FROM cks_operation_log
-                WHERE session_id = %s
-                ORDER BY op_id
-            """
-            params = (session_id,)
+            clauses.append("object_id = %s")
+            params.append(object_id)
+        if version_id is not None:
+            clauses.append("version_id = %s")
+            params.append(version_id)
+
+        query = (
+            "SELECT object_id, op_type, field_key, field_value, version_id "
+            "FROM cks_operation_log WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY op_id"
+        )
 
         async with self._pool.connection() as conn:
-            rows = await (await conn.execute(query, params)).fetchall()
+            rows = await (await conn.execute(query, tuple(params))).fetchall()
 
         result = []
         for row in rows:
@@ -870,9 +884,55 @@ class PostgresStorage(AsyncRuntimeStorage):
                 await conn.execute("DELETE FROM cks_outbox_tasks")
                 await conn.execute("DELETE FROM versions")
                 await conn.execute("DELETE FROM sessions")
+                await conn.execute("DELETE FROM cks_runtime_identity")
                 await conn.commit()
 
         await _retry_on_transient(_write)
+
+    #
+    # ------------------------------------------------------------------
+    # Distributed replication (ADR-008)
+    # ------------------------------------------------------------------
+    #
+
+    async def get_or_create_replica_id(self) -> str | None:
+        """
+        Return this database's durable replica identity, generating
+        and persisting one under the single-row ``cks_runtime_identity``
+        table on first call. Mirrors ``SQLiteStorage.get_or_create_replica_id``;
+        see there for the single-row/race-safety rationale.
+        """
+
+        async def _get_or_create() -> str:
+            async with self._pool.connection() as conn:
+                row = await (
+                    await conn.execute(
+                        "SELECT replica_id FROM cks_runtime_identity WHERE id = 1"
+                    )
+                ).fetchone()
+                if row is not None:
+                    return str(row[0])
+
+                candidate = str(uuid4())
+                try:
+                    await conn.execute(
+                        "INSERT INTO cks_runtime_identity (id, replica_id) "
+                        "VALUES (1, %s)",
+                        (candidate,),
+                    )
+                    await conn.commit()
+                    return candidate
+                except psycopg.errors.UniqueViolation:
+                    await conn.rollback()
+                    row = await (
+                        await conn.execute(
+                            "SELECT replica_id FROM cks_runtime_identity WHERE id = 1"
+                        )
+                    ).fetchone()
+                    assert row is not None
+                    return str(row[0])
+
+        return await _retry_on_transient(_get_or_create)
 
     # ------------------------------------------------------------------
     # Internal helpers — embedding column lifecycle
