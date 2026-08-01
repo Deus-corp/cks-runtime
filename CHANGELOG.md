@@ -19,6 +19,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.28.0] - 2026-08-01
+
+### Added
+- **Integration HTTP tests for gossip** – 14 new tests in `test_http_transport.py` covering fast-forward, three-way merge, bootstrap of unknown sessions, signature rejection, replay-filter handling over real HTTP, peer discovery via `/gossip/peers`, and a full `GossipService` round.
+- **Peer discovery on `GossipService` start** – `GossipService.start()` now calls `discover_peers()` to query all known peers for additional addresses before entering the background loop.
+- **SPEC-009_Gossip_Replication.md** – formal specification for the gossip envelope format, `apply_remote_session` semantics, and the `GossipTransport` contract for third-party transports.
+
+### Changed
+- `GossipService` now has a `discover_peers()` method and performs an initial discovery sweep on start.
+- `test_http_transport.py` — previously referenced in docstrings but non-existent; now fully implemented and passing.
+
+---
+
 ## [1.27.2] - 2026-08-01
 
 ### Added

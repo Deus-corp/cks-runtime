@@ -187,7 +187,7 @@ class GossipService:
 
         return peer
 
-    async def _discover_from(self, peer: str) -> None:
+    async def _discover_from(self, peer: str) -> list[str]:
         """
         Ask ``peer`` which other peers it knows about (peer-exchange,
         ``discovery.py``) and merge any new addresses into
@@ -200,31 +200,90 @@ class GossipService:
         ``GossipTransport``/``PeerDiscovery`` pairing where discovery
         was never wired up on its end) must not stop session gossip
         from working, so a ``PeerDiscoveryError`` here is logged and
-        swallowed rather than propagated out of ``gossip_round``.
+        swallowed rather than propagated out of the caller (both
+        ``gossip_round`` and ``discover_peers`` below rely on that).
+
+        Returns the addresses newly added to ``scheduler`` (possibly
+        empty), for ``discover_peers`` to aggregate across several
+        peers in one bootstrap pass.
         """
         assert self._discovery is not None
         try:
             discovered = await self._discovery.fetch_peers(peer)
         except PeerDiscoveryError as exc:
             logger.warning("GossipService: peer discovery via %s failed: %s", peer, exc)
-            return
+            return []
 
         newly_added = merge_discovered_peers(
             self._scheduler, discovered, self_address=self._self_address
         )
         if newly_added:
             logger.info("GossipService: discovered new peers via %s: %s", peer, newly_added)
+        return newly_added
+
+    async def discover_peers(self) -> list[str]:
+        """
+        Ask every peer ``scheduler`` currently knows about for their
+        own known-peer lists, and merge every answer in.
+
+        This is the "at start" half of the peer-discovery follow-up
+        item ADR-008 itself names: ``gossip_round``'s own discovery
+        step only ever asks the *one* peer chosen for that round,
+        which means a service configured with nothing but a handful
+        of static seed addresses (the PEX bootstrap model
+        ``discovery.py`` describes -- "grow a full membership view
+        from a handful of seed addresses") would otherwise have to
+        wait for its first successful session-gossip round before
+        membership could grow at all. ``start()`` calls this once,
+        before the periodic loop begins, so a fresh replica's peer
+        set is as complete as its seeds can make it from the first
+        round onward -- every later round's own post-round discovery
+        (``gossip_round`` / ``_discover_from``) keeps it growing
+        epidemically from there.
+
+        Queries ``scheduler.peers`` as it stood at the moment this was
+        called (a snapshot -- ``PeerScheduler.peers`` already returns
+        a tuple, not a live view) rather than transitively following
+        newly discovered addresses within the same pass; a peer
+        discovered via this call is asked in turn the next time
+        ``discover_peers`` or a round's own ``_discover_from`` runs,
+        matching how epidemic membership protocols converge over
+        several rounds rather than one BFS traversal. A no-op,
+        returning ``[]``, when ``discovery`` was never configured or
+        ``scheduler`` starts with no peers at all (nothing to ask).
+
+        Best-effort per peer, same as ``_discover_from``: one seed
+        failing to answer does not stop the others from being asked.
+        """
+        if self._discovery is None:
+            return []
+
+        newly_added: list[str] = []
+        for peer in self._scheduler.peers:
+            newly_added.extend(await self._discover_from(peer))
+        return newly_added
 
     # ------------------------------------------------------------------
     # Background loop
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Launch the background gossip loop. No-op if already running."""
+        """
+        Launch the background gossip loop. No-op if already running.
+
+        When ``discovery`` was supplied, this first runs
+        ``discover_peers()`` once -- growing ``scheduler`` beyond its
+        static seed list immediately, rather than only reactively
+        after each round's chosen peer succeeds (see
+        ``discover_peers``'s docstring) -- before the periodic loop
+        begins.
+        """
         if self._running:
             logger.debug("GossipService already running.")
             return
         self._running = True
+        if self._discovery is not None:
+            await self.discover_peers()
         self._task = asyncio.ensure_future(self._run_forever())
 
     async def stop(self) -> None:
