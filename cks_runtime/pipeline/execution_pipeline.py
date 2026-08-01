@@ -230,6 +230,7 @@ class ExecutionPipeline:
             core_bridge=self._runtime.core_bridge,
             previous_state=initial_state,
             node_id=node_id,
+            replica_id=self._runtime.replica_id,
         )
 
         await self._runtime.events.publish(

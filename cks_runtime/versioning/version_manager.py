@@ -46,6 +46,7 @@ class VersionManager:
         core_bridge: CoreBridge | None = None,
         previous_state: Any | None = None,
         node_id: str | None = None,
+        replica_id: str | None = None,
     ) -> RuntimeVersion:
         """
         Create a new RuntimeVersion.
@@ -104,6 +105,20 @@ class VersionManager:
             untouched -- callers that construct a VersionManager
             directly without a Runtime (e.g. existing unit tests) see
             no behaviour change.
+        replica_id
+            Optional (ADR-008 §1). When supplied, this call *also*
+            bumps the same VersionVector for ``replica_id`` -- in
+            addition to ``node_id``, not instead of it. ``node_id``
+            keeps doing exactly the job ADR-007 gave it (local
+            fast-path disambiguation between concurrent branches from
+            the same replica); ``replica_id`` adds a coarser, durable
+            identity that stays stable across a process restart
+            minting a fresh ``node_id``, which is what lets a gossip
+            peer recognize "this is the same replica I talked to
+            yesterday" (see ``Runtime.replica_id``,
+            ``RuntimeStorage.get_or_create_replica_id``). ``None``
+            (the default) leaves the vector exactly as it was before
+            this parameter existed.
 
         Raises
         ------
@@ -112,9 +127,12 @@ class VersionManager:
             was not supplied.
         """
 
-        if node_id is not None:
+        if node_id is not None or replica_id is not None:
             vector = VersionVector.from_metadata(session.metadata)
-            vector.bump(node_id)
+            if node_id is not None:
+                vector.bump(node_id)
+            if replica_id is not None:
+                vector.bump(replica_id)
             vector.to_metadata(session.metadata)
 
         transaction_id = ""

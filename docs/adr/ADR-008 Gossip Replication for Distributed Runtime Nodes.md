@@ -41,6 +41,31 @@ skipped); `mypy`/`ruff` are clean across the package. The gossip
 transport itself (peer discovery, scheduling, wire format) remains
 unimplemented -- see Non-Goals.
 
+**Revision (2026-08-01, v1.29.0):** Point 1's "every session created
+by that process bumps its VersionVector under `replica_id` in
+addition to ... `node_id`" is now implemented: `Runtime.create()`
+sources `replica_id` from `storage.get_or_create_replica_id()` once
+at startup (`Runtime.replica_id`, `None` for a bare `Runtime(...)`
+or a storage backend without gossip support), and
+`ExecutionPipeline._create_version` passes it through to
+`VersionManager.create(..., replica_id=...)`, which bumps the vector
+for it alongside `node_id`. This closes Problem 1 as stated --
+`replica_id` now survives a process restart the way `node_id` never
+could. It does **not**, on its own, make concurrently-bootstrapped
+replicas of the same `session_id` converge: `apply_remote_session`'s
+non-fast-forward path still goes through `MergeOperation`, which
+needs `parent_version_id` lineage to compute a three-way merge base.
+Sessions independently constructed on separate replicas (rather than
+via `create_branch`) have no such lineage, so once both sides have
+committed anything, every further gossip round between them fails
+with "could not determine a merge base" and escalates via
+`GossipConflictDetected` -- indefinitely, not just once. Confirmed
+against a 3-replica local reproduction (Supervisor/Critic/Worker,
+one field-disjoint commit each): 20+ anti-entropy rounds, zero
+transport failures, zero convergence. Establishing shared lineage
+for gossip-bootstrapped sessions is unaddressed and is the next gap
+to close, not this revision's scope.
+
 ---
 
 # Context

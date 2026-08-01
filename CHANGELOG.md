@@ -19,6 +19,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.29.0] - 2026-08-02
+
+### Added
+- **`VersionVector` now bumped by `replica_id`** – `VersionManager.create()` accepts an optional `replica_id` parameter (ADR-008 §1). When supplied, the version vector is bumped for both `node_id` and `replica_id`, giving gossip peers a durable, cross-restart identity to anchor anti-entropy comparisons.
+- **`Runtime.replica_id` property** – sourced once from `storage.get_or_create_replica_id()` during `Runtime.create()`, exposed as a public property. `None` for bare `Runtime(...)` instances or backends without gossip support.
+- **`ExecutionPipeline._create_version`** now passes `replica_id` from the runtime to `VersionManager.create()`.
+
+### Changed
+- ADR-008 updated with a revision note documenting the `replica_id` bump and its scope: it closes the durable identity problem but does not yet solve convergence for independently bootstrapped sessions without shared lineage.
+
+### Fixed
+- `VersionManager.create()` no longer ignores `replica_id` when `node_id` is also present – both keys are bumped together.
+
+---
+
 ## [1.28.1] - 2026-08-01
 
 ### Fixed

@@ -1,5 +1,6 @@
 from cks_runtime.session.session_manager import SessionManager
 from cks_runtime.versioning.version_manager import VersionManager
+from cks_runtime.versioning.version_vector import VersionVector
 
 
 def create_session():
@@ -125,3 +126,55 @@ def test_version_is_snapshot():
 
     assert version.metadata.get("node_id") is not None
     assert "user" not in version.metadata
+
+def test_create_bumps_vector_for_node_id_only_by_default():
+
+    session = create_session()
+
+    manager = VersionManager()
+
+    manager.create(session, node_id="node-a")
+
+    vector = VersionVector.from_metadata(session.metadata)
+
+    assert vector.clocks == {"node-a": 1}
+
+
+def test_create_bumps_vector_for_replica_id_in_addition_to_node_id():
+    """ADR-008 §1: replica_id is bumped *in addition to*, not instead of, node_id."""
+
+    session = create_session()
+
+    manager = VersionManager()
+
+    manager.create(session, node_id="node-a", replica_id="replica-x")
+
+    vector = VersionVector.from_metadata(session.metadata)
+
+    assert vector.clocks == {"node-a": 1, "replica-x": 1}
+
+
+def test_create_bumps_vector_for_replica_id_alone_when_node_id_absent():
+
+    session = create_session()
+
+    manager = VersionManager()
+
+    manager.create(session, replica_id="replica-x")
+
+    vector = VersionVector.from_metadata(session.metadata)
+
+    assert vector.clocks == {"replica-x": 1}
+
+
+def test_create_leaves_vector_untouched_when_neither_id_given():
+
+    session = create_session()
+
+    manager = VersionManager()
+
+    manager.create(session)
+
+    vector = VersionVector.from_metadata(session.metadata)
+
+    assert vector.clocks == {}

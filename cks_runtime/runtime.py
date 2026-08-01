@@ -153,6 +153,7 @@ class Runtime:
         "_outbox_worker",
         "_pipeline",
         "_registry",
+        "_replica_id",
         "_sessions",
         "_storage",
         "_transactions",
@@ -188,6 +189,14 @@ class Runtime:
         #
 
         self._storage = _resolve_storage(storage, self.config)
+
+        # Durable per-process identity (ADR-008 §1), distinct from the
+        # per-session node_id SessionManager mints below. None until
+        # sourced from storage in create() -- a bare Runtime(...) (many
+        # existing unit tests construct one this way, with no running
+        # event loop / async startup) sees no behaviour change, exactly
+        # like node_id-less VersionManager.create() calls today.
+        self._replica_id: str | None = None
 
         #
         # Runtime subsystems
@@ -307,6 +316,14 @@ class Runtime:
             embedding_client=embedding_client,
         )
 
+        # Sourced once per process lifetime, here -- the one place
+        # ADR-008 §4 (SPEC-009) designates as responsible for durability
+        # across restarts. A backend without gossip support (its
+        # get_or_create_replica_id() default) returns None; that's the
+        # correct "not a distinguishable gossip peer" outcome, not an
+        # error, so it's stored as-is rather than substituted.
+        runtime._replica_id = await runtime._storage.get_or_create_replica_id()
+
         await runtime._restore_from_storage()
         await runtime._outbox_worker.start()
 
@@ -341,6 +358,22 @@ class Runtime:
         """
 
         return self._storage
+
+    @property
+    def replica_id(
+        self,
+    ) -> str | None:
+        """
+        Durable per-process identity (ADR-008 §1), or ``None`` for a
+        bare ``Runtime(...)`` that never ran ``create()``'s async
+        startup, or whose storage backend doesn't support gossip
+        (``get_or_create_replica_id()`` returning ``None`` is the
+        documented "not a distinguishable gossip peer" outcome).
+        Distinct from the per-session ``node_id`` in
+        ``session.metadata`` -- see ``VersionVector`` / ``GossipAdapter``.
+        """
+
+        return self._replica_id
 
 
     @property
