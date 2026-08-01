@@ -19,6 +19,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.26.1] - 2026-08-01
+
+### Added
+- **`get_or_create_replica_id`** – durable per-process identity for gossip, persisted via new `cks_runtime_identity` table in SQLiteStorage and PostgresStorage. InMemoryStorage provides an auto-generated transient replica_id for testing.
+- **`fetch_operations_since`** – new method on `RuntimeStorage` / `AsyncRuntimeStorage` for retrieving operation-log entries not yet reflected in a given `VersionVector`.
+- **`list_operations` `version_id` filter** – `list_operations` now accepts an optional `version_id` parameter for scoped queries (SQLite, Postgres, InMemory).
+
+### Fixed
+- **`SyncStorageAdapter`** now properly forwards `list_operations` with the new `version_id` parameter, and exposes `get_or_create_replica_id` / `fetch_operations_since`.
+- **Duplicate `GossipConflictDetected`** class removed; canonical event is now only in `events/runtime_event.py`.
+- **`GossipAdapter` rewritten** to exchange full `RuntimeSession` snapshots via the existing `MergeOperation` path (probe → commit), replacing the non-functional field-operation-replay design. (ADR-008)
+
+---
+
 ## [1.26.0] - 2026-08-01
 
 ### Added

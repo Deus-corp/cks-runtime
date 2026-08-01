@@ -1,53 +1,87 @@
 """
-GossipAdapter – applies remote operations received from another replica.
+GossipAdapter -- applies a remote replica's session state into the
+local Runtime by reusing the existing, already-tested MergeOperation
+(ADR-007) session-to-session merge path.
 
-ADR-008: This is the active component that merges incoming operations
-into the local knowledge base, using the existing MergeOperation to
-reuse conflict detection and resolution logic.
+ADR-008 status update: the original design in this module attempted
+to reconstruct a remote Knowledge Structure by replaying raw
+``RuntimeFieldOperation`` rows fetched via ``fetch_operations_since``.
+That cannot work as specified: per ``RuntimeFieldOperation``'s own
+contract, an ``"add_object"``/``"add_relation"`` entry carries no
+payload at all (``field_key``/``field_value`` are always ``None`` for
+those op types) -- it only marks that an identity appeared. There is
+no way to reconstruct a genuinely new object from the operation log
+alone; the log is a field-level accelerant for resolving conflicts on
+objects *both* branches already have (exactly how
+``MergeOperation._field_level_resolutions`` already uses it), not a
+substitute for the actual state.
+
+The fix: gossip exchanges whole ``RuntimeSession`` snapshots (which
+already carry a complete ``knowledge_structure``) for a session both
+replicas already track, and reconciliation goes through the same
+two-phase probe-then-commit sequence cks-mcp's own ``merge_branch``
+tool uses -- ``executor.execute(MergeOperation(...))`` to detect a
+conflict cheaply with no persisted side effects, then, only on
+success, ``begin_transaction`` / ``commit_transaction`` to actually
+persist it as a new committed Version. This is not a new merge
+mechanism; it is the existing one, reused, exactly as ADR-008's
+Decision section intended.
+
+``fetch_operations_since``/``get_or_create_replica_id`` remain useful
+-- as a transport-layer accelerant for deciding what's changed and as
+a durable peer identity -- but are no longer the payload the merge
+itself is built from.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
+from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
+from cks_runtime.events.event_bus import EventBus
+from cks_runtime.events.runtime_event import GossipConflictDetected
+from cks_runtime.execution.operation_executor import OperationStatus
+from cks_runtime.operations.operation_types import MergeOperation
+from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version_vector import VersionVector
 
-
-@dataclass
-class GossipConflictDetected:
-    source_replica_id: str
-    conflicts: list[str]
+if TYPE_CHECKING:
+    from cks_runtime.runtime import Runtime
 
 
 class GossipAdapter:
     """
-    Wraps a Runtime's storage and core bridge to apply operations
-    received from another replica.
+    Wraps a ``Runtime`` to apply another replica's session state,
+    reconciling it through the existing three-way merge path.
 
-    A single GossipAdapter is bound to one local replica. It knows
-    how to:
+    A single ``GossipAdapter`` is bound to one local replica (one
+    ``Runtime``). It knows how to:
 
-    - retrieve the local version vector from storage metadata
-    - query the operation log for operations since a given vector
-    - apply a batch of remote operations, merging them into the
-      local session and updating the local vector
-    - publish ``GossipConflictDetected`` when a merge conflict occurs
+    - read the local version vector for a session both replicas track;
+    - apply a remote replica's snapshot of that same session, merging
+      it into the local session via the standard ``MergeOperation``
+      path and persisting the result as a new committed Version;
+    - publish ``GossipConflictDetected`` when the merge conflicts,
+      instead of raising synchronously -- a background gossip cycle
+      has no caller waiting on the call the way a synchronous
+      ``merge_branch`` invocation does.
+
+    Bootstrapping a session neither replica has seen before, and the
+    actual peer-to-peer transport, are both out of scope here -- see
+    ADR-008's Non-Goals; this adapter only reconciles a session that
+    already exists locally.
     """
 
     def __init__(
         self,
-        storage: Any,            # AsyncRuntimeStorage (or sync via adapter)
-        core_bridge: Any,
+        runtime: Runtime,
         replica_id: str,
-        event_bus: Any | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
-        self._storage = storage
-        self._core_bridge = core_bridge
+        self._runtime = runtime
         self._replica_id = replica_id
-        self._event_bus = event_bus
-
+        self._event_bus = event_bus if event_bus is not None else runtime.events
 
     @property
     def replica_id(self) -> str:
@@ -57,92 +91,79 @@ class GossipAdapter:
     # Vector helpers
     # ------------------------------------------------------------------
 
-    async def get_local_vector(self) -> VersionVector:
+    async def get_local_vector(self, session_id: str) -> VersionVector:
         """
-        Return the current version vector from the local replica's metadata.
-        The vector is stored in the *replica* identity, not per session,
-        so we read it from a well-known key in the storage's identity table
-        (get_or_create_replica_id stores it there, but we need the vector
-        separately).
+        Return the local ``VersionVector`` for ``session_id``, or an
+        empty vector if this replica doesn't have that session (or it
+        has never committed under the ADR-007 scheme).
         """
-        # For now, we store the vector in a dedicated key alongside replica_id.
-        # The storage layer doesn't expose a generic key-value store; we'll
-        # retrieve the latest vector by scanning session vectors? Wait,
-        # the version vector is per-session, not per-replica. In our current
-        # design, each session has its own version vector tracking the
-        # highest commit clock from each node that has written to it.
-        # For gossip, we need a *replica-level* vector that aggregates
-        # all sessions. For simplicity, we'll use the session's vector
-        # of a designated "gossip session" (like a global session).
-        # But the user hasn't implemented that yet. So for now, we'll
-        # assume the adapter is given the vector externally, or we use
-        # a dummy vector. We'll refine later.
-        # Placeholder: return an empty vector (will be replaced later).
-        return VersionVector()
+        session = self._runtime.get_session(session_id)
+        if session is None:
+            return VersionVector()
+        return VersionVector.from_metadata(session.metadata)
 
     async def get_operations_since(
         self, vector: VersionVector
     ) -> list[RuntimeFieldOperation]:
-        """Return operations from the local log that are not yet reflected in *vector*."""
-        return await self._storage.fetch_operations_since(vector)
-
-    # ------------------------------------------------------------------
-    # Merge incoming remote operations
-    # ------------------------------------------------------------------
-
-    async def apply_remote_operations(
-        self,
-        source_replica_id: str,
-        operations: list[RuntimeFieldOperation],
-        source_vector: VersionVector,
-    ) -> bool:
-        """Apply a batch of operations received from a remote replica.
-
-        Creates a temporary gossip session, synthesises a Knowledge
-        Structure from the remote operations using the Core's
-        ``synthesize_merge``, and merges it into the local state via
-        the standard ``MergeOperation`` path.
-
-        Returns True if all operations were applied without conflict,
-        False if one or more conflicts were detected and escalated
-        via ``GossipConflictDetected``.
         """
+        Return locally logged operations not yet reflected in
+        ``vector`` -- a transport-layer accelerant only (see module
+        docstring); not required to apply a remote session.
+        """
+        storage = self._runtime.storage
+        if not getattr(storage, "supports_operation_log", False):
+            return []
+        return await storage.fetch_operations_since(vector)
 
-        if not operations:
+    # ------------------------------------------------------------------
+    # Apply a remote replica's session snapshot
+    # ------------------------------------------------------------------
+
+    async def apply_remote_session(self, remote_session: RuntimeSession) -> bool:
+        local = self._runtime.get_session(remote_session.session_id)
+        if local is None:
+            return False
+
+        local_vector = VersionVector.from_metadata(local.metadata)
+        remote_vector = VersionVector.from_metadata(remote_session.metadata)
+
+        if local_vector.dominates(remote_vector):
             return True
 
-        # Build a synthetic Knowledge Structure from the remote operations.
-        # We rely on the Core's synthesize_merge to create the merged object,
-        # then wrap it in a session for MergeOperation.
-        # For the first version, we need a base object — use the first
-        # operation's object_id and the local session's current state.
-        # This is a simplified approach; a full implementation would
-        # batch operations per object_id and apply them sequentially.
-        try:
-            # Placeholder: create a fresh session with an empty structure
-            # and let MergeOperation handle the rest. In practice, the
-            # gossip session should already exist and be passed in.
+        # Fast‑forward: remote dominates → adopt remote state without a
+        # full merge, the same way MergeOperation.execute does it.
+        if remote_vector.dominates(local_vector):
+            local.knowledge_structure = remote_session.knowledge_structure
+            local_vector.absorb(remote_vector)
+            local_vector.to_metadata(local.metadata)
+            # Persist the fast‑forward as a new local Version.
+            tx = self._runtime.begin_transaction(local)
+            await self._runtime.commit_transaction(tx)
+            return True
 
-            # Merge the remote operations into the local gossip session.
-            # Since MergeOperation expects a source_session with a
-            # Knowledge Structure, we create one from the first operation's
-            # object_id. A full implementation would reconstruct the
-            # entire remote structure from the operation log.
+        # Neither dominates → three‑way merge probe.
+        def _operation() -> MergeOperation:
+            return MergeOperation("gossip-merge", source_session=remote_session)
 
-            # Execute the merge. If it fails with conflict, escalate.
-            # Note: executor is not available here; we need to refactor
-            # to accept it. For now, raise NotImplementedError.
-            raise NotImplementedError(
-                "Full apply_remote_operations requires access to OperationExecutor"
-            )
-        except NotImplementedError:
-            raise
-        except Exception as exc: # noqa: BLE001
+        probe = await self._runtime.executor.execute(
+            _operation(), local, record_metrics=False
+        )
+
+        if probe.status == OperationStatus.FAILED:
+            if isinstance(probe.error, RuntimeMergeConflictError):
+                conflicts = [c.object_id for c in probe.error.conflicts]
+            else:
+                conflicts = [str(probe.error)]
             if self._event_bus is not None:
                 await self._event_bus.publish(
                     GossipConflictDetected(
-                        source_replica_id=source_replica_id,
-                        conflicts=[str(exc)],
+                        source_replica_id=self._replica_id,
+                        conflicts=conflicts,
                     )
                 )
             return False
+
+        tx = self._runtime.begin_transaction(local)
+        tx.add_operation(_operation())
+        await self._runtime.commit_transaction(tx)
+        return True

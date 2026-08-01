@@ -16,6 +16,7 @@ from typing import Any
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version import RuntimeVersion
+from cks_runtime.versioning.version_vector import VersionVector
 
 
 class ConcurrentModificationError(RuntimeError):
@@ -258,6 +259,51 @@ class RuntimeStorage(ABC):
         """
         return []
 
+    #
+    # ------------------------------------------------------------------
+    # Distributed replication (ADR-008)
+    # ------------------------------------------------------------------
+    #
+
+    def get_or_create_replica_id(self) -> str | None:
+        """
+        Return this storage instance's durable replica identity,
+        creating and persisting one on first call if none exists yet.
+        ``None`` by default -- backends that support gossip
+        replication override this. A ``None`` replica id means this
+        storage instance is not a distinguishable gossip peer; callers
+        (``GossipAdapter``) must not attempt to gossip through it.
+        """
+        return None
+
+    def fetch_operations_since(
+        self, vector: VersionVector
+    ) -> list[RuntimeFieldOperation]:
+        """
+        Return every logged field-level operation belonging to a
+        RuntimeVersion whose own recorded VersionVector is not
+        dominated by ``vector``.
+
+        A generic, backend-agnostic default built entirely on
+        ``list_versions()`` + ``list_operations(version_id=...)`` --
+        mirrors ``AsyncRuntimeStorage.fetch_operations_since()``
+        exactly, so any backend that already supports the operation
+        log (``supports_operation_log``) gets this for free without
+        writing its own version. Empty when the operation log isn't
+        supported, same as ``list_operations``' own default.
+        """
+        if not self.supports_operation_log:
+            return []
+
+        operations: list[RuntimeFieldOperation] = []
+        for version in self.list_versions():
+            version_vector = VersionVector.from_metadata(version.metadata)
+            if vector.dominates(version_vector):
+                continue
+            operations.extend(
+                self.list_operations(version.session_id, version_id=version.version_id)
+            )
+        return operations
 
     def list_sessions_modified_before(
         self,

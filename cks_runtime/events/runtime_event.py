@@ -147,6 +147,16 @@ class ValidationFailed(RuntimeEvent):
 
 @dataclass(frozen=True, slots=True)
 class GossipConflictDetected(RuntimeEvent):
-    """Published when merging gossiped operations results in a conflict."""
+    """
+    Published by ``GossipAdapter`` (ADR-008) when merging a remote
+    replica's session into the local one raises
+    ``RuntimeMergeConflictError``. A background gossip cycle has no
+    synchronous caller to raise to, unlike ``merge_branch``, so the
+    conflict is escalated here instead -- a subscriber (e.g. a future
+    Critic agent) resolves it later through the ordinary
+    ``merge_branch`` tool.
+    """
+
     source_replica_id: str = ""
+
     conflicts: list[Any] = field(default_factory=list)

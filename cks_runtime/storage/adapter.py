@@ -30,6 +30,7 @@ from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.async_storage import AsyncRuntimeStorage
 from cks_runtime.storage.storage import OutboxTask, RuntimeStorage
 from cks_runtime.versioning.version import RuntimeVersion
+from cks_runtime.versioning.version_vector import VersionVector
 
 
 class SyncStorageAdapter(AsyncRuntimeStorage):
@@ -166,6 +167,18 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         return await asyncio.to_thread(
             lambda: self._sync.list_operations(session_id, object_id, version_id)
         )
+
+    # ------------------------------------------------------------------
+    # Distributed replication (ADR-008)
+    # ------------------------------------------------------------------
+
+    async def get_or_create_replica_id(self) -> str | None:
+        return await asyncio.to_thread(self._sync.get_or_create_replica_id)
+
+    async def fetch_operations_since(
+        self, vector: VersionVector
+    ) -> list[RuntimeFieldOperation]:
+        return await asyncio.to_thread(self._sync.fetch_operations_since, vector)
 
     # ------------------------------------------------------------------
     # Embedding search
