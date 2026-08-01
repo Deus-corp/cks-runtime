@@ -244,6 +244,7 @@ class RuntimeStorage(ABC):
         self,
         session_id: str,
         object_id: str | None = None,
+        version_id: str | None = None,
     ) -> list[RuntimeFieldOperation]:
         """
         Return logged field-level operations for a session (optionally

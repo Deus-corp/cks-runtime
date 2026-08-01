@@ -161,8 +161,11 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         self,
         session_id: str,
         object_id: str | None = None,
+        version_id: str | None = None,
     ) -> list[RuntimeFieldOperation]:
-        return await asyncio.to_thread(self._sync.list_operations, session_id, object_id)
+        return await asyncio.to_thread(
+            lambda: self._sync.list_operations(session_id, object_id, version_id)
+        )
 
     # ------------------------------------------------------------------
     # Embedding search
