@@ -7,6 +7,7 @@ fake in-memory ``GossipTransport`` -- exercises the orchestration logic
 
 from __future__ import annotations
 
+import time
 from uuid import uuid4
 
 import cks
@@ -62,6 +63,60 @@ async def _paired_replicas() -> tuple[Runtime, Runtime, str]:
         session_id=session_a.session_id,
     )
     session_b.metadata["node_id"] = str(uuid4())
+    runtime_b._sessions.restore(session_b)
+    await runtime_b.storage.save_session(session_b)
+
+    return runtime_a, runtime_b, session_a.session_id
+
+
+async def _paired_replicas_with_shared_base() -> tuple[Runtime, Runtime, str]:
+    """
+    Like ``_paired_replicas``, but both sides additionally carry the
+    *same* genesis ``RuntimeVersion`` in their own local
+    ``version_history``, with ``parent_version_id`` on both sessions
+    pointing at it.
+
+    ``MergeOperation`` resolves its base by looking up
+    ``source_session.parent_version_id`` inside the *receiving*
+    side's own ``version_history`` (see
+    ``cks_runtime.operations.operation_types.MergeOperation.execute``)
+    -- so a one-sided fork record (as in
+    ``test_gossip_adapter._paired_replicas_with_shared_base``, where
+    only the branch's *parent* ever committed the fork point) only
+    lets a merge resolve in *one* direction. A full
+    ``gossip_exchange_over_transport`` round trip needs both
+    directions to resolve (A's snapshot merges into B, then B's reply
+    merges into A), so both sides need the shared version recorded
+    locally. Real gossip would produce exactly this after a session
+    bootstrap (``GossipAdapter.apply_remote_session`` adopting a
+    session neither side had merge history for yet); this constructs
+    that end state directly for a test that wants to start from
+    "already synced once."
+    """
+    from cks_runtime.versioning.version import RuntimeVersion
+
+    runtime_a = await Runtime.create(core=CksCoreAdapter())
+    runtime_b = await Runtime.create(core=CksCoreAdapter())
+
+    session_a = await runtime_a.create_session(make_structure(["root"]))
+
+    genesis = RuntimeVersion(
+        session_id=session_a.session_id,
+        transaction_id="genesis",
+        knowledge_structure=make_structure(["root"]),
+        metadata={},
+    )
+    session_a.version_history.append(genesis)
+    session_a.parent_version_id = genesis.version_id
+    await runtime_a.storage.save_session(session_a)
+
+    session_b = RuntimeSession(
+        knowledge_structure=make_structure(["root"]),
+        session_id=session_a.session_id,
+        parent_version_id=genesis.version_id,
+    )
+    session_b.metadata["node_id"] = str(uuid4())
+    session_b.version_history.append(genesis)
     runtime_b._sessions.restore(session_b)
     await runtime_b.storage.save_session(session_b)
 
@@ -128,9 +183,8 @@ class TestGossipExchangeOverTransport:
         assert result is False
         assert transport.calls == []
 
-    @pytest.mark.skip(reason="FakeTransport needs to wire session lookup for apply_remote_session path")
     async def test_converges_two_replicas_that_each_committed(self):
-        runtime_a, runtime_b, session_id = await _paired_replicas()
+        runtime_a, runtime_b, session_id = await _paired_replicas_with_shared_base()
         session_a = runtime_a.get_session(session_id)
         session_b = runtime_b.get_session(session_id)
 
@@ -151,7 +205,6 @@ class TestGossipExchangeOverTransport:
         assert ids_a == {"root", "a", "b"}
         assert ids_b == {"root", "a", "b"}
 
-    @pytest.mark.skip(reason="FakeTransport needs to wire session lookup for apply_remote_session path")
     async def test_returns_true_when_peer_has_nothing_new(self):
         runtime_a, runtime_b, session_id = await _paired_replicas()
         adapter_a = GossipAdapter(runtime_a, "replica-a")
@@ -230,7 +283,6 @@ class TestGossipExchangeOverTransport:
         ids_a = {o.identity.id for o in runtime_a.get_session(session_id).knowledge_structure.objects}
         assert ids_a == {"root"}
 
-    @pytest.mark.skip(reason="FakeTransport needs to wire session lookup for apply_remote_session path")
     async def test_replay_filter_rejects_a_resent_reply(self):
         runtime_a, runtime_b, session_id = await _paired_replicas()
         adapter_a = GossipAdapter(runtime_a, "replica-a")
@@ -242,7 +294,14 @@ class TestGossipExchangeOverTransport:
             seq_no=1,
             secret=SECRET,
             nonce="fixed-nonce",
-            timestamp_ms=1_700_000_000_000,
+            # A fixed-but-*current* timestamp: this test is about
+            # nonce/seq replay protection, not clock-skew rejection,
+            # so it must stay within GossipFilter's default skew
+            # tolerance no matter when the suite actually runs --
+            # a hardcoded past literal would eventually (and did)
+            # start failing here instead of at the replay check this
+            # test is actually for.
+            timestamp_ms=int(time.time() * 1000),
         )
 
         class ReplayingTransport(GossipTransport):

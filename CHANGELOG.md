@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.27.1] - 2026-08-01
+
+### Fixed
+- **Gossip transport tests** – all three previously skipped tests (`test_converges_two_replicas_that_each_committed`, `test_returns_true_when_peer_has_nothing_new`, `test_replay_filter_rejects_a_resent_reply`) now pass. `test_converges_two_replicas_that_each_committed` rewritten to use a symmetric shared-base helper so the merge base is resolvable in both directions.
+- **`apply_remote_session`** – added `structurally_equivalent` fast-path: when local and remote snapshots are already identical (same root hash), the method returns `True` immediately instead of escalating a spurious conflict.
+- **`test_gossip_envelope.py`** – fixed mutable default argument (`list[str] = ["root"]`) in `make_session` helper.
+
+---
+
 ## [1.27.0] - 2026-08-01
 
 ### Added

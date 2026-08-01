@@ -141,7 +141,26 @@ class GossipAdapter:
             await self._runtime.commit_transaction(tx)
             return True
 
-        # Neither dominates → three‑way merge probe.
+        # Neither vector dominates -- but if the two sides' actual
+        # content is already identical (e.g. neither has committed
+        # anything since they started tracking this session_id, so
+        # both vectors are still empty), there is nothing to
+        # reconcile at all: skip straight to "converged" rather than
+        # attempting a merge probe that would fail with "could not
+        # determine a merge base" purely because no fork point was
+        # ever recorded, even though nothing actually diverged.
+        # ``structurally_equivalent`` is an O(1) root-hash comparison
+        # (cks.KnowledgeStructure), so this is cheap to check first.
+        if local.knowledge_structure.structurally_equivalent(
+            remote_session.knowledge_structure
+        ):
+            return True
+
+        # Neither dominates and content genuinely differs → three‑way
+        # merge probe. With no common ancestor MergeOperation can
+        # resolve, this deliberately escalates (see
+        # ``test_concurrent_divergence_with_no_common_ancestor_is_escalated``)
+        # rather than guessing at a merge base.
         def _operation() -> MergeOperation:
             return MergeOperation("gossip-merge", source_session=remote_session)
 
