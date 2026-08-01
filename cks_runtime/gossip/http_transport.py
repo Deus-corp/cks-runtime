@@ -45,6 +45,8 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
         "pip install cks-runtime[gossip]"
     ) from exc
 
+from cks_runtime.gossip.seq_no import SeqNoCounter
+
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.discovery import PeerDiscovery, PeerDiscoveryError
 from cks_runtime.gossip.envelope import GossipEnvelope
@@ -193,6 +195,14 @@ class GossipServer:
     was never listed in anyone's own static configuration, matching
     the reachable-through-a-seed model peer-exchange protocols rely
     on.
+
+    Replies are signed with a ``SeqNoCounter`` (``seq_no.py``) --  by
+    default one built from ``adapter.replica_id``, the same default a
+    ``GossipService`` for this same replica also falls back to. The
+    two roles sharing one ``sender_replica_id`` must never hand out
+    overlapping ``seq_no`` values (SPEC-009 Section 7); see
+    ``seq_no.py``'s module docstring for how the default keeps that
+    true even without the caller wiring the two together explicitly.
     """
 
     def __init__(
@@ -205,6 +215,7 @@ class GossipServer:
         gossip_filter: GossipFilter | None = None,
         known_peers: Callable[[], Iterable[str]] | Iterable[str] | None = None,
         self_address: str | None = None,
+        seq_no_counter: SeqNoCounter | None = None,
     ) -> None:
         self._adapter = adapter
         self._secret = secret
@@ -214,7 +225,15 @@ class GossipServer:
         self._known_peers = known_peers
         self._self_address = self_address
 
-        self._reply_seq_no = 0
+        # Same default as GossipService.seq_no_counter, and for the
+        # same reason (seq_no.py): a fresh SeqNoCounter for
+        # adapter.replica_id, persisted unless overridden, so this
+        # server's replies and a same-replica GossipService's own
+        # outgoing rounds never collide even when neither was told
+        # about the other.
+        self._seq_no_counter = (
+            seq_no_counter if seq_no_counter is not None else SeqNoCounter(adapter.replica_id)
+        )
         self._running = False
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
@@ -229,9 +248,18 @@ class GossipServer:
     def running(self) -> bool:
         return self._running
 
+    @property
+    def seq_no_counter(self) -> SeqNoCounter:
+        """
+        The ``SeqNoCounter`` this server signs replies with. Pass it
+        to a ``GossipService`` for the same ``adapter.replica_id`` to
+        share it explicitly; see the equivalent property on
+        ``GossipService``.
+        """
+        return self._seq_no_counter
+
     def _next_reply_seq_no(self) -> int:
-        self._reply_seq_no += 1
-        return self._reply_seq_no
+        return self._seq_no_counter.next()
 
     def build_app(self) -> web.Application:
         app = web.Application()

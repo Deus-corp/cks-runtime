@@ -19,6 +19,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.28.1] - 2026-08-01
+
+### Fixed
+- **Shared `seq_no` counter for gossip** – `GossipService` and `GossipServer` no longer maintain independent sequence-number counters for the same `replica_id`, which previously caused legitimate bidirectional messages to be rejected as replays. A single `SeqNoCounter` is now shared between both components.
+- **`seq_no` persists across restarts** – `SeqNoCounter` stores the last sequence number on disk (same directory as the gossip secret), so a restarted replica continues monotonically instead of resetting to 0 and being permanently rejected by peers.
+- **Test isolation for gossip persisted state** – a new `conftest.py` fixture redirects `CKS_RUNTIME_DATA_DIR` to a temporary directory during tests, preventing accidental writes to `~/.cks_runtime`.
+
+---
+
 ## [1.28.0] - 2026-08-01
 
 ### Added

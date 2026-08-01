@@ -27,6 +27,16 @@ of its own), and any newly learned addresses are merged into
 ``scheduler``. Omitting ``discovery`` (the default) leaves peer
 membership exactly as static as before this feature existed --
 nothing about the core anti-entropy loop depends on it.
+
+``seq_no``, one shared source per replica: this service draws every
+outgoing ``seq_no`` from a ``SeqNoCounter`` (``seq_no.py``) -- by
+default one built from ``adapter.replica_id``, persisted, and safe to
+share (even implicitly, via the same default file) with a
+``GossipServer`` replying on this same replica's behalf. See
+``seq_no.py``'s module docstring for why a single in-memory counter
+here was not enough: this replica also replies to peer-initiated
+rounds through ``GossipServer``, under the same ``sender_replica_id``,
+and the two must never hand out overlapping values.
 """
 
 from __future__ import annotations
@@ -34,6 +44,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+
+from cks_runtime.gossip.seq_no import SeqNoCounter
 
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.discovery import (
@@ -88,6 +100,7 @@ class GossipService:
         interval_s: float = DEFAULT_INTERVAL_S,
         discovery: PeerDiscovery | None = None,
         self_address: str | None = None,
+        seq_no_counter: SeqNoCounter | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError(f"interval_s must be > 0, got {interval_s!r}.")
@@ -102,7 +115,14 @@ class GossipService:
         self._discovery = discovery
         self._self_address = self_address
 
-        self._seq_no = 0
+        # See seq_no.py's module docstring: defaulting to a fresh
+        # SeqNoCounter for adapter.replica_id (persisted, unless the
+        # caller overrides) is what lets this run alongside a
+        # GossipServer for the same replica without either one having
+        # to be told about the other explicitly.
+        self._seq_no_counter = (
+            seq_no_counter if seq_no_counter is not None else SeqNoCounter(adapter.replica_id)
+        )
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -113,6 +133,19 @@ class GossipService:
     @property
     def tracked_sessions(self) -> tuple[str, ...]:
         return tuple(self._session_ids)
+
+    @property
+    def seq_no_counter(self) -> SeqNoCounter:
+        """
+        The ``SeqNoCounter`` this service signs outgoing envelopes
+        with. Pass it to a ``GossipServer`` for the same
+        ``adapter.replica_id`` (``GossipServer(..., seq_no_counter=
+        service.seq_no_counter)``) to share it explicitly and skip the
+        file round-trip ``SeqNoCounter.next()`` otherwise does each
+        call to reconcile against a sibling instance -- not required
+        for correctness (see ``seq_no.py``), just an optimization.
+        """
+        return self._seq_no_counter
 
     def track_session(self, session_id: str) -> None:
         """Add a session to the set gossiped every round, if not already tracked."""
@@ -125,8 +158,7 @@ class GossipService:
             self._session_ids.remove(session_id)
 
     def _next_seq_no(self) -> int:
-        self._seq_no += 1
-        return self._seq_no
+        return self._seq_no_counter.next()
 
     # ------------------------------------------------------------------
     # One explicit round
