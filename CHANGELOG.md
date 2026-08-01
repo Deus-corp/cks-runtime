@@ -19,6 +19,28 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.27.0] - 2026-08-01
+
+### Added
+- **Gossip transport layer** – new `cks_runtime/gossip/` package implementing the peer-to-peer exchange for ADR-008:
+  - `GossipEnvelope` – HMAC-SHA256 signed session snapshots for secure, verifiable gossip messages.
+  - `GossipFilter` – replay protection, sequence-number validation, and clock-skew detection for incoming gossip envelopes.
+  - `GossipTransport` – abstract protocol for sending/receiving gossip envelopes between replicas.
+  - `HTTPGossipTransport` – reference implementation of `GossipTransport` using `aiohttp` (client + server).
+  - `PeerScheduler` – weighted peer selection with exponential backoff for handling network failures.
+  - `GossipService` – background `asyncio.Task` that ties together the scheduler, transport, and adapter for periodic anti-entropy cycles.
+  - `secret.py` – dedicated HMAC secret management for gossip, separate from `cks-mcp`'s provenance secret.
+- **Optional `gossip` extra** – `pip install cks-runtime[gossip]` installs `aiohttp` for the HTTP transport.
+
+### Fixed
+- `_paired_replicas` test helper now correctly initialises `node_id` on hand-built sessions, fixing `VersionVector` comparison in gossip tests.
+- `test_real_merge_conflict_is_escalated_not_raised` rewritten to use two-replica setup with a genuine common ancestor, actually exercising the `RuntimeMergeConflictError` path.
+
+### Changed
+- ADR-008 status updated from `Proposed` to `Partially Implemented`, reflecting the session-snapshot gossip design and transport layer.
+
+---
+
 ## [1.26.2] - 2026-08-01
 
 ### Fixed
