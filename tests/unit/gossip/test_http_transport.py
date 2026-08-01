@@ -37,7 +37,10 @@ from cks_runtime.gossip.http_transport import (
 )
 from cks_runtime.gossip.scheduling import PeerScheduler
 from cks_runtime.gossip.service import GossipService
-from cks_runtime.gossip.transport import GossipTransportError, gossip_exchange_over_transport
+from cks_runtime.gossip.transport import (
+    GossipTransportError,
+    gossip_exchange_over_transport,
+)
 from cks_runtime.operations.operation_types import EvolveOperation
 from cks_runtime.runtime import Runtime
 from cks_runtime.session.session import RuntimeSession
