@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from cks_runtime.gossip.seq_no import SeqNoCounter, default_seq_no_path
 
 

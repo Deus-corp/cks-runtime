@@ -45,8 +45,6 @@ import asyncio
 import contextlib
 import logging
 
-from cks_runtime.gossip.seq_no import SeqNoCounter
-
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.discovery import (
     PeerDiscovery,
@@ -55,6 +53,7 @@ from cks_runtime.gossip.discovery import (
 )
 from cks_runtime.gossip.filter import GossipFilter
 from cks_runtime.gossip.scheduling import PeerScheduler
+from cks_runtime.gossip.seq_no import SeqNoCounter
 from cks_runtime.gossip.transport import (
     GossipTransport,
     GossipTransportError,

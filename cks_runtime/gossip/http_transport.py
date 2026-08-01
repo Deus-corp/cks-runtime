@@ -45,12 +45,11 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
         "pip install cks-runtime[gossip]"
     ) from exc
 
-from cks_runtime.gossip.seq_no import SeqNoCounter
-
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.discovery import PeerDiscovery, PeerDiscoveryError
 from cks_runtime.gossip.envelope import GossipEnvelope
 from cks_runtime.gossip.filter import GossipFilter
+from cks_runtime.gossip.seq_no import SeqNoCounter
 from cks_runtime.gossip.transport import GossipTransport, GossipTransportError
 
 logger = logging.getLogger(__name__)
