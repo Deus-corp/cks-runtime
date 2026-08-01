@@ -41,7 +41,7 @@ jobs:
           PGPASSWORD=cks psql -h localhost -U cks -d cks_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
       - name: Install dependencies
-        run: pip install -e ".[dev,postgres]"
+        run: pip install -e ".[dev,postgres,gossip]"
 
       - name: Ruff
         run: |
