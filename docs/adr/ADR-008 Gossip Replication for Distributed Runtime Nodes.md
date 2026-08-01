@@ -2,7 +2,7 @@
 
 # Gossip Replication for Distributed Runtime Nodes: Persistent Replica Identity and Operation-Log Exchange
 
-**Status:** Proposed
+**Status:** Partially Implemented
 
 **Date:** 2026-08-01
 
@@ -11,12 +11,35 @@
 ---
 
 **Status (2026-08-01):** Storage-layer portion implemented in
-`cks-runtime` v1.26.0.  `RuntimeStorage.get_or_create_replica_id`,
+`cks-runtime` v1.26.0: `RuntimeStorage.get_or_create_replica_id`,
 `RuntimeStorage.fetch_operations_since`, and the
 `GossipConflictDetected` event exist and are wired through `SQLiteStorage`,
-`InMemoryStorage`, and `PostgresStorage`.  `GossipAdapter` is stubbed
-at the adapter layer; the gossip-session lifecycle and production
-transport remain follow‑up work.
+`InMemoryStorage`, and `PostgresStorage`.
+
+**Revision (2026-08-01, v1.26.1):** The Decision section below (point
+2, "Fetch on gap" / "Apply through the existing fast path") described
+reconstructing a remote Knowledge Structure by replaying raw
+`RuntimeFieldOperation` rows. That cannot work as specified: per
+`RuntimeFieldOperation`'s own contract, an `"add_object"`/
+`"add_relation"` entry carries no payload at all -- it only marks that
+an identity appeared, so a genuinely new object can never be
+reconstructed from the operation log alone. `GossipAdapter` was
+rewritten around this: it exchanges whole `RuntimeSession` snapshots
+(which already carry a complete `knowledge_structure`) for a session
+both replicas track, and reconciles them through the same two-phase
+probe-then-commit sequence `cks-mcp`'s `merge_branch` tool already
+uses -- `executor.execute(MergeOperation(...))` to detect a conflict
+with no persisted side effects, then, only on success,
+`begin_transaction`/`commit_transaction`. This is the existing
+ADR-007 merge mechanism, reused, not a new one; see the module
+docstring in `cks_runtime/gossip/adapter.py` for the full rationale.
+`fetch_operations_since`/`get_or_create_replica_id` remain useful as a
+transport-layer accelerant and durable peer identity, but are no
+longer the payload the merge itself is built from. All 12
+`tests/unit/gossip/test_gossip_adapter.py` cases now pass (none
+skipped); `mypy`/`ruff` are clean across the package. The gossip
+transport itself (peer discovery, scheduling, wire format) remains
+unimplemented -- see Non-Goals.
 
 ---
 
@@ -193,9 +216,13 @@ this ADR exists to avoid.
 
 - `replica_id` is new durable state — another migration for existing
   SQLite/Postgres deployments.
-- `fetch_operations_since` / `apply_remote_operations` are two more
-  no-op-by-default methods every backend maintainer must eventually
-  decide whether to implement.
+- `fetch_operations_since` is one more no-op-by-default method every
+  backend maintainer must eventually decide whether to implement.
+  (`apply_remote_operations`, originally proposed alongside it below,
+  was dropped during implementation — see the 2026-08-01 revision
+  note above; applying a remote snapshot goes through the existing
+  `MergeOperation`/`commit_transaction` path instead of a dedicated
+  storage method.)
 - Long-disconnected peers replaying a large operation-log range
   raises the retention/compaction question from ADR-007 from
   "eventually" to "soon."
@@ -204,9 +231,13 @@ this ADR exists to avoid.
 
 # Status
 
-Proposed. Not yet implemented. Depends on ADR-007's operation log and
-version vectors (implemented) but adds a new durable identity and two
-new `RuntimeStorage` methods that need their own interface review
-before implementation — same open-question shape ADR-007 left for
-`node_id`/`agent_id` ownership, now resolved by `replica_id` above,
-but the storage interface addition still needs sign-off.
+Partially implemented as of the 2026-08-01 revision note above:
+persistent `replica_id`, the operation-log storage methods, and
+`GossipAdapter`'s session-snapshot reconciliation (via the existing
+ADR-007 `MergeOperation`/`VersionVector` machinery) are implemented
+and unit-tested. Still open: the actual peer transport
+(`GossipTransport` has no reference implementation yet), scheduling
+of anti-entropy cycles, and bootstrapping a session neither replica
+has seen before (out of scope for `GossipAdapter` as written — see
+Non-Goals). Depends on ADR-007's operation log and version vectors
+(implemented).

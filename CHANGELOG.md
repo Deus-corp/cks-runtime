@@ -19,6 +19,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.26.2] - 2026-08-01
+
+### Fixed
+- **`_paired_replicas` test helper** – hand-built `RuntimeSession` for the "second replica" was missing `metadata["node_id"]`, so `ExecutionPipeline._persist` silently skipped `VersionVector.bump()` on every commit; the replica's vector stayed permanently empty, breaking `dominates()`/fast-forward comparisons in `GossipAdapter`.
+- **`test_gossip_adapter.py`** – all 4 previously-`skip`-marked gossip tests (fast-forward, no-common-ancestor escalation, real field-level conflict escalation, full exchange convergence) now pass; none skipped. `test_real_merge_conflict_is_escalated_not_raised` was rewritten around a new `_paired_replicas_with_shared_base` helper — the old version passed a `create_branch` result straight into `apply_remote_session`, but a branch always mints its own `session_id`, so `apply_remote_session`'s `get_session(remote_session.session_id)` lookup resolved "local" back to the branch itself (a trivial self-comparison) and never reached a real merge.
+
+### Changed
+- **ADR-008** – status note updated to reflect the v1.26.1 `GossipAdapter` rewrite (session-snapshot exchange via `MergeOperation`, not operation-log replay); top-level status moved from `Proposed` to `Partially Implemented`; stale reference to a never-implemented `apply_remote_operations` storage method removed from Consequences.
+
+---
+
 ## [1.26.1] - 2026-08-01
 
 ### Added

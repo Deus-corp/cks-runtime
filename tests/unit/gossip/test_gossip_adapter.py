@@ -15,6 +15,9 @@ that already exists locally; it does not bootstrap a brand-new one).
 
 from __future__ import annotations
 
+import copy
+from uuid import uuid4
+
 import cks
 import pytest
 
@@ -54,10 +57,52 @@ async def _paired_replicas() -> tuple[Runtime, Runtime, str]:
         knowledge_structure=make_structure(["root"]),
         session_id=session_a.session_id,
     )
+    # Bypassing SessionManager.create_session (the only place that
+    # normally mints one) means session_b starts with no node_id in
+    # its metadata. Without it, ExecutionPipeline._persist's
+    # `node_id = transaction.session.metadata.get("node_id")` is
+    # None, so VersionManager.create() silently skips vector.bump()
+    # (see its docstring) -- session_b's VersionVector would stay
+    # permanently empty even after real commits, breaking every
+    # dominates()/fast-forward comparison below.
+    session_b.metadata["node_id"] = str(uuid4())
     runtime_b._sessions.restore(session_b)
     await runtime_b.storage.save_session(session_b)
 
     return runtime_a, runtime_b, session_a.session_id
+
+
+async def _paired_replicas_with_shared_base() -> tuple[Runtime, Runtime, str, str]:
+    """
+    Like ``_paired_replicas``, but the two replicas share a genuine
+    common-ancestor *version* (not just an identical starting
+    structure): replica A commits one version, then replica B is
+    constructed as of that exact version with its ``parent_version_id``
+    pointing at it. That lets ``MergeOperation`` resolve a real base
+    (via ``source_session.parent_version_id``, looked up in local
+    replica A's own ``version_history``) instead of failing with
+    "could not determine a merge base" -- needed to exercise the
+    genuine field-level ``RuntimeMergeConflictError`` path rather than
+    the no-common-ancestor path already covered by
+    ``test_concurrent_divergence_with_no_common_ancestor_is_escalated``.
+    """
+    runtime_a = await Runtime.create(core=CksCoreAdapter())
+    runtime_b = await Runtime.create(core=CksCoreAdapter())
+
+    session_a = await runtime_a.create_session(make_structure(["root"]))
+    await _evolve(runtime_a, session_a, [_add("shared")])
+    fork_version = runtime_a.latest_version(session_a)
+
+    session_b = RuntimeSession(
+        knowledge_structure=copy.deepcopy(session_a.knowledge_structure),
+        session_id=session_a.session_id,
+        parent_version_id=fork_version.version_id,
+    )
+    session_b.metadata["node_id"] = str(uuid4())
+    runtime_b._sessions.restore(session_b)
+    await runtime_b.storage.save_session(session_b)
+
+    return runtime_a, runtime_b, session_a.session_id, fork_version.version_id
 
 
 async def _evolve(runtime: Runtime, session: RuntimeSession, operations: list) -> None:
@@ -157,7 +202,6 @@ class TestApplyRemoteSession:
             "root",
             "a",
         }
-    @pytest.mark.skip(reason="ADR-008 fast-forward requires vector init in paired replicas")
     async def test_fast_forwards_when_remote_dominates(self):
         runtime_a, runtime_b, session_id = await _paired_replicas()
         session_a = runtime_a.get_session(session_id)
@@ -178,8 +222,6 @@ class TestApplyRemoteSession:
         # an in-memory mutation.
         assert len(session_a.version_history) >= 1
 
-
-    @pytest.mark.skip(reason="ADR-008 conflict escalation requires base resolution in MergeOperation")
     async def test_concurrent_divergence_with_no_common_ancestor_is_escalated(self):
         """
         Two replicas that both evolved independently, with no branch
@@ -206,19 +248,30 @@ class TestApplyRemoteSession:
         assert received[0].source_replica_id == "replica-a"
         assert received[0].conflicts  # some description of what went wrong
 
-    @pytest.mark.skip(reason="ADR-008 conflict escalation requires base resolution in MergeOperation")
     async def test_real_merge_conflict_is_escalated_not_raised(self):
         """
         A genuine field-level conflict (both sides change the same
         identity's structure differently) surfaces as
         RuntimeMergeConflictError inside MergeOperation -- must be
         escalated the same way, not raised out of apply_remote_session.
-        """
-        runtime_a = await Runtime.create(core=CksCoreAdapter())
-        session_a = await runtime_a.create_session(make_structure(["root"]))
-        branch = await runtime_a.create_branch(session_a)
 
+        Uses ``_paired_replicas_with_shared_base`` rather than
+        ``create_branch``: a branch always mints its own session_id
+        (see ``SessionManager.create_branch``), and
+        ``apply_remote_session`` looks up the local session via
+        ``remote_session.session_id`` -- passing a branch straight in
+        would resolve "local" right back to the branch itself (a
+        trivial self-comparison), never reaching a real merge. Two
+        replicas sharing one session_id, as gossip actually works, is
+        the only way to exercise this path.
+        """
         from cks.evolution import UpdateObject
+
+        runtime_a, runtime_b, session_id, _fork_version_id = (
+            await _paired_replicas_with_shared_base()
+        )
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
 
         await _evolve(
             runtime_a,
@@ -226,16 +279,16 @@ class TestApplyRemoteSession:
             [UpdateObject("root", structure_patch={"k": "from-a"})],
         )
         await _evolve(
-            runtime_a,
-            branch,
+            runtime_b,
+            session_b,
             [UpdateObject("root", structure_patch={"k": "from-b"})],
         )
 
         received: list[GossipConflictDetected] = []
         runtime_a.events.subscribe(GossipConflictDetected, received.append)
 
-        adapter = GossipAdapter(runtime_a, "replica-a")
-        result = await adapter.apply_remote_session(branch)
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+        result = await adapter_a.apply_remote_session(session_b)
 
         assert result is False
         assert len(received) == 1
@@ -248,7 +301,6 @@ class TestApplyRemoteSession:
 
 
 class TestGossipExchange:
-    @pytest.mark.skip(reason="ADR-008 exchange convergence requires full reconciliation logic")
     async def test_both_sides_converge(self):
         runtime_a, runtime_b, session_id = await _paired_replicas()
         session_a = runtime_a.get_session(session_id)
