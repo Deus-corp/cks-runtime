@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.31.1] - 2026-08-02
+
+### Changed
+- Bumped `cks-core` dependency floor to `>=1.19.0` — absorbs the new `ResolveInferenceConflict` structural operator (the write-side counterpart to `InferenceConfidenceConflictConstraint`). No code changes in cks-runtime itself.
+
+---
+
 ## [1.31.0] - 2026-08-02
 
 ### Added
