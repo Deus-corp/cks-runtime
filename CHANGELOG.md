@@ -19,6 +19,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.30.1] - 2026-08-02
+
+### Fixed
+- **Race in `GossipAdapter.apply_remote_session` for concurrent inbound gossip** – two inbound gossip requests for the same `session_id` arriving concurrently (the normal shape of load on a multi-peer mesh, surfaced by the demo's real HTTP concurrency rather than sequential manual calls) could both pass `TransactionManager.begin`'s "no active transaction yet" check before either committed, and the second would raise `RuntimeError("Session already has an active transaction.")`. Not data-corrupting – the losing round was simply dropped and the next round still converged – but noisy and a wasted round under real concurrent load. `apply_remote_session` is now serialized per `session_id` via a lazily-created `asyncio.Lock` (`GossipAdapter._lock_for`); unrelated sessions are unaffected and still reconcile fully concurrently.
+
+---
+
 ## [1.30.0] - 2026-08-02
 
 ### Added

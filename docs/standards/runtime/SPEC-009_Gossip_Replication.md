@@ -244,6 +244,19 @@ A conformant implementation shall not silently guess at a merge base
 when none can be determined. No-common-ancestor divergence is
 escalated exactly as a genuine field-level conflict is.
 
+**Concurrency.** `apply_remote_session` calls that target the same
+`session_id` are serialized against each other — a second call for a
+`session_id` already being reconciled waits for the first to finish
+rather than racing it through the begin/commit sequence above. Calls
+for *different* `session_id`s are never blocked on each other. A
+third-party transport (Section 9) that fans inbound requests out
+across multiple concurrent handlers — as `GossipServer` does for
+inbound HTTP — relies on this: without it, two requests for one
+Session arriving close together could both observe no active
+transaction yet and both attempt to open one, and the second would
+fail with a transaction-conflict error instead of reconciling
+normally.
+
 ---
 
 # 9. The GossipTransport Contract

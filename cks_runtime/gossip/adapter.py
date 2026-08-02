@@ -35,8 +35,9 @@ itself is built from.
 ADR-008 status update (bootstrap): the module and class docstrings
 below originally described "bootstrapping a session neither replica
 has seen before" as out of scope for this adapter. It no longer is --
-see ``_bootstrap_remote_session`` and ``apply_remote_session``'s
-``local is None`` branch. There is no local state to reconcile a
+see ``_bootstrap_remote_session`` and
+``_apply_remote_session_locked``'s ``local is None`` branch. There is
+no local state to reconcile a
 never-seen session against, only a remote snapshot to adopt, so this
 needed none of the merge machinery above; it reuses the same
 "register + persist + commit" sequence the fast-forward path already
@@ -45,6 +46,7 @@ uses to turn an adopted snapshot into a real local Version.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -83,7 +85,13 @@ class GossipAdapter:
     - publish ``GossipConflictDetected`` when the merge conflicts,
       instead of raising synchronously -- a background gossip cycle
       has no caller waiting on the call the way a synchronous
-      ``merge_branch`` invocation does.
+      ``merge_branch`` invocation does;
+    - serialize concurrent ``apply_remote_session`` calls that target
+      the same ``session_id`` (see ``_lock_for``), so two inbound
+      gossip requests for one session arriving at the same time
+      reconcile one after the other instead of racing each other's
+      transaction. Calls for *different* sessions are never blocked
+      on each other.
     """
 
     def __init__(
@@ -95,6 +103,10 @@ class GossipAdapter:
         self._runtime = runtime
         self._replica_id = replica_id
         self._event_bus = event_bus if event_bus is not None else runtime.events
+        # session_id -> lock serializing apply_remote_session for that
+        # session (see _lock_for below). Deliberately per-session, not
+        # one lock for the whole adapter.
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
     @property
     def replica_id(self) -> str:
@@ -156,11 +168,68 @@ class GossipAdapter:
             return []
         return await storage.fetch_operations_since(vector)
 
+    def _lock_for(self, session_id: str) -> asyncio.Lock:
+        """
+        Return the ``asyncio.Lock`` serializing ``apply_remote_session``
+        calls for one ``session_id``.
+
+        ``apply_remote_session`` reads the local session, decides how
+        to reconcile it, and only *then* opens a
+        ``begin_transaction``/``commit_transaction`` pair around the
+        result -- several ``await`` points with nothing enforcing
+        atomicity between them. Two inbound gossip requests for the
+        same ``session_id`` arriving concurrently (the ordinary shape
+        of a multi-peer mesh under load, not an edge case -- ADR-008)
+        can both pass ``TransactionManager.begin``'s
+        "no active transaction yet" check before either commits, and
+        the second call raises ``RuntimeError("Session already has an
+        active transaction.")``. That failure isn't fatal -- the
+        losing round is simply dropped and the next gossip round
+        converges as usual -- but it is pure noise and a wasted round
+        under any real concurrent load.
+
+        Locking is per-``session_id``, not global: unrelated sessions
+        must still reconcile fully concurrently (one gossip node
+        commonly tracks many sessions shared with many peers at once),
+        so a single lock across every session would serialize far more
+        than the actual race requires.
+
+        Lookup and insertion below are synchronous with no ``await``
+        between them, so this is race-free on its own even though nothing
+        else in ``GossipAdapter`` synchronizes access to this dict --
+        the surrounding event loop is single-threaded (see
+        ``scheduling.py``), so nothing can interleave between the
+        membership check and the assignment.
+
+        Locks are created lazily and kept for the adapter's lifetime,
+        one per distinct ``session_id`` ever seen -- the same policy
+        this package already applies to session state itself
+        (``Runtime`` keeps every session it has ever tracked), so this
+        adds no new unbounded-growth concern beyond what already
+        exists.
+        """
+        lock = self._session_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_id] = lock
+        return lock
+
     # ------------------------------------------------------------------
     # Apply a remote replica's session snapshot
     # ------------------------------------------------------------------
 
     async def apply_remote_session(self, remote_session: RuntimeSession) -> bool:
+        """
+        Apply ``remote_session`` into the local ``Runtime``, serialized
+        per ``session_id`` (see ``_lock_for``) against any other
+        concurrent ``apply_remote_session`` call for the same session --
+        this method itself does the reconciliation, unlocked, in
+        ``_apply_remote_session_locked``.
+        """
+        async with self._lock_for(remote_session.session_id):
+            return await self._apply_remote_session_locked(remote_session)
+
+    async def _apply_remote_session_locked(self, remote_session: RuntimeSession) -> bool:
         local = self._runtime.get_session(remote_session.session_id)
         if local is None:
             return await self._bootstrap_remote_session(remote_session)
@@ -241,10 +310,12 @@ class GossipAdapter:
         """
         Adopt ``remote_session`` as a brand-new local session.
 
-        Called only from ``apply_remote_session`` when this replica
-        has no local session under ``remote_session.session_id`` at
-        all -- there is no local state to reconcile against, so this
-        is registration, not merging. Mirrors how
+        Called only from ``_apply_remote_session_locked`` (itself only
+        reachable through the public ``apply_remote_session``, under
+        that session's lock) when this replica has no local session
+        under ``remote_session.session_id`` at all -- there is no
+        local state to reconcile against, so this is registration,
+        not merging. Mirrors how
         ``Runtime._restore_from_storage`` registers a session loaded
         from local storage at startup (``SessionManager.restore``),
         except the snapshot originates from a peer instead of this

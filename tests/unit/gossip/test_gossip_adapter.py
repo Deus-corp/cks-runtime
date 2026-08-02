@@ -18,7 +18,9 @@ session_id one replica has never seen at all (see
 
 from __future__ import annotations
 
+import asyncio
 import copy
+from unittest import mock
 from uuid import uuid4
 
 import cks
@@ -405,6 +407,179 @@ class TestApplyRemoteSession:
         assert result is False
         assert len(received) == 1
         assert received[0].conflicts == ["root"]
+
+
+# ---------------------------------------------------------------------------
+# Concurrent apply_remote_session (per-session_id locking)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyRemoteSessionSerialization:
+    """
+    Regression coverage for the race apply_remote_session had before
+    GossipAdapter serialized it per session_id: two inbound gossip
+    requests for the same session_id, arriving concurrently, could
+    both pass TransactionManager.begin's "no active transaction yet"
+    check before either committed -- the second raising
+    RuntimeError("Session already has an active transaction."). See
+    GossipAdapter._lock_for's docstring for the full explanation.
+    """
+
+    async def test_lock_for_is_per_session_not_global(self):
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        adapter = GossipAdapter(runtime, "r1")
+
+        lock_a1 = adapter._lock_for("session-a")
+        lock_a2 = adapter._lock_for("session-a")
+        lock_b = adapter._lock_for("session-b")
+
+        assert lock_a1 is lock_a2
+        assert lock_a1 is not lock_b
+
+    async def test_unlocked_body_can_raise_when_run_concurrently(self):
+        """
+        Confirms the hazard is real, not hypothetical: calling
+        ``_apply_remote_session_locked`` (the reconciliation body,
+        bypassing ``apply_remote_session``'s new lock) twice
+        concurrently for one session_id can still raise
+        "Session already has an active transaction." This is what the
+        paired test below (going through the public,
+        now-lock-guarded ``apply_remote_session``) proves no longer
+        happens.
+
+        Two *different* remote snapshots are used -- one from replica
+        B (fast-forward source), one from a from-scratch replica C
+        anchored to ``EMPTY_STATE_VERSION_ID`` (merge-probe source) --
+        because a single snapshot applied twice would let the second
+        call's own vector comparison see the first call's
+        already-mutated local metadata and short-circuit as a no-op
+        before ever reaching ``begin_transaction``; that would prove
+        nothing about the race. ``commit_transaction`` is patched
+        with a real (if short) delay so the first call's
+        begin/commit window stays open long enough for the second
+        call's ``begin_transaction`` to land inside it, instead of
+        relying on incidental event-loop scheduling.
+        """
+        runtime_a, runtime_b, session_id = await _paired_replicas()
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
+        await _evolve(runtime_b, session_b, [_add("from-b")])
+
+        runtime_c = await Runtime.create(core=CksCoreAdapter())
+        session_c = RuntimeSession(
+            knowledge_structure=copy.deepcopy(session_a.knowledge_structure),
+            session_id=session_id,
+            parent_version_id=EMPTY_STATE_VERSION_ID,
+        )
+        session_c.metadata["node_id"] = str(uuid4())
+        runtime_c._sessions.restore(session_c)
+        await runtime_c.storage.save_session(session_c)
+        await _evolve(runtime_c, session_c, [_add("from-c")])
+
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+
+        # Runtime uses __slots__, so an instance can't be monkeypatched
+        # directly -- patch the class method instead (affects only
+        # this Runtime instance's *behavior* for the duration of the
+        # context manager, same net effect).
+        original_commit = Runtime.commit_transaction
+
+        async def slow_commit(self, transaction):
+            await asyncio.sleep(0.05)
+            return await original_commit(self, transaction)
+
+        with mock.patch.object(Runtime, "commit_transaction", slow_commit):
+            results = await asyncio.gather(
+                adapter_a._apply_remote_session_locked(session_b),
+                adapter_a._apply_remote_session_locked(session_c),
+                return_exceptions=True,
+            )
+
+        assert any(isinstance(r, RuntimeError) for r in results), results
+
+    async def test_locked_public_method_does_not_raise_for_the_same_race(self):
+        """
+        Same setup as the previous test, but through the public,
+        lock-guarded ``apply_remote_session`` instead of the raw
+        body: the second call now waits for the lock instead of
+        racing the first one's open transaction, so both calls
+        succeed and neither raises.
+        """
+        runtime_a, runtime_b, session_id = await _paired_replicas()
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
+        await _evolve(runtime_b, session_b, [_add("from-b")])
+
+        runtime_c = await Runtime.create(core=CksCoreAdapter())
+        session_c = RuntimeSession(
+            knowledge_structure=copy.deepcopy(session_a.knowledge_structure),
+            session_id=session_id,
+            parent_version_id=EMPTY_STATE_VERSION_ID,
+        )
+        session_c.metadata["node_id"] = str(uuid4())
+        runtime_c._sessions.restore(session_c)
+        await runtime_c.storage.save_session(session_c)
+        await _evolve(runtime_c, session_c, [_add("from-c")])
+
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+
+        original_commit = Runtime.commit_transaction
+
+        async def slow_commit(self, transaction):
+            await asyncio.sleep(0.05)
+            return await original_commit(self, transaction)
+
+        with mock.patch.object(Runtime, "commit_transaction", slow_commit):
+            results = await asyncio.gather(
+                adapter_a.apply_remote_session(session_b),
+                adapter_a.apply_remote_session(session_c),
+            )
+
+        assert results == [True, True]
+        ids = {o.identity.id for o in session_a.knowledge_structure.objects}
+        assert ids == {"root", "from-b", "from-c"}
+
+    async def test_concurrent_calls_for_different_sessions_are_not_serialized(self):
+        """
+        The other half of the guarantee: locking is per session_id,
+        not one lock across the whole adapter -- two different
+        sessions must still be able to be inside the reconciliation
+        body at the same time. Would time out if a single adapter-wide
+        lock serialized unrelated sessions against each other.
+        """
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        adapter = GossipAdapter(runtime, "r1")
+
+        both_inside = asyncio.Event()
+        active: set[str] = set()
+        original = adapter._apply_remote_session_locked
+
+        async def tracked(remote_session):
+            sid = remote_session.session_id
+            active.add(sid)
+            if len(active) == 2:
+                both_inside.set()
+            await asyncio.wait_for(both_inside.wait(), timeout=1)
+            try:
+                return await original(remote_session)
+            finally:
+                active.discard(sid)
+
+        adapter._apply_remote_session_locked = tracked
+
+        remote_1 = RuntimeSession(
+            knowledge_structure=make_structure(["root"]), session_id="session-1"
+        )
+        remote_2 = RuntimeSession(
+            knowledge_structure=make_structure(["root"]), session_id="session-2"
+        )
+
+        results = await asyncio.gather(
+            adapter.apply_remote_session(remote_1),
+            adapter.apply_remote_session(remote_2),
+        )
+
+        assert results == [True, True]
 
 
 # ---------------------------------------------------------------------------
