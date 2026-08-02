@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.32.0] - 2026-08-02
+
+### Added
+- **`Runtime.register_foreign_branch`** — new public method that registers a branch of a parent session whose content originates from outside this Runtime (e.g. a remote replica's snapshot received via gossip). Unlike `create_branch`, which only ever forks the parent's own content, this method accepts a caller-supplied `KnowledgeStructure` together with an explicit `parent_version_id` and optional `metadata`. Returns a fully-addressable `RuntimeSession` ready for `merge_branch` / `compare_versions` / `explain_diff`, and publishes `SessionCreated` for the new branch, consistent with `create_session`/`create_branch`.
+- **`GossipConflictDetected.source_session_id`** — the event now carries the `session_id` of a local branch materialized from the remote content that failed to merge (via `register_foreign_branch`). A subscriber (e.g. a Critic agent) can pass `target_session_id=session_id, source_session_id=source_session_id` straight to `merge_branch` — or diff against it first — instead of having only a bare list of conflicting object ids with no way to see what the remote side actually contained. Empty when branch registration itself failed (defensive: an empty id is still an escalation, better than losing the event entirely).
+
+### Changed
+- **Gossip conflict deduplication** — `GossipAdapter` now tracks which remote `VersionVector` most recently triggered an *unresolved* conflict for each `session_id`. A gossip round that re-sends the same unresolved content (e.g. a scheduled retry before the conflict is addressed) does not leak a second `RuntimeSession` into the registry or re-publish `GossipConflictDetected` for content a subscriber already knows about. The guard is cleared whenever that `session_id` is resolved by any path (dominated, fast-forwarded, or merged), so a genuinely new divergence after resolution is still escalated fresh.
+
+---
+
 ## [1.31.2] - 2026-08-02
 
 ### Fixed

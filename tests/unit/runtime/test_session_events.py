@@ -10,8 +10,9 @@ its structured lifecycle log -- but nothing in ``Runtime`` ever called
 that logging, and anything else built on the same subscription (e.g.
 cks-mcp's optional gossip integration tracking sessions automatically),
 silently never fired. These tests pin the fix: ``create_session``,
-``create_branch``, and ``close_session`` must each publish their
-corresponding event, carrying the right ``session_id``.
+``create_branch``, ``register_foreign_branch``, and ``close_session``
+must each publish their corresponding event, carrying the right
+``session_id``.
 """
 
 from __future__ import annotations
@@ -48,6 +49,41 @@ async def test_create_branch_publishes_session_created_for_the_branch():
     assert len(seen) == 1
     assert seen[0].session_id == branch.session_id
     assert branch.session_id != session.session_id
+
+
+async def test_register_foreign_branch_publishes_session_created():
+    runtime = Runtime()
+    seen: list[SessionCreated] = []
+    runtime.events.subscribe(SessionCreated, seen.append)
+
+    session = await runtime.create_session({})
+    seen.clear()  # only interested in the foreign branch's own event here
+
+    branch = await runtime.register_foreign_branch(
+        session, {"foreign": "structure"}, parent_version_id="v-remote"
+    )
+
+    assert len(seen) == 1
+    assert seen[0].session_id == branch.session_id
+    assert branch.session_id != session.session_id
+    assert branch.parent_session_id == session.session_id
+    assert branch.parent_version_id == "v-remote"
+    assert branch.knowledge_structure == {"foreign": "structure"}
+    assert runtime.get_session(branch.session_id) is branch
+
+
+async def test_register_foreign_branch_merges_extra_metadata():
+    runtime = Runtime()
+    session = await runtime.create_session({})
+
+    branch = await runtime.register_foreign_branch(
+        session, {}, metadata={"gossip_source_replica_id": "peer-42"}
+    )
+
+    assert branch.metadata["gossip_source_replica_id"] == "peer-42"
+    # node_id is still minted fresh for the branch, not clobbered by
+    # the caller-supplied metadata merge.
+    assert "node_id" in branch.metadata
 
 
 async def test_close_session_publishes_session_closed():

@@ -562,6 +562,74 @@ class Runtime:
         return branch
 
 
+    async def register_foreign_branch(
+        self,
+        parent_session: RuntimeSession,
+        knowledge_structure: Any,
+        *,
+        parent_version_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> RuntimeSession:
+        """
+        Register a branch of ``parent_session`` whose content originates
+        elsewhere -- supplied directly by the caller, not resolved from
+        ``parent_session``'s own version history the way ``create_branch``
+        resolves it.
+
+        ``create_branch`` only ever forks ``parent_session``'s *own*
+        content (current state or one of its own historical versions);
+        it has no way to register a Knowledge Structure obtained from
+        somewhere else under a real, addressable ``session_id``. This
+        method is that missing primitive -- added for
+        ``GossipAdapter.apply_remote_session`` (ADR-008 status update),
+        which needs to turn a remote replica's snapshot into a
+        ``source_session_id`` a Critic agent can later pass to
+        ``merge_branch``/``compare_versions`` once a merge conflict is
+        escalated, instead of that content being a local variable
+        discarded the instant the conflict is reported. Any other
+        caller that obtains a Knowledge Structure from outside this
+        Runtime and wants to reconcile it against an existing session
+        via the ordinary branch/merge path has the same need.
+
+        ``parent_version_id`` is recorded on the new branch exactly as
+        given, the same as ``create_branch``'s own -- it is the
+        caller's responsibility to supply a version id that resolves in
+        *parent_session*'s history (see ``MergeOperation``'s base
+        resolution), since that is what a later ``merge_branch`` against
+        ``parent_session`` will look up. When the caller already knows
+        what a merge attempt used (or would use) as its base -- e.g.
+        gossip re-registering ``remote_session.parent_version_id`` after
+        a conflicting merge probe -- passing that value through
+        unchanged is the common, correct choice, not something to
+        recompute here.
+
+        ``metadata`` is merged onto the new branch's own metadata after
+        creation (e.g. recording which peer this content came from) --
+        distinct from ``node_id``, which ``SessionManager.create_branch``
+        always mints fresh for the branch regardless, for the same
+        independent-version-vector-identity reason ``create_session``/
+        ``create_branch`` already do.
+        """
+
+        branch = self._sessions.create_branch(
+            parent_session,
+            knowledge_structure,
+            parent_version_id=parent_version_id,
+        )
+        if metadata:
+            branch.metadata.update(metadata)
+
+        await self._storage.save_session(
+            branch,
+        )
+
+        await self._events.publish(
+            SessionCreated(session_id=branch.session_id),
+        )
+
+        return branch
+
+
     def get_session(
         self,
         session_id: str,

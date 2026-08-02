@@ -161,10 +161,30 @@ class GossipConflictDetected(RuntimeEvent):
     way to know which session to pass to ``merge_branch``/
     ``compare_versions`` and can't disambiguate one conflict from
     another when several sessions are gossiping concurrently.
+
+    ``source_session_id`` (ADR-008 status update) identifies a
+    ``RuntimeSession`` this same ``Runtime`` now tracks, registered via
+    ``Runtime.register_foreign_branch`` at the moment this conflict was
+    detected, holding the *remote* replica's content that failed to
+    merge. Before this field existed, that content was only ever a
+    local variable inside ``GossipAdapter.apply_remote_session`` --
+    discarded the instant this event was published, with no way for a
+    subscriber to later inspect what the remote side actually
+    contained. With it, a subscriber can pass
+    ``target_session_id=session_id, source_session_id=source_session_id``
+    straight to ``merge_branch`` (or ``compare_versions``/
+    ``explain_diff`` against it first) to see the real diff, the same
+    as resolving any other branch conflict. Empty when this event
+    predates that change or (defensively) when registering the branch
+    itself failed -- a subscriber should treat an empty
+    ``source_session_id`` as "no diff available, only the conflicting
+    ids below", not assume it is always populated.
     """
 
     source_replica_id: str = ""
 
     session_id: str = ""
+
+    source_session_id: str = ""
 
     conflicts: list[Any] = field(default_factory=list)

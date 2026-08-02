@@ -281,7 +281,7 @@ class TestApplyRemoteSession:
 
         assert session.parent_version_id == EMPTY_STATE_VERSION_ID
 
-
+    async def test_bootstrap_persists_the_new_session_to_storage(self):
         """
         Not just an in-memory registration -- a restart (or another
         code path reading straight from storage) must see it too,
@@ -408,6 +408,201 @@ class TestApplyRemoteSession:
         assert result is False
         assert len(received) == 1
         assert received[0].session_id == session_id
+        assert received[0].conflicts == ["root"]
+
+
+# ---------------------------------------------------------------------------
+# Conflict materialization: source_session_id + dedup across retries
+# ---------------------------------------------------------------------------
+
+
+class TestGossipConflictMaterialization:
+    """
+    ADR-008 status update: a gossip merge conflict used to escalate
+    with only a bare list of conflicting object ids -- a subscriber
+    had no way to see what the remote side actually contained, since
+    the only copy of it was a local variable discarded the instant
+    ``GossipConflictDetected`` was published. These tests pin the fix:
+    the remote content is registered as a real local branch
+    (``source_session_id``), and a gossip round that keeps re-sending
+    the same unresolved conflict does not leak a fresh branch or
+    re-publish the event every time (``_pending_conflict_vectors``).
+    """
+
+    async def test_conflict_materializes_remote_content_as_a_branch(self):
+        from cks.evolution import UpdateObject
+
+        runtime_a, runtime_b, session_id, _fork_version_id = (
+            await _paired_replicas_with_shared_base()
+        )
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
+
+        await _evolve(
+            runtime_a,
+            session_a,
+            [UpdateObject("root", structure_patch={"k": "from-a"})],
+        )
+        await _evolve(
+            runtime_b,
+            session_b,
+            [UpdateObject("root", structure_patch={"k": "from-b"})],
+        )
+
+        received: list[GossipConflictDetected] = []
+        runtime_a.events.subscribe(GossipConflictDetected, received.append)
+
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+        result = await adapter_a.apply_remote_session(session_b)
+
+        assert result is False
+        assert len(received) == 1
+        source_session_id = received[0].source_session_id
+        assert source_session_id  # non-empty: registration succeeded
+
+        source = runtime_a.get_session(source_session_id)
+        assert source is not None
+        assert source.parent_session_id == session_id
+        assert source.knowledge_structure == session_b.knowledge_structure
+
+    async def test_repeated_gossip_round_with_same_conflict_is_not_rematerialized(self):
+        """
+        A gossip cycle keeps retrying every tracked session on a fixed
+        interval regardless of whether the last attempt conflicted, so
+        the same unresolved remote content arrives again on the very
+        next round. That must not leak a second branch or re-publish a
+        second event for content a subscriber has already been told
+        about.
+        """
+        from cks.evolution import UpdateObject
+
+        runtime_a, runtime_b, session_id, _fork_version_id = (
+            await _paired_replicas_with_shared_base()
+        )
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
+
+        await _evolve(
+            runtime_a,
+            session_a,
+            [UpdateObject("root", structure_patch={"k": "from-a"})],
+        )
+        await _evolve(
+            runtime_b,
+            session_b,
+            [UpdateObject("root", structure_patch={"k": "from-b"})],
+        )
+
+        received: list[GossipConflictDetected] = []
+        runtime_a.events.subscribe(GossipConflictDetected, received.append)
+
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+
+        result_1 = await adapter_a.apply_remote_session(session_b)
+        result_2 = await adapter_a.apply_remote_session(session_b)
+
+        assert result_1 is False
+        assert result_2 is False
+        # Only the first round registered a branch and published.
+        assert len(received) == 1
+        first_source_session_id = received[0].source_session_id
+
+        # No second RuntimeSession leaked into the registry beyond the
+        # one branch from the first round.
+        sessions_seen = {
+            s.session_id
+            for s in runtime_a.list_sessions()
+            if s.parent_session_id == session_id
+        }
+        assert sessions_seen == {first_source_session_id}
+
+    async def test_new_divergence_after_a_resolved_conflict_is_rematerialized(self):
+        """
+        Once a session_id's conflict is actually resolved (any of the
+        no-op/fast-forward/merge success paths), a *new* conflict on
+        the same session_id afterwards must register and publish
+        fresh -- the dedup guard is per unresolved conflict, not
+        permanent.
+        """
+        runtime_a, runtime_b, session_id = await _paired_replicas()
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
+
+        await _evolve(runtime_a, session_a, [_add("a")])
+        await _evolve(runtime_b, session_b, [_add("b")])
+
+        received: list[GossipConflictDetected] = []
+        runtime_a.events.subscribe(GossipConflictDetected, received.append)
+
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+
+        # First divergence: no common ancestor, escalated.
+        assert await adapter_a.apply_remote_session(session_b) is False
+        assert len(received) == 1
+
+        # Resolve it locally by fast-forwarding straight to B's state
+        # (simulating however the conflict eventually got resolved),
+        # then converge A's vector so the next round sees a genuine
+        # no-op instead of another escalation.
+        session_a.knowledge_structure = copy.deepcopy(session_b.knowledge_structure)
+        VersionVector.from_metadata(session_b.metadata).to_metadata(session_a.metadata)
+        tx = runtime_a.begin_transaction(session_a)
+        await runtime_a.commit_transaction(tx)
+
+        assert await adapter_a.apply_remote_session(session_b) is True
+        assert len(received) == 1  # still just the first conflict
+
+        # Now a brand-new divergence on the same session_id.
+        await _evolve(runtime_a, session_a, [_add("c")])
+        await _evolve(runtime_b, session_b, [_add("d")])
+
+        assert await adapter_a.apply_remote_session(session_b) is False
+        assert len(received) == 2
+        assert received[1].source_session_id
+        assert received[1].source_session_id != received[0].source_session_id
+
+    async def test_registration_failure_still_escalates_with_empty_source_session_id(
+        self,
+    ):
+        """
+        Defensive path: if register_foreign_branch itself fails (e.g. a
+        storage hiccup), the conflict must still be escalated -- an
+        empty source_session_id ("no diff available") beats losing the
+        escalation entirely.
+        """
+        from cks.evolution import UpdateObject
+
+        runtime_a, runtime_b, session_id, _fork_version_id = (
+            await _paired_replicas_with_shared_base()
+        )
+        session_a = runtime_a.get_session(session_id)
+        session_b = runtime_b.get_session(session_id)
+
+        await _evolve(
+            runtime_a,
+            session_a,
+            [UpdateObject("root", structure_patch={"k": "from-a"})],
+        )
+        await _evolve(
+            runtime_b,
+            session_b,
+            [UpdateObject("root", structure_patch={"k": "from-b"})],
+        )
+
+        received: list[GossipConflictDetected] = []
+        runtime_a.events.subscribe(GossipConflictDetected, received.append)
+
+        adapter_a = GossipAdapter(runtime_a, "replica-a")
+        with mock.patch.object(
+            type(runtime_a),
+            "register_foreign_branch",
+            side_effect=RuntimeError("storage hiccup"),
+        ):
+            result = await adapter_a.apply_remote_session(session_b)
+
+        assert result is False
+        assert len(received) == 1
+        assert received[0].source_session_id == ""
         assert received[0].conflicts == ["root"]
 
 

@@ -85,7 +85,14 @@ class GossipAdapter:
     - publish ``GossipConflictDetected`` when the merge conflicts,
       instead of raising synchronously -- a background gossip cycle
       has no caller waiting on the call the way a synchronous
-      ``merge_branch`` invocation does;
+      ``merge_branch`` invocation does. The remote content that failed
+      to merge is first materialized as a real local branch (see
+      ``_register_conflict_branch``), so the event's
+      ``source_session_id`` gives a subscriber something to diff
+      against instead of only a bare list of conflicting ids. A
+      conflict already reported for the same remote content on a prior
+      gossip round is not re-registered or re-published (see
+      ``_pending_conflict_vectors``);
     - serialize concurrent ``apply_remote_session`` calls that target
       the same ``session_id`` (see ``_lock_for``), so two inbound
       gossip requests for one session arriving at the same time
@@ -107,6 +114,24 @@ class GossipAdapter:
         # session (see _lock_for below). Deliberately per-session, not
         # one lock for the whole adapter.
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # session_id -> the remote VersionVector that most recently
+        # triggered an *unresolved* conflict for that session (see
+        # _register_conflict_branch). A gossip cycle runs on a fixed
+        # interval (PeerScheduler, default every few seconds) and keeps
+        # retrying every tracked session regardless of whether its last
+        # attempt conflicted -- so as long as a conflict sits
+        # unaddressed, the *same* remote content arrives again on the
+        # very next round. Without this, every one of those retries
+        # would call register_foreign_branch again and leak one more
+        # full RuntimeSession (unlike ConflictInbox's own records,
+        # SessionManager's registry is not ring-buffer capped) and
+        # re-publish GossipConflictDetected for content a Critic agent
+        # has already been told about. Cleared whenever
+        # _apply_remote_session_locked resolves this session_id by any
+        # path (converged, fast-forwarded, or merged) -- see its own
+        # `return True` sites -- so a *new* conflict on the same
+        # session_id after that always registers fresh.
+        self._pending_conflict_vectors: dict[str, VersionVector] = {}
 
     @property
     def replica_id(self) -> str:
@@ -238,6 +263,7 @@ class GossipAdapter:
         remote_vector = VersionVector.from_metadata(remote_session.metadata)
 
         if local_vector.dominates(remote_vector):
+            self._pending_conflict_vectors.pop(remote_session.session_id, None)
             return True
 
         # Fast‑forward: remote dominates → adopt remote state without a
@@ -249,6 +275,7 @@ class GossipAdapter:
             # Persist the fast‑forward as a new local Version.
             tx = self._runtime.begin_transaction(local)
             await self._runtime.commit_transaction(tx)
+            self._pending_conflict_vectors.pop(remote_session.session_id, None)
             return True
 
         # Neither vector dominates -- but if the two sides' actual
@@ -264,6 +291,7 @@ class GossipAdapter:
         if local.knowledge_structure.structurally_equivalent(
             remote_session.knowledge_structure
         ):
+            self._pending_conflict_vectors.pop(remote_session.session_id, None)
             return True
 
         # Neither dominates and content genuinely differs → three‑way
@@ -288,11 +316,30 @@ class GossipAdapter:
                 conflicts = [c.object_id for c in probe.error.conflicts]
             else:
                 conflicts = [str(probe.error)]
+
+            # Same remote content that already triggered an unresolved
+            # conflict for this session_id (see _pending_conflict_vectors)
+            # -- a retried gossip round for content a Critic agent has
+            # already been told about, not new information. Skip
+            # re-registering a branch and re-publishing the event; the
+            # method still reports the conflict as unresolved.
+            already_pending = self._pending_conflict_vectors.get(
+                remote_session.session_id
+            )
+            if already_pending == remote_vector:
+                return False
+
+            source_session_id = await self._register_conflict_branch(
+                local, remote_session
+            )
+            self._pending_conflict_vectors[remote_session.session_id] = remote_vector
+
             if self._event_bus is not None:
                 await self._event_bus.publish(
                     GossipConflictDetected(
                         source_replica_id=self._replica_id,
                         session_id=local.session_id,
+                        source_session_id=source_session_id,
                         conflicts=conflicts,
                     )
                 )
@@ -301,7 +348,43 @@ class GossipAdapter:
         tx = self._runtime.begin_transaction(local)
         tx.add_operation(_operation())
         await self._runtime.commit_transaction(tx)
+        self._pending_conflict_vectors.pop(remote_session.session_id, None)
         return True
+
+    async def _register_conflict_branch(
+        self, local: RuntimeSession, remote_session: RuntimeSession
+    ) -> str:
+        """
+        Materialize ``remote_session``'s content as a local branch of
+        ``local`` (via ``Runtime.register_foreign_branch``) at the
+        moment a gossip merge conflict is detected, so
+        ``GossipConflictDetected.source_session_id`` gives a subscriber
+        something real to diff against -- ``merge_branch``/
+        ``compare_versions``/``explain_diff`` against ``local.session_id``
+        -- instead of only the bare list of conflicting object ids.
+
+        ``parent_version_id`` is passed through as
+        ``remote_session.parent_version_id`` unchanged: that is exactly
+        the base the just-failed merge probe attempted to resolve
+        against, so a later ``merge_branch`` retried by hand from this
+        branch resolves the same fork point, not a recomputed one.
+
+        Defensive: registration failure (e.g. a storage hiccup) must
+        never swallow the conflict escalation itself -- an empty
+        ``source_session_id`` ("no diff available, only the conflicting
+        ids") is far better than losing the event entirely. See
+        ``GossipConflictDetected``'s own docstring for that contract.
+        """
+        try:
+            branch = await self._runtime.register_foreign_branch(
+                local,
+                remote_session.knowledge_structure,
+                parent_version_id=remote_session.parent_version_id,
+                metadata={"gossip_source_replica_id": self._replica_id},
+            )
+        except Exception:  # noqa: BLE001 -- must not lose the conflict escalation itself
+            return ""
+        return branch.session_id
 
     # ------------------------------------------------------------------
     # Bootstrap a session neither replica has seen before
