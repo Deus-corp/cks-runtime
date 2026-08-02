@@ -6,16 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
-# [Unreleased]
+## [1.30.2] - 2026-08-02
 
-## Planned
-
-- Adapter implementations (MCP, CLI, HTTP)
-- Runtime Facade
-- Explainability integration
-- Runtime Conformance Suite
-- Storage backends beyond in-memory
-- CKS Core integration package
+### Fixed
+- **`Runtime.create_session`/`create_branch`/`close_session` never published `SessionCreated`/`SessionClosed` events.** Both event types existed on the EventBus but were never fired, so lifecycle logging in `cks-mcp` and any other subscribers silently saw no session events. All three methods now publish the corresponding event after persisting.
 
 ---
 

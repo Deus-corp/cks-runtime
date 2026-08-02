@@ -25,6 +25,7 @@ from cks_runtime.diagnostics.aggregator import (
 from cks_runtime.dispatcher.dispatcher import Dispatcher
 from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
 from cks_runtime.events.event_bus import EventBus
+from cks_runtime.events.runtime_event import SessionClosed, SessionCreated
 from cks_runtime.execution.operation_executor import OperationExecutor
 from cks_runtime.gc.garbage_collector import GarbageCollector
 from cks_runtime.metrics.collector import MetricsCollector
@@ -493,6 +494,10 @@ class Runtime:
             session,
         )
 
+        await self._events.publish(
+            SessionCreated(session_id=session.session_id),
+        )
+
         return session
 
 
@@ -550,6 +555,10 @@ class Runtime:
             branch,
         )
 
+        await self._events.publish(
+            SessionCreated(session_id=branch.session_id),
+        )
+
         return branch
 
 
@@ -605,6 +614,10 @@ class Runtime:
         if session is not None:
             await self._storage.save_session(
                 session,
+            )
+
+            await self._events.publish(
+                SessionClosed(session_id=session_id),
             )
 
 
