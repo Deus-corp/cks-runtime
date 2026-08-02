@@ -136,6 +136,72 @@ class ExplainOperation(Operation):
         )
 
 
+class ExplainInferenceOperation(Operation):
+    """
+    Explain why a specific object is currently believed, by walking
+    its active InferenceStep chain(s) (ADR-001, "Reasoning Objects").
+
+    Read-only, like ``ExplainOperation``/``QuerySubgraphOperation``:
+    never mutates session state, so it is deliberately not
+    special-cased in ``ExecutionPipeline._apply_state_mutation``
+    either. Requires ``object_id``, unlike ``ExplainOperation`` --
+    there is no structure-wide default for "why", only a per-object
+    one.
+
+    Delegates to ``CoreBridge.explain_inference``, an *optional*
+    capability (see ``CoreInterface.explain_inference``): an attached
+    Core that does not implement it raises ``NotImplementedError``,
+    which -- like an unknown ``object_id`` or any other Core-side
+    failure -- is caught below and reported as a FAILED
+    ``ExecutionResult`` rather than propagated, matching
+    ``QuerySubgraphOperation``'s error-handling convention.
+    """
+    operation_id: str = "explain_inference"
+
+    def __init__(
+        self,
+        operation_id: str = "explain_inference",
+        *,
+        knowledge_structure: Any = None,
+        object_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(operation_id, metadata=metadata)
+        self.knowledge_structure = knowledge_structure
+        self.object_id = object_id
+
+    async def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        if not self.object_id:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=ValueError(
+                    "ExplainInferenceOperation requires 'object_id'."
+                ),
+            )
+
+        try:
+            explanation = executor.core.explain_inference(
+                self.knowledge_structure, self.object_id
+            )
+        except Exception as exc:  # noqa: BLE001 -- Core plugin boundary; captured below, not swallowed
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=exc,
+            )
+
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=explanation,
+        )
+
+
 class QuerySubgraphOperation(Operation):
     """
     Extract the local k-hop neighborhood around one or more seed ids

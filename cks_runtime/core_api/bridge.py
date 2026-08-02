@@ -171,6 +171,46 @@ class CoreBridge:
         )
 
     # ------------------------------------------------------------------
+    # Inference explanation (optional capability)
+    # ------------------------------------------------------------------
+
+    def explain_inference(
+        self,
+        knowledge_structure: Any,
+        object_id: str,
+    ) -> dict[str, Any]:
+        """
+        Delegate an inference explanation ("why is object_id believed?").
+
+        Raises
+        ------
+        RuntimeError
+            No Core implementation is attached at all.
+        NotImplementedError
+            A Core implementation is attached but does not support
+            inference explanation. Propagated as-is, matching
+            ``field_diff()``'s contract.
+        """
+        impl = self._implementation
+        if impl is None:
+            raise RuntimeError("No Runtime Core implementation is attached.")
+        return impl.explain_inference(knowledge_structure, object_id)
+
+    @property
+    def supports_explain_inference(self) -> bool:
+        """
+        Whether the attached Core implementation overrides
+        ``explain_inference()``. Mirrors ``supports_field_diff``.
+        """
+        impl = self._implementation
+        if impl is None:
+            return False
+        return (
+            type(impl).explain_inference
+            is not CoreInterface.explain_inference
+        )
+
+    # ------------------------------------------------------------------
     # Structural Diff
     # ------------------------------------------------------------------
 

@@ -163,6 +163,25 @@ class CksCoreAdapter(CoreInterface):
             "summary": summary,
         }
 
+    def explain_inference(
+        self,
+        knowledge_structure: Any,
+        object_id: str,
+    ) -> dict[str, Any]:
+        """
+        Explain why ``object_id`` is currently believed by walking its
+        active InferenceStep chain(s) (see ADR-001, "Reasoning
+        Objects"). Delegates entirely to the opt-in
+        ``cks.constraints.reasoning`` extension -- see
+        ``explain_inference`` there for the full contract.
+        """
+        # Imported lazily, matching evolution.RecordInference's own
+        # precedent -- the reasoning-objects vocabulary is an opt-in
+        # extension, not part of cks-core's always-imported surface.
+        from cks.constraints.reasoning import explain_inference
+
+        return explain_inference(knowledge_structure, object_id)
+
     def diff(self, source: Any, target: Any) -> list[Any]:
         return source.diff(target)
 

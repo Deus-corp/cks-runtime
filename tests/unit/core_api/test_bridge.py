@@ -36,6 +36,9 @@ class _FakeCore(CoreInterface):
             "summary": "fake explanation",
         }
 
+    def explain_inference(self, knowledge_structure, object_id):
+        return {"object_id": object_id, "fake_explanation": True}
+
     def diff(self, source, target):
         return []
 
@@ -142,6 +145,29 @@ def test_explain_delegates_to_core(bridge):
 def test_explain_without_core_returns_empty_dict(detached_bridge):
     result = detached_bridge.explain({})
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Inference Explanation (optional capability)
+# ---------------------------------------------------------------------------
+
+
+def test_explain_inference_delegates_to_core(bridge):
+    result = bridge.explain_inference({}, "obj-1")
+    assert result == {"object_id": "obj-1", "fake_explanation": True}
+
+
+def test_explain_inference_without_core_raises(detached_bridge):
+    with pytest.raises(RuntimeError, match="No Runtime Core implementation"):
+        detached_bridge.explain_inference({}, "obj-1")
+
+
+def test_supports_explain_inference_true(bridge):
+    assert bridge.supports_explain_inference is True
+
+
+def test_supports_explain_inference_false(detached_bridge):
+    assert detached_bridge.supports_explain_inference is False
 
 
 # ---------------------------------------------------------------------------

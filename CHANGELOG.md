@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.31.0] - 2026-08-02
+
+### Added
+- **`CoreInterface.explain_inference()` / `CoreBridge.explain_inference()`** – new *optional* Core capability, mirroring `field_diff()`/`synthesize_merge()`: raises `NotImplementedError` by default, so Runtime never assumes every plugged-in Core has a "reasoning objects" vocabulary to walk. `CoreBridge.supports_explain_inference` mirrors `supports_field_diff`.
+- **`CksCoreAdapter.explain_inference()`** – implements the new capability by delegating to `cks.constraints.reasoning.explain_inference` (cks-core 1.18.0), answering "why is this object currently believed?" by walking its active `InferenceStep` chain(s).
+- **`ExplainInferenceOperation`** – new read-only Runtime Operation, mirroring `QuerySubgraphOperation`'s error-handling convention (broad `except Exception`, including the optional capability's `NotImplementedError`, turned into a `FAILED` `ExecutionResult` rather than propagated). Requires `object_id`; not special-cased in `ExecutionPipeline._apply_state_mutation`, same as `ExplainOperation`/`QuerySubgraphOperation`.
+
+### Changed
+- `cks-core` dependency floor raised to `>=1.18.0` for `cks.constraints.reasoning.explain_inference`.
+
+---
+
 ## [1.30.2] - 2026-08-02
 
 ### Fixed

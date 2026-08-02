@@ -138,6 +138,52 @@ class CoreInterface(ABC):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
+    # Inference explanation (optional capability)
+    # ------------------------------------------------------------------
+
+    def explain_inference(
+        self,
+        knowledge_structure: Any,
+        object_id: str,
+    ) -> dict[str, Any]:
+        """
+        Explain *why* ``object_id`` is currently believed: walk the
+        active `InferenceStep` chain(s) concluding it back through
+        each step's premises.
+
+        This is an *optional* capability, like ``field_diff()``/
+        ``synthesize_merge()``: Runtime must not assume every
+        plugged-in Core has a native "reasoning objects" vocabulary
+        to walk. ``explain()`` above is the only explanation every
+        Core must support, and it is free to describe a structure in
+        whatever generic terms it has (object/relation counts, a
+        summary). Core implementations that record `InferenceStep`-
+        style reasoning objects should override this method to answer
+        the more specific "why" question instead.
+
+        Returns
+        -------
+        dict[str, Any]
+            Core-native explanation payload. Runtime treats this as
+            opaque, the same way it treats ``explain()``'s return --
+            it crosses the boundary as whatever shape the attached
+            Core produces, unlike ``field_diff()``'s
+            ``RuntimeFieldOperation`` (which Runtime's operation log
+            must itself persist in a Core-independent shape).
+
+        Raises
+        ------
+        NotImplementedError
+            The attached Core does not support inference explanation.
+            Propagated as-is, matching ``field_diff()``'s contract, so
+            callers can distinguish "not supported" from "supported
+            but nothing to explain" (e.g. an empty/no-op result).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement explain_inference()."
+        )
+
+    # ------------------------------------------------------------------
     # Structural Diff
     # ------------------------------------------------------------------
 

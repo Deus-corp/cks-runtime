@@ -92,3 +92,18 @@ def test_merge_is_an_optional_capability_by_default():
 
     with pytest.raises(NotImplementedError):
         core.merge({}, {}, {})
+
+
+def test_explain_inference_is_an_optional_capability_by_default():
+    """
+    A CoreInterface implementation that does not override
+    explain_inference() (like DummyCore) must not be forced to
+    implement reasoning-object explanation -- calling the default
+    raises NotImplementedError, the same optional-capability contract
+    field_diff()/merge()/hash() already have.
+    """
+
+    core = DummyCore()
+
+    with pytest.raises(NotImplementedError):
+        core.explain_inference({}, "some-id")
