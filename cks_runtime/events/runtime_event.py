@@ -155,8 +155,16 @@ class GossipConflictDetected(RuntimeEvent):
     conflict is escalated here instead -- a subscriber (e.g. a future
     Critic agent) resolves it later through the ordinary
     ``merge_branch`` tool.
+
+    ``session_id`` identifies which of possibly many gossiped sessions
+    conflicted -- without it, a subscriber handling this event has no
+    way to know which session to pass to ``merge_branch``/
+    ``compare_versions`` and can't disambiguate one conflict from
+    another when several sessions are gossiping concurrently.
     """
 
     source_replica_id: str = ""
+
+    session_id: str = ""
 
     conflicts: list[Any] = field(default_factory=list)

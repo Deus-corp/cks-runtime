@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.31.2] - 2026-08-02
+
+### Fixed
+- **`GossipConflictDetected` now carries `session_id`.** `GossipAdapter` previously published this event with only `source_replica_id` and the conflicting object ids — a subscriber (e.g. a Critic agent listening on the `EventBus`) had no way to tell *which* gossiped session conflicted, and so no way to pass the right session to `merge_branch`/`compare_versions` when more than one session is gossiping concurrently. `_apply_remote_session_locked` now passes `session_id=local.session_id` at the point it escalates. See SPEC-009 Section 8.
+
+---
+
 ## [1.31.1] - 2026-08-02
 
 ### Changed

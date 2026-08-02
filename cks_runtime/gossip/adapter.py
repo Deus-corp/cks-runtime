@@ -292,6 +292,7 @@ class GossipAdapter:
                 await self._event_bus.publish(
                     GossipConflictDetected(
                         source_replica_id=self._replica_id,
+                        session_id=local.session_id,
                         conflicts=conflicts,
                     )
                 )

@@ -360,6 +360,7 @@ class TestApplyRemoteSession:
         assert result is False
         assert len(received) == 1
         assert received[0].source_replica_id == "replica-a"
+        assert received[0].session_id == session_id
         assert received[0].conflicts  # some description of what went wrong
 
     async def test_real_merge_conflict_is_escalated_not_raised(self):
@@ -406,6 +407,7 @@ class TestApplyRemoteSession:
 
         assert result is False
         assert len(received) == 1
+        assert received[0].session_id == session_id
         assert received[0].conflicts == ["root"]
 
 
