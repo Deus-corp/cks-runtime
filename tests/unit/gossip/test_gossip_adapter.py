@@ -28,7 +28,10 @@ from cks_runtime.events.event_bus import EventBus
 from cks_runtime.events.runtime_event import GossipConflictDetected
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.exchange import gossip_exchange
-from cks_runtime.operations.operation_types import EvolveOperation
+from cks_runtime.operations.operation_types import (
+    EMPTY_STATE_VERSION_ID,
+    EvolveOperation,
+)
 from cks_runtime.runtime import Runtime
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version_vector import VersionVector
@@ -245,7 +248,38 @@ class TestApplyRemoteSession:
         for node_id, clock in remote_vector.clocks.items():
             assert local_vector.clocks[node_id] >= clock
 
-    async def test_bootstrap_is_persisted_to_storage(self):
+    async def test_bootstrap_anchors_to_empty_state_regardless_of_remote_parent(self):
+        """
+        The bootstrapped local copy's parent_version_id is always
+        EMPTY_STATE_VERSION_ID -- never copied from the remote's own
+        parent_version_id, even when the remote has one. The remote's
+        recorded fork point lives in the remote's own version_history,
+        which this replica has never seen and never receives (gossip
+        carries snapshots, not history) -- so it would be a dangling
+        pointer here, not a usable common ancestor.
+        """
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        adapter = GossipAdapter(runtime, "r1")
+        remote = RuntimeSession(
+            knowledge_structure=make_structure(["root"]),
+            session_id="ghost",
+            parent_version_id=str(uuid4()),  # some real version on the remote's side
+        )
+        await adapter.apply_remote_session(remote)
+
+        local = runtime.get_session("ghost")
+        assert local.parent_version_id == EMPTY_STATE_VERSION_ID
+
+    async def test_anchor_genesis_sets_parent_version_id(self):
+        runtime = await Runtime.create(core=CksCoreAdapter())
+        session = await runtime.create_session(make_structure(["root"]))
+        assert session.parent_version_id is None
+
+        GossipAdapter.anchor_genesis(session)
+
+        assert session.parent_version_id == EMPTY_STATE_VERSION_ID
+
+
         """
         Not just an in-memory registration -- a restart (or another
         code path reading straight from storage) must see it too,
@@ -419,3 +453,73 @@ class TestGossipExchange:
             "root",
             "a",
         }
+
+class TestThreeReplicaConvergenceViaGenesis:
+    """
+    End-to-end reproduction of the exact scenario that used to hang
+    forever with "could not determine a merge base": three replicas
+    (Supervisor/Critic/Worker), one true origin, two gossip-only
+    joiners, concurrent field-disjoint edits on two of them after
+    everyone has bootstrapped.
+    """
+
+    async def test_supervisor_critic_worker_converge_after_concurrent_edits(self):
+        runtime_sup = await Runtime.create(core=CksCoreAdapter())
+        runtime_critic = await Runtime.create(core=CksCoreAdapter())
+        runtime_worker = await Runtime.create(core=CksCoreAdapter())
+
+        # Supervisor is the true origin: created locally, not received
+        # via gossip, so it's the one call site that must explicitly
+        # anchor_genesis() (see GossipAdapter.anchor_genesis docstring).
+        sup_session = await runtime_sup.create_session(make_structure(["root"]))
+        GossipAdapter.anchor_genesis(sup_session)
+
+        adapter_sup = GossipAdapter(runtime_sup, "replica-supervisor")
+        adapter_critic = GossipAdapter(runtime_critic, "replica-critic")
+        adapter_worker = GossipAdapter(runtime_worker, "replica-worker")
+
+        # First contact: Critic and Worker have never seen this
+        # session_id, so this exercises the real
+        # _bootstrap_remote_session path, not the paired-replica test
+        # shortcut.
+        assert runtime_critic.get_session(sup_session.session_id) is None
+        assert runtime_worker.get_session(sup_session.session_id) is None
+        await adapter_critic.apply_remote_session(sup_session)
+        await adapter_worker.apply_remote_session(sup_session)
+
+        critic_session = runtime_critic.get_session(sup_session.session_id)
+        worker_session = runtime_worker.get_session(sup_session.session_id)
+        assert critic_session is not None
+        assert worker_session is not None
+
+        # Now Supervisor and Worker independently commit field-disjoint
+        # changes, with no further contact before Critic gets involved
+        # -- the concurrent-edit case the earlier ad hoc reproduction
+        # (three manually-seeded sessions, no real bootstrap) could
+        # never converge.
+        await _evolve(runtime_sup, sup_session, [_add("from-supervisor")])
+        await _evolve(runtime_worker, worker_session, [_add("from-worker")])
+
+        received_conflicts: list[GossipConflictDetected] = []
+        for rt in (runtime_sup, runtime_critic, runtime_worker):
+            rt.events.subscribe(GossipConflictDetected, received_conflicts.append)
+
+        # A handful of pairwise rounds, full mesh -- mirroring what
+        # PeerScheduler would do over several intervals, just without
+        # the real transport or the randomness.
+        pairs = [
+            (adapter_sup, sup_session.session_id, adapter_critic),
+            (adapter_sup, sup_session.session_id, adapter_worker),
+            (adapter_critic, sup_session.session_id, adapter_worker),
+        ]
+        for _round in range(3):
+            for a, sid, b in pairs:
+                await gossip_exchange(sid, a, b)
+
+        assert received_conflicts == []
+
+        expected = {"root", "from-supervisor", "from-worker"}
+        for rt in (runtime_sup, runtime_critic, runtime_worker):
+            session = rt.get_session(sup_session.session_id)
+            ids = {o.identity.id for o in session.knowledge_structure.objects}
+            assert ids == expected, f"{rt} has {ids}"

@@ -19,6 +19,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.30.0] - 2026-08-02
+
+### Added
+- **Genesis Block for gossip convergence** – `EMPTY_STATE_VERSION_ID` (`"00000000-0000-0000-0000-000000000000"`) allows two independently bootstrapped replicas to name a shared common ancestor for three-way merge. `MergeOperation` resolves this constant to an empty structure without requiring a real version in any session's history.
+- **`GossipAdapter.anchor_genesis(session)`** – anchors a locally-created session to `EMPTY_STATE_VERSION_ID`, giving it the same fork point that gossip-bootstrapped peers get automatically.
+- **`_bootstrap_remote_session`** now always sets `parent_version_id = EMPTY_STATE_VERSION_ID` on the adopted local copy.
+- **End-to-end convergence test** – `TestThreeReplicaConvergenceViaGenesis` reproduces the Supervisor/Critic/Worker scenario with real bootstrap and concurrent field-disjoint edits, confirming convergence within a handful of rounds without escalated conflicts.
+
+---
+
 ## [1.29.0] - 2026-08-02
 
 ### Added

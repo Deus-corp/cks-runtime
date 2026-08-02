@@ -226,3 +226,85 @@ async def test_create_branch_without_version_id_defaults_to_latest_committed_ver
 
     merged_ids = {obj.identity.id for obj in trunk.knowledge_structure.objects}
     assert merged_ids == {"root", "a", "b", "c"}
+
+
+async def test_merge_operation_resolves_empty_state_with_no_history_entry():
+    """
+    EMPTY_STATE_VERSION_ID resolves without needing to exist in
+    either session's version_history at all -- unlike an ordinary
+    base_version_id, which must be a real, resolvable committed
+    version (see get_version_state()). This is what lets two
+    sessions from *different* Runtimes/storage backends -- which
+    have never shared any version -- still name a common ancestor.
+    """
+    from cks_runtime.operations.operation_types import EMPTY_STATE_VERSION_ID
+
+    runtime_a = await Runtime.create(core=CksCoreAdapter())
+    runtime_b = await Runtime.create(core=CksCoreAdapter())
+
+    session_a = await runtime_a.create_session(make_structure([]))
+    session_a.parent_version_id = EMPTY_STATE_VERSION_ID
+    await _evolve(runtime_a, session_a, [_add("from-a")])
+
+    session_b = await runtime_b.create_session(make_structure([]))
+    session_b.parent_version_id = EMPTY_STATE_VERSION_ID
+    await _evolve(runtime_b, session_b, [_add("from-b")])
+
+    # Neither session ever appears in the other's version_history --
+    # confirming the short-circuit truly needs no shared storage.
+    assert EMPTY_STATE_VERSION_ID not in [
+        v.version_id for v in session_a.version_history
+    ]
+
+    operation = MergeOperation("merge", source_session=session_b)
+    result = await runtime_a.executor.execute(operation, session_a)
+
+    assert result.status == OperationStatus.COMPLETED
+    merged_ids = {obj.identity.id for obj in result.payload.objects}
+    assert merged_ids == {"from-a", "from-b"}
+
+
+async def test_merge_operation_empty_state_converges_identical_concurrent_additions():
+    """Same object, same id, added independently on both sides: not a conflict."""
+    from cks_runtime.operations.operation_types import EMPTY_STATE_VERSION_ID
+
+    runtime_a = await Runtime.create(core=CksCoreAdapter())
+    runtime_b = await Runtime.create(core=CksCoreAdapter())
+
+    session_a = await runtime_a.create_session(make_structure([]))
+    session_a.parent_version_id = EMPTY_STATE_VERSION_ID
+    await _evolve(runtime_a, session_a, [_add("root")])
+
+    session_b = await runtime_b.create_session(make_structure([]))
+    session_b.parent_version_id = EMPTY_STATE_VERSION_ID
+    await _evolve(runtime_b, session_b, [_add("root")])
+
+    operation = MergeOperation("merge", source_session=session_b)
+    result = await runtime_a.executor.execute(operation, session_a)
+
+    assert result.status == OperationStatus.COMPLETED
+    merged_ids = {obj.identity.id for obj in result.payload.objects}
+    assert merged_ids == {"root"}
+
+
+async def test_merge_operation_without_empty_state_anchor_still_fails():
+    """
+    Sanity check: EMPTY_STATE_VERSION_ID is opt-in. Two sessions that
+    were never anchored to it (parent_version_id left at its None
+    default) get the original, unresolvable-base failure -- this
+    isn't a global behaviour change for ordinary ADR-007 usage.
+    """
+    runtime_a = await Runtime.create(core=CksCoreAdapter())
+    runtime_b = await Runtime.create(core=CksCoreAdapter())
+
+    session_a = await runtime_a.create_session(make_structure([]))
+    await _evolve(runtime_a, session_a, [_add("from-a")])
+
+    session_b = await runtime_b.create_session(make_structure([]))
+    await _evolve(runtime_b, session_b, [_add("from-b")])
+
+    operation = MergeOperation("merge", source_session=session_b)
+    result = await runtime_a.executor.execute(operation, session_a)
+
+    assert result.status == OperationStatus.FAILED
+    assert "could not determine a merge base" in str(result.error)

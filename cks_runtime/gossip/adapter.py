@@ -54,7 +54,10 @@ from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.events.runtime_event import GossipConflictDetected
 from cks_runtime.execution.operation_executor import OperationStatus
-from cks_runtime.operations.operation_types import MergeOperation
+from cks_runtime.operations.operation_types import (
+    EMPTY_STATE_VERSION_ID,
+    MergeOperation,
+)
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version_vector import VersionVector
 
@@ -96,6 +99,34 @@ class GossipAdapter:
     @property
     def replica_id(self) -> str:
         return self._replica_id
+
+    @staticmethod
+    def anchor_genesis(session: RuntimeSession) -> None:
+        """
+        Anchor a freshly-created, not-yet-gossiped session to the
+        well-known empty state (``EMPTY_STATE_VERSION_ID``) as its
+        recorded fork point.
+
+        Call this once, right after ``Runtime.create_session()``, on
+        whichever replica is the true origin of a session meant to be
+        gossiped -- i.e. the one call in the whole deployment that
+        does *not* go through ``_bootstrap_remote_session`` (that path
+        already anchors to the same constant automatically for every
+        other replica that later adopts this session_id via gossip).
+        Without this call, the origin's own ``parent_version_id`` stays
+        ``None``, and any peer that later merges this session in as a
+        ``source_session`` hits "could not determine a merge base"
+        despite every *other* replica converging fine.
+
+        Idempotent and safe to call even on a session that will never
+        be gossiped -- it only changes what a future ``MergeOperation``
+        would resolve as this session's fork point, nothing about its
+        current content. Not persisted automatically; if the session's
+        storage backend needs the change durable before the next
+        commit, save it explicitly (``await runtime.storage.save_session(session)``).
+        """
+
+        session.parent_version_id = EMPTY_STATE_VERSION_ID
 
     # ------------------------------------------------------------------
     # Vector helpers
@@ -167,10 +198,15 @@ class GossipAdapter:
             return True
 
         # Neither dominates and content genuinely differs → three‑way
-        # merge probe. With no common ancestor MergeOperation can
-        # resolve, this deliberately escalates (see
+        # merge probe. If both sides' parent_version_id happen to
+        # agree on a resolvable common ancestor -- most commonly
+        # EMPTY_STATE_VERSION_ID, when both were anchored via
+        # anchor_genesis()/_bootstrap_remote_session -- MergeOperation
+        # resolves it and this merges cleanly, no escalation. With no
+        # such anchor at all (see
         # ``test_concurrent_divergence_with_no_common_ancestor_is_escalated``)
-        # rather than guessing at a merge base.
+        # it deliberately escalates rather than guessing at a merge
+        # base.
         def _operation() -> MergeOperation:
             return MergeOperation("gossip-merge", source_session=remote_session)
 
@@ -245,7 +281,17 @@ class GossipAdapter:
             metadata=dict(remote_session.metadata),
             snapshot_interval=remote_session.snapshot_interval,
             parent_session_id=remote_session.parent_session_id,
-            parent_version_id=remote_session.parent_version_id,
+            # Deliberately EMPTY_STATE_VERSION_ID, not
+            # remote_session.parent_version_id: whatever the remote's
+            # own recorded fork point was, it lives in the remote's
+            # version_history, which this replica has never seen and
+            # never will (gossip carries snapshots, not history). From
+            # *this* replica's point of view there is genuinely nothing
+            # before this bootstrap commit, so its own fork point is
+            # the well-known empty state -- see EMPTY_STATE_VERSION_ID
+            # and anchor_genesis(), which does the equivalent for a
+            # session's true origin (created locally, not bootstrapped).
+            parent_version_id=EMPTY_STATE_VERSION_ID,
         )
         local.metadata["node_id"] = str(uuid4())
 

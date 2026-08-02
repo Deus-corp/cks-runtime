@@ -66,6 +66,31 @@ transport failures, zero convergence. Establishing shared lineage
 for gossip-bootstrapped sessions is unaddressed and is the next gap
 to close, not this revision's scope.
 
+**Revision (2026-08-02, v1.30.0):** The lineage gap above is closed
+-- `EMPTY_STATE_VERSION_ID` (`cks_runtime/operations/operation_types.py`,
+`"00000000-0000-0000-0000-000000000000"`), the same trick as git's
+empty-tree hash. Two sessions whose `parent_version_id` both equal
+this constant are defined to share it as a common ancestor without
+either ever having seen the other's real `version_history`:
+`MergeOperation.execute` resolves it to an empty structure directly,
+skipping the `get_version_state()` lookup that requires the id to
+physically appear in local history. `_bootstrap_remote_session` now
+always anchors the newly-adopted local copy to it (regardless of
+what the remote's own `parent_version_id` was -- that pointer lives
+in the remote's history, which this replica never receives and never
+will, gossip carrying snapshots, not history). `GossipAdapter
+.anchor_genesis(session)` does the equivalent for a session's true
+origin -- the one replica in a deployment whose session was created
+locally via `Runtime.create_session()`, not received via gossip, and
+so needs one explicit call right after creation to get the same
+anchor every bootstrap joiner gets automatically. Re-ran the same
+3-replica reproduction from the prior revision with these three
+pieces in place: converges within a handful of rounds, zero
+escalated conflicts (`tests/unit/gossip/test_gossip_adapter.py::TestThreeReplicaConvergenceViaGenesis`).
+`EMPTY_STATE_VERSION_ID` is opt-in -- sessions that never call
+`anchor_genesis()`/never get bootstrapped keep today's `None` default
+and today's escalate-on-divergence behavior unchanged.
+
 ---
 
 # Context

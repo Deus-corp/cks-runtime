@@ -343,6 +343,36 @@ class DiffOperation(Operation):
         )
 
 
+EMPTY_STATE_VERSION_ID = "00000000-0000-0000-0000-000000000000"
+"""
+Well-known, deterministic version id representing "empty state, no
+real history" -- the same trick as git's empty-tree hash
+(``4b825dc642cb6eb9a060e54bf8d69288fbee4904``), used there as a diff
+base for a repository's very first commit, which likewise has no
+real parent to diff against.
+
+A session's ``parent_version_id`` pointing at this constant means
+"this lineage's recorded fork point is the empty structure" rather
+than "no fork point is recorded at all" (``None``). ``MergeOperation``
+resolves it directly to an empty structure of the right type (see
+below) without a ``version_history`` lookup, so it needs no entry to
+actually exist in *any* session's history, on *any* replica -- every
+replica reconstructs the same empty state locally and independently.
+
+This is what lets two sessions that were bootstrapped on different
+processes with no shared storage still name a common ancestor for a
+three-way merge: any two ``RuntimeSession``s whose ``parent_version_id``
+is this constant are defined to share it, without either having ever
+seen the other's actual version history. Used by gossip's
+first-contact bootstrap (``GossipAdapter._bootstrap_remote_session``,
+``GossipAdapter.anchor_genesis``, ADR-008) for exactly that reason,
+but the constant and the short-circuit in ``MergeOperation`` are
+plain versioning-layer mechanism, not gossip-specific -- ADR-007
+``create_branch``/``merge_branch`` callers are free to use it too for
+a from-scratch branch with no real parent.
+"""
+
+
 class MergeOperation(Operation):
     """
     Three-way merge of another (source) session's branch into the
@@ -447,17 +477,24 @@ class MergeOperation(Operation):
                         "recorded at branch time."
                     ),
                 )
-            try:
-                base = session.get_version_state(
-                    base_version_id,
-                    executor.core,
-                )
-            except ValueError as exc:
-                return ExecutionResult(
-                    operation_id=self.operation_id,
-                    status=OperationStatus.FAILED,
-                    error=exc,
-                )
+            if base_version_id == EMPTY_STATE_VERSION_ID:
+                # No real history to walk -- every replica reconstructs
+                # this independently, so no get_version_state() lookup
+                # (and no requirement that this id appear in anyone's
+                # version_history) is needed. See EMPTY_STATE_VERSION_ID.
+                base = type(session.knowledge_structure)([])
+            else:
+                try:
+                    base = session.get_version_state(
+                        base_version_id,
+                        executor.core,
+                    )
+                except ValueError as exc:
+                    return ExecutionResult(
+                        operation_id=self.operation_id,
+                        status=OperationStatus.FAILED,
+                        error=exc,
+                    )
 
         try:
             merged = executor.core.merge(
