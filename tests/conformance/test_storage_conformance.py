@@ -367,3 +367,179 @@ async def test_outbox_round_trips_when_supported(storage):
 
     # A completed task must not be handed out again.
     assert await storage.dequeue_next_outbox_task() is None
+
+
+# ---------------------------------------------------------------------------
+# task_type filter, dead-lettering, and batch listing -- added alongside
+# the Critic-agent outbox work. Same supports_outbox gating as above.
+# ---------------------------------------------------------------------------
+
+
+async def test_dequeue_respects_task_type_filter(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    await storage.enqueue_task("projection", "s1", "{}")
+
+    # A worker dedicated to "projection" must never claim the
+    # "gossip_conflict" task meant for a different worker.
+    task = await storage.dequeue_next_outbox_task(task_type="projection")
+    assert task is not None
+    assert task.task_type == "projection"
+
+    # The gossip_conflict task is untouched and still claimable by its
+    # own worker.
+    remaining = await storage.dequeue_next_outbox_task(task_type="gossip_conflict")
+    assert remaining is not None
+    assert remaining.task_type == "gossip_conflict"
+
+
+async def test_dequeue_with_task_type_ignores_other_types_even_when_older(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("projection", "s1", "{}")  # enqueued first
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")  # enqueued second
+
+    # Ordering only applies *within* a type -- a type-scoped dequeue must
+    # not fall back to an older task of a different type.
+    task = await storage.dequeue_next_outbox_task(task_type="gossip_conflict")
+    assert task is not None
+    assert task.task_type == "gossip_conflict"
+
+
+async def test_dead_letter_task_is_never_dequeued_again(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("inference_conflict", "s1", "{}")
+    task = await storage.dequeue_next_outbox_task()
+    assert task is not None
+
+    await storage.dead_letter_outbox_task(task.task_id, "gave up after 5 retries")
+
+    # Unlike fail_outbox_task, dead-lettering must not schedule a retry --
+    # the task is gone from the eligible pool for good.
+    assert await storage.dequeue_next_outbox_task() is None
+
+
+async def test_dead_letter_task_appears_in_list_dead_letter_tasks(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("inference_conflict", "s1", "{}")
+    task = await storage.dequeue_next_outbox_task()
+    assert task is not None
+    await storage.dead_letter_outbox_task(task.task_id, "boom")
+
+    dead = await storage.list_dead_letter_tasks()
+    assert len(dead) == 1
+    assert dead[0].task_id == task.task_id
+    assert dead[0].task_type == "inference_conflict"
+
+
+async def test_list_dead_letter_tasks_filters_by_task_type(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    await storage.enqueue_task("inference_conflict", "s1", "{}")
+    gossip_task = await storage.dequeue_next_outbox_task(task_type="gossip_conflict")
+    inference_task = await storage.dequeue_next_outbox_task(task_type="inference_conflict")
+    assert gossip_task is not None and inference_task is not None
+    await storage.dead_letter_outbox_task(gossip_task.task_id, "boom")
+    await storage.dead_letter_outbox_task(inference_task.task_id, "boom")
+
+    only_gossip = await storage.list_dead_letter_tasks(task_type="gossip_conflict")
+    assert len(only_gossip) == 1
+    assert only_gossip[0].task_id == gossip_task.task_id
+
+
+async def test_list_dead_letter_tasks_never_drains(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    task = await storage.dequeue_next_outbox_task()
+    assert task is not None
+    await storage.dead_letter_outbox_task(task.task_id, "boom")
+
+    first_read = await storage.list_dead_letter_tasks()
+    second_read = await storage.list_dead_letter_tasks()
+    assert len(first_read) == len(second_read) == 1
+
+
+async def test_list_tasks_by_type_returns_only_matching_pending_tasks(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    await storage.enqueue_task("projection", "s1", "{}")
+
+    tasks = await storage.list_tasks_by_type("gossip_conflict", drain=False)
+    assert len(tasks) == 2
+    assert all(t.task_type == "gossip_conflict" for t in tasks)
+
+
+async def test_list_tasks_by_type_drains_by_default(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+
+    first = await storage.list_tasks_by_type("gossip_conflict")
+    assert len(first) == 1
+
+    second = await storage.list_tasks_by_type("gossip_conflict")
+    assert second == []
+
+
+async def test_list_tasks_by_type_peek_does_not_drain(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+
+    first_peek = await storage.list_tasks_by_type("gossip_conflict", drain=False)
+    second_peek = await storage.list_tasks_by_type("gossip_conflict", drain=False)
+    assert len(first_peek) == len(second_peek) == 1
+    assert first_peek[0].task_id == second_peek[0].task_id
+
+
+async def test_list_tasks_by_type_filters_by_session_id(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    await storage.enqueue_task("gossip_conflict", "s2", "{}")
+
+    tasks = await storage.list_tasks_by_type("gossip_conflict", session_id="s1")
+    assert len(tasks) == 1
+    assert tasks[0].session_id == "s1"
+
+
+async def test_list_tasks_by_type_excludes_claimed_in_progress_tasks(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    # Claim it via the single-task path -- it's now IN_PROGRESS, not
+    # PENDING, so a batch reader must not also hand it to another worker.
+    claimed = await storage.dequeue_next_outbox_task(task_type="gossip_conflict")
+    assert claimed is not None
+
+    tasks = await storage.list_tasks_by_type("gossip_conflict")
+    assert tasks == []
+
+
+async def test_dead_letter_and_list_methods_no_op_when_outbox_unsupported(storage):
+    if storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} supports the outbox -- covered above")
+
+    # Must behave as documented no-ops rather than raising, even though
+    # there is nothing to act on.
+    await storage.dead_letter_outbox_task(999, "n/a")
+    assert await storage.list_tasks_by_type("gossip_conflict") == []
+    assert await storage.list_dead_letter_tasks() == []

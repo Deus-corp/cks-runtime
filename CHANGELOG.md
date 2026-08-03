@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.34.1] - 2026-08-03
+
+### Added
+- **Conformance tests for outbox task_type filter, DLQ, and batch-by-type methods** — new test cases in `tests/conformance/test_storage_conformance.py` cover `dequeue_next_outbox_task` with `task_type`, `dead_letter_outbox_task`, `list_tasks_by_type` (including `session_id` filter and `drain` behaviour), and `list_dead_letter_tasks`. Tests run against SQLite (12 scenarios) and InMemoryStorage (no-op paths); Postgres skipped when no `CKS_TEST_POSTGRES_DSN` is set. No functional changes to the storage layer itself.
+
+---
+
 ## [1.34.0] - 2026-08-03
 
 ### Added
