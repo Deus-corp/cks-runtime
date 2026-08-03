@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.34.0] - 2026-08-03
+
+### Added
+- **`task_type` filter in `dequeue_next_outbox_task`** – storage backends now accept an optional `task_type` parameter to restrict task claiming to a specific type (e.g. `"projection"`, `"gossip_conflict"`, `"inference_conflict"`). This allows multiple workers sharing one outbox table to never steal each other's tasks. Implemented for SQLiteStorage and PostgresStorage; InMemoryStorage returns None (no-op).
+- **`dead_letter_outbox_task`** – permanently marks a task as DEAD after repeated failures, removing it from the eligible pool while preserving it for inspection via `list_dead_letter_tasks`. Mirrors the existing `fail_outbox_task` but without scheduling a retry.
+- **`list_tasks_by_type`** – batch peek/drain read over PENDING tasks of a given type, with optional `session_id` filtering and `drain` control. Provides the outbox-backed equivalent of `ConflictInbox.list` / `list_inference` for gossip and inference conflicts. Implemented for SQLiteStorage and PostgresStorage.
+- **`list_dead_letter_tasks`** – returns every DEAD-lettered task (optionally filtered by type) for operator inspection. Never drains.
+
+### Changed
+- Abstract interfaces `RuntimeStorage` and `AsyncRuntimeStorage` now declare the new methods with default no-op implementations, preserving full backward compatibility with existing backends.
+
+---
+
 ## [1.33.0] - 2026-08-03
 
 ### Added

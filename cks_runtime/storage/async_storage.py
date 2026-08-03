@@ -165,7 +165,7 @@ class AsyncRuntimeStorage(ABC):
     ) -> None:
         """No-op by default -- backends that support the task bus override this."""
 
-    async def dequeue_next_outbox_task(self) -> OutboxTask | None:
+    async def dequeue_next_outbox_task(self, task_type: str | None = None) -> OutboxTask | None:
         """
         Atomically claim and return the next eligible outbox task, or
         None if the backend doesn't support outbox operations (or
@@ -175,6 +175,13 @@ class AsyncRuntimeStorage(ABC):
         task -- for ``PostgresStorage`` this is ``SELECT ... FOR
         UPDATE SKIP LOCKED``, not a port of SQLite's single-writer
         claim.
+
+        ``task_type``, when given, restricts eligibility to tasks of
+        that type, same rationale as ``RuntimeStorage``'s sync
+        counterpart: it's what lets an ``OutboxEmbeddingWorker`` and a
+        Critic-agent worker share one table without stealing each
+        other's tasks. ``None`` preserves the original untyped
+        behaviour.
         """
         return None
 
@@ -185,6 +192,39 @@ class AsyncRuntimeStorage(ABC):
         self, task_id: int, retry_count: int, error: str, next_retry_at: str
     ) -> None:
         """Mark a task as failed with exponential backoff. No-op by default."""
+
+    async def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
+        """
+        Permanently mark a task as ``DEAD`` instead of scheduling
+        another retry -- see ``RuntimeStorage.dead_letter_outbox_task``
+        for the rationale. No-op by default.
+        """
+
+    async def list_tasks_by_type(
+        self,
+        task_type: str,
+        session_id: str | None = None,
+        drain: bool = True,
+    ) -> list[OutboxTask]:
+        """
+        Return every PENDING task of ``task_type`` (optionally filtered
+        to one ``session_id``), oldest first, draining them from the
+        outbox unless ``drain=False``. See
+        ``RuntimeStorage.list_tasks_by_type`` for the full rationale --
+        this is the batch peek/drain read a Critic agent uses to list
+        outstanding gossip/inference conflicts, as opposed to
+        ``dequeue_next_outbox_task``'s single-task claim. Empty by
+        default.
+        """
+        return []
+
+    async def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+        """
+        Return every ``DEAD``-lettered task (optionally filtered to one
+        ``task_type``), oldest first, for inspection -- never drains.
+        Empty by default.
+        """
+        return []
 
     async def save_object_embeddings(
         self, object_id: str, session_id: str, embedding: bytes

@@ -636,7 +636,7 @@ class PostgresStorage(AsyncRuntimeStorage):
 
         await _retry_on_transient(_write)
 
-    async def dequeue_next_outbox_task(self) -> OutboxTask | None:
+    async def dequeue_next_outbox_task(self, task_type: str | None = None) -> OutboxTask | None:
         """
         Atomically claim and return the next eligible task.
 
@@ -648,30 +648,57 @@ class PostgresStorage(AsyncRuntimeStorage):
 
         Eligible = PENDING with ``next_retry_at <= now()``, OR
         IN_PROGRESS with a stale ``claimed_at`` (worker crashed/hung).
+        ``task_type``, when given, restricts the candidate set to that
+        type only -- same rationale as ``SQLiteStorage``'s counterpart.
         """
         async def _claim() -> OutboxTask | None:
             async with self._pool.connection() as conn:
-                row = await (
-                    await conn.execute(
-                        f"""
-                        WITH candidate AS (
-                            SELECT task_id FROM cks_outbox_tasks
-                            WHERE (status = 'PENDING' AND next_retry_at <= now())
-                               OR (status = 'IN_PROGRESS'
-                                   AND claimed_at <= now() - INTERVAL '{_OUTBOX_LEASE_TIMEOUT}')
-                            ORDER BY created_at ASC
-                            LIMIT 1
-                            FOR UPDATE SKIP LOCKED
+                if task_type is None:
+                    row = await (
+                        await conn.execute(
+                            f"""
+                            WITH candidate AS (
+                                SELECT task_id FROM cks_outbox_tasks
+                                WHERE (status = 'PENDING' AND next_retry_at <= now())
+                                   OR (status = 'IN_PROGRESS'
+                                       AND claimed_at <= now() - INTERVAL '{_OUTBOX_LEASE_TIMEOUT}')
+                                ORDER BY created_at ASC
+                                LIMIT 1
+                                FOR UPDATE SKIP LOCKED
+                            )
+                            UPDATE cks_outbox_tasks t
+                            SET status = 'IN_PROGRESS', claimed_at = now()
+                            FROM candidate
+                            WHERE t.task_id = candidate.task_id
+                            RETURNING t.task_id, t.task_type, t.session_id,
+                                      t.payload, t.retry_count
+                            """
                         )
-                        UPDATE cks_outbox_tasks t
-                        SET status = 'IN_PROGRESS', claimed_at = now()
-                        FROM candidate
-                        WHERE t.task_id = candidate.task_id
-                        RETURNING t.task_id, t.task_type, t.session_id,
-                                  t.payload, t.retry_count
-                        """
-                    )
-                ).fetchone()
+                    ).fetchone()
+                else:
+                    row = await (
+                        await conn.execute(
+                            f"""
+                            WITH candidate AS (
+                                SELECT task_id FROM cks_outbox_tasks
+                                WHERE task_type = %s
+                                  AND ((status = 'PENDING' AND next_retry_at <= now())
+                                   OR (status = 'IN_PROGRESS'
+                                       AND claimed_at <= now() - INTERVAL '{_OUTBOX_LEASE_TIMEOUT}'))
+                                ORDER BY created_at ASC
+                                LIMIT 1
+                                FOR UPDATE SKIP LOCKED
+                            )
+                            UPDATE cks_outbox_tasks t
+                            SET status = 'IN_PROGRESS', claimed_at = now()
+                            FROM candidate
+                            WHERE t.task_id = candidate.task_id
+                            RETURNING t.task_id, t.task_type, t.session_id,
+                                      t.payload, t.retry_count
+                            """,
+                            (task_type,),
+                        )
+                    ).fetchone()
                 await conn.commit()
             if row is None:
                 return None
@@ -715,6 +742,128 @@ class PostgresStorage(AsyncRuntimeStorage):
                 await conn.commit()
 
         await _retry_on_transient(_write)
+
+    async def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
+        """Permanently mark a task DEAD -- see SQLiteStorage's counterpart."""
+        async def _write() -> None:
+            async with self._pool.connection() as conn:
+                await conn.execute(
+                    """
+                    UPDATE cks_outbox_tasks
+                    SET status = 'DEAD',
+                        last_error = %s,
+                        claimed_at = NULL
+                    WHERE task_id = %s
+                    """,
+                    (error, task_id),
+                )
+                await conn.commit()
+
+        await _retry_on_transient(_write)
+
+    async def list_tasks_by_type(
+        self,
+        task_type: str,
+        session_id: str | None = None,
+        drain: bool = True,
+    ) -> list[OutboxTask]:
+        """
+        Batch peek/drain read over PENDING tasks of ``task_type``,
+        locking the matched rows with ``FOR UPDATE SKIP LOCKED`` so a
+        concurrent caller (single-task ``dequeue_next_outbox_task`` or
+        another ``list_tasks_by_type`` call) never returns the same row
+        twice, then deleting them in the same transaction when
+        ``drain`` is true.
+        """
+        async def _read() -> list[tuple]:
+            async with self._pool.connection() as conn:
+                if session_id is None:
+                    rows = await (
+                        await conn.execute(
+                            """
+                            SELECT task_id, task_type, session_id, payload, retry_count
+                            FROM cks_outbox_tasks
+                            WHERE task_type = %s AND status = 'PENDING'
+                            ORDER BY created_at ASC
+                            FOR UPDATE SKIP LOCKED
+                            """,
+                            (task_type,),
+                        )
+                    ).fetchall()
+                else:
+                    rows = await (
+                        await conn.execute(
+                            """
+                            SELECT task_id, task_type, session_id, payload, retry_count
+                            FROM cks_outbox_tasks
+                            WHERE task_type = %s AND status = 'PENDING' AND session_id = %s
+                            ORDER BY created_at ASC
+                            FOR UPDATE SKIP LOCKED
+                            """,
+                            (task_type, session_id),
+                        )
+                    ).fetchall()
+                if drain and rows:
+                    task_ids = [row[0] for row in rows]
+                    await conn.execute(
+                        "DELETE FROM cks_outbox_tasks WHERE task_id = ANY(%s)",
+                        (task_ids,),
+                    )
+                await conn.commit()
+                return rows
+
+        rows = await _retry_on_transient(_read)
+        return [
+            OutboxTask(
+                task_id=row[0],
+                task_type=row[1],
+                session_id=row[2],
+                payload=row[3],
+                retry_count=row[4],
+            )
+            for row in rows
+        ]
+
+    async def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+        """Return every DEAD-lettered task, oldest first. Never drains."""
+        async def _read() -> list[tuple]:
+            async with self._pool.connection() as conn:
+                if task_type is None:
+                    rows = await (
+                        await conn.execute(
+                            """
+                            SELECT task_id, task_type, session_id, payload, retry_count
+                            FROM cks_outbox_tasks
+                            WHERE status = 'DEAD'
+                            ORDER BY created_at ASC
+                            """
+                        )
+                    ).fetchall()
+                else:
+                    rows = await (
+                        await conn.execute(
+                            """
+                            SELECT task_id, task_type, session_id, payload, retry_count
+                            FROM cks_outbox_tasks
+                            WHERE status = 'DEAD' AND task_type = %s
+                            ORDER BY created_at ASC
+                            """,
+                            (task_type,),
+                        )
+                    ).fetchall()
+                return rows
+
+        rows = await _retry_on_transient(_read)
+        return [
+            OutboxTask(
+                task_id=row[0],
+                task_type=row[1],
+                session_id=row[2],
+                payload=row[3],
+                retry_count=row[4],
+            )
+            for row in rows
+        ]
 
     # ------------------------------------------------------------------
     # Operation log (ADR-007)

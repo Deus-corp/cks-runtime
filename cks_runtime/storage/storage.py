@@ -191,7 +191,7 @@ class RuntimeStorage(ABC):
         persisted; check ``supports_outbox`` first.
         """
 
-    def dequeue_next_outbox_task(self) -> OutboxTask | None:
+    def dequeue_next_outbox_task(self, task_type: str | None = None) -> OutboxTask | None:
         """
         Atomically claim and return the next eligible outbox task, or
         None if the backend doesn't support outbox operations (or
@@ -199,6 +199,15 @@ class RuntimeStorage(ABC):
         must claim the task as part of the same operation that reads
         it, so that two callers polling concurrently never both
         receive the same task.
+
+        ``task_type``, when given, restricts eligibility to tasks of
+        that type -- so a worker dedicated to one kind of task (e.g.
+        ``OutboxEmbeddingWorker`` polling for ``"projection"``, or a
+        Critic-agent worker polling for ``"gossip_conflict"`` /
+        ``"inference_conflict"``) never claims a task meant for a
+        different worker and fails on it. ``None`` (the default)
+        preserves the original untyped behaviour of claiming the
+        earliest eligible task regardless of type.
         """
         return None
 
@@ -207,6 +216,52 @@ class RuntimeStorage(ABC):
 
     def fail_outbox_task(self, task_id: int, retry_count: int, error: str, next_retry_at: str) -> None:
         """Mark a task as failed with exponential backoff. No-op by default."""
+
+    def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
+        """
+        Permanently mark a task as ``DEAD`` -- the caller has given up
+        retrying it (e.g. a Critic agent that could not resolve a
+        conflict with any confidence after repeated attempts). Unlike
+        ``fail_outbox_task``, this removes the task from the eligible
+        pool for good rather than scheduling another retry; it stays
+        in the table (see ``list_dead_letter_tasks``) for a human or
+        an operator tool to inspect. No-op by default.
+        """
+
+    def list_tasks_by_type(
+        self,
+        task_type: str,
+        session_id: str | None = None,
+        drain: bool = True,
+    ) -> list[OutboxTask]:
+        """
+        Return every PENDING task of ``task_type`` (optionally filtered
+        to one ``session_id``), oldest first -- a batch read for
+        callers that want the whole matching queue at once rather than
+        one task at a time (unlike ``dequeue_next_outbox_task``, which
+        claims a single task for sequential processing). This is the
+        outbox-backed equivalent of ``ConflictInbox.list``/
+        ``list_inference``'s peek/drain shape, so gossip- and
+        inference-conflict records enqueued as outbox tasks can be
+        listed the same way regardless of which storage backend holds
+        them.
+
+        ``drain`` (default ``True``) removes the returned tasks from
+        the outbox as part of the same read -- a caller that just read
+        a conflict is expected to act on it. Pass ``drain=False`` to
+        peek without consuming. Empty by default -- backends that
+        support the outbox override this.
+        """
+        return []
+
+    def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+        """
+        Return every ``DEAD``-lettered task (optionally filtered to one
+        ``task_type``), oldest first, for inspection -- never drains.
+        Empty by default -- backends that support the outbox override
+        this.
+        """
+        return []
 
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
         """Save an embedding for an object. No-op by default."""

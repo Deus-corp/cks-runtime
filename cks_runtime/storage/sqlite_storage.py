@@ -655,7 +655,7 @@ class SQLiteStorage(RuntimeStorage):
     # another worker to claim.
     _OUTBOX_LEASE_TIMEOUT_MODIFIER = "-5 minutes"
 
-    def dequeue_next_outbox_task(self) -> OutboxTask | None:
+    def dequeue_next_outbox_task(self, task_type: str | None = None) -> OutboxTask | None:
         """
         Atomically claim and return the next eligible task: a PENDING
         task whose retry delay has elapsed, or an IN_PROGRESS task
@@ -663,23 +663,47 @@ class SQLiteStorage(RuntimeStorage):
         happen in one statement, so two workers polling the same table
         concurrently (e.g. two cks-mcp server processes sharing a
         SQLite file) can never both claim the same task.
+
+        ``task_type``, when given, restricts the candidate set to that
+        type only, so e.g. a Critic-agent worker polling for
+        ``"gossip_conflict"`` never claims (and fails on) a
+        ``"projection"`` task meant for ``OutboxEmbeddingWorker``, and
+        vice versa.
         """
         def _write() -> tuple | None:
-            row = self._conn.execute(
-                """
-                UPDATE cks_outbox_tasks
-                SET status = 'IN_PROGRESS', claimed_at = datetime('now')
-                WHERE task_id = (
-                    SELECT task_id FROM cks_outbox_tasks
-                    WHERE (status = 'PENDING' AND next_retry_at <= datetime('now'))
-                       OR (status = 'IN_PROGRESS' AND claimed_at <= datetime('now', ?))
-                    ORDER BY created_at ASC
-                    LIMIT 1
-                )
-                RETURNING task_id, task_type, session_id, payload, retry_count
-                """,
-                (self._OUTBOX_LEASE_TIMEOUT_MODIFIER,),
-            ).fetchone()
+            if task_type is None:
+                row = self._conn.execute(
+                    """
+                    UPDATE cks_outbox_tasks
+                    SET status = 'IN_PROGRESS', claimed_at = datetime('now')
+                    WHERE task_id = (
+                        SELECT task_id FROM cks_outbox_tasks
+                        WHERE (status = 'PENDING' AND next_retry_at <= datetime('now'))
+                           OR (status = 'IN_PROGRESS' AND claimed_at <= datetime('now', ?))
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                    )
+                    RETURNING task_id, task_type, session_id, payload, retry_count
+                    """,
+                    (self._OUTBOX_LEASE_TIMEOUT_MODIFIER,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    """
+                    UPDATE cks_outbox_tasks
+                    SET status = 'IN_PROGRESS', claimed_at = datetime('now')
+                    WHERE task_id = (
+                        SELECT task_id FROM cks_outbox_tasks
+                        WHERE task_type = ?
+                          AND ((status = 'PENDING' AND next_retry_at <= datetime('now'))
+                           OR (status = 'IN_PROGRESS' AND claimed_at <= datetime('now', ?)))
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                    )
+                    RETURNING task_id, task_type, session_id, payload, retry_count
+                    """,
+                    (task_type, self._OUTBOX_LEASE_TIMEOUT_MODIFIER),
+                ).fetchone()
             self._conn.commit()
             return row
 
@@ -718,6 +742,120 @@ class SQLiteStorage(RuntimeStorage):
             self._conn.commit()
 
         _retry_on_locked(_write)
+
+    def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
+        """
+        Permanently mark a task ``DEAD`` -- removed from the eligible
+        pool for good (unlike ``fail_outbox_task``, no ``next_retry_at``
+        is set), kept in the table for later inspection via
+        ``list_dead_letter_tasks``.
+        """
+        def _write() -> None:
+            self._conn.execute(
+                """
+                UPDATE cks_outbox_tasks
+                SET status = 'DEAD',
+                    last_error = ?,
+                    claimed_at = NULL
+                WHERE task_id = ?
+                """,
+                (error, task_id),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
+    def list_tasks_by_type(
+        self,
+        task_type: str,
+        session_id: str | None = None,
+        drain: bool = True,
+    ) -> list[OutboxTask]:
+        """
+        Batch peek/drain read over PENDING tasks of ``task_type``,
+        oldest first -- see the abstract method's docstring for how
+        this differs from ``dequeue_next_outbox_task``. Tasks
+        currently claimed (``IN_PROGRESS``) by another worker are never
+        returned, mirroring dequeue's own exclusion of in-flight work.
+        """
+        def _write() -> list[tuple]:
+            if session_id is None:
+                rows = self._conn.execute(
+                    """
+                    SELECT task_id, task_type, session_id, payload, retry_count
+                    FROM cks_outbox_tasks
+                    WHERE task_type = ? AND status = 'PENDING'
+                    ORDER BY created_at ASC
+                    """,
+                    (task_type,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT task_id, task_type, session_id, payload, retry_count
+                    FROM cks_outbox_tasks
+                    WHERE task_type = ? AND status = 'PENDING' AND session_id = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (task_type, session_id),
+                ).fetchall()
+            if drain and rows:
+                task_ids = [row[0] for row in rows]
+                placeholders = ",".join("?" for _ in task_ids)
+                self._conn.execute(
+                    f"DELETE FROM cks_outbox_tasks WHERE task_id IN ({placeholders})",
+                    task_ids,
+                )
+            self._conn.commit()
+            return rows
+
+        rows = _retry_on_locked(_write)
+        return [
+            OutboxTask(
+                task_id=row[0],
+                task_type=row[1],
+                session_id=row[2],
+                payload=row[3],
+                retry_count=row[4],
+            )
+            for row in rows
+        ]
+
+    def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+        """Return every DEAD-lettered task, oldest first. Never drains."""
+        def _write() -> list[tuple]:
+            if task_type is None:
+                rows = self._conn.execute(
+                    """
+                    SELECT task_id, task_type, session_id, payload, retry_count
+                    FROM cks_outbox_tasks
+                    WHERE status = 'DEAD'
+                    ORDER BY created_at ASC
+                    """
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT task_id, task_type, session_id, payload, retry_count
+                    FROM cks_outbox_tasks
+                    WHERE status = 'DEAD' AND task_type = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (task_type,),
+                ).fetchall()
+            return rows
+
+        rows = _retry_on_locked(_write)
+        return [
+            OutboxTask(
+                task_id=row[0],
+                task_type=row[1],
+                session_id=row[2],
+                payload=row[3],
+                retry_count=row[4],
+            )
+            for row in rows
+        ]
 
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
         def _write() -> None:

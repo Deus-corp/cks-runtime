@@ -109,8 +109,8 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
     ) -> None:
         await asyncio.to_thread(self._sync.enqueue_task, task_type, session_id, payload)
 
-    async def dequeue_next_outbox_task(self) -> OutboxTask | None:
-        return await asyncio.to_thread(self._sync.dequeue_next_outbox_task)
+    async def dequeue_next_outbox_task(self, task_type: str | None = None) -> OutboxTask | None:
+        return await asyncio.to_thread(self._sync.dequeue_next_outbox_task, task_type)
 
     async def complete_outbox_task(self, task_id: int) -> None:
         await asyncio.to_thread(self._sync.complete_outbox_task, task_id)
@@ -121,6 +121,22 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         await asyncio.to_thread(
             self._sync.fail_outbox_task, task_id, retry_count, error, next_retry_at
         )
+
+    async def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
+        await asyncio.to_thread(self._sync.dead_letter_outbox_task, task_id, error)
+
+    async def list_tasks_by_type(
+        self,
+        task_type: str,
+        session_id: str | None = None,
+        drain: bool = True,
+    ) -> list[OutboxTask]:
+        return await asyncio.to_thread(
+            self._sync.list_tasks_by_type, task_type, session_id, drain
+        )
+
+    async def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+        return await asyncio.to_thread(self._sync.list_dead_letter_tasks, task_type)
 
     @property
     def supports_outbox(self) -> bool:
