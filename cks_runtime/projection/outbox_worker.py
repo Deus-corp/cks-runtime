@@ -87,18 +87,21 @@ class OutboxEmbeddingWorker:
             await asyncio.sleep(self._poll_interval)
 
     async def _process_next_task(self) -> None:
-        task = await self._storage.dequeue_next_outbox_task()
+        # Filtered to "projection" so this worker only ever claims its
+        # own tasks -- other task_types (e.g. "gossip_conflict" /
+        # "inference_conflict", enqueued for a Critic agent) now share
+        # this same table (see storage.py's dequeue_next_outbox_task
+        # task_type filter, cks-runtime 1.34.0) and must never be
+        # claimed, and fail, here.
+        task = await self._storage.dequeue_next_outbox_task(task_type="projection")
         if task is None:
             return
 
         try:
-            if task.task_type == "projection":
-                payload = json.loads(task.payload)
-                prev_version_id = payload.get("previous_version_id")
-                new_version_id = payload.get("new_version_id")
-                await self._execute_task(task.session_id, prev_version_id, new_version_id)
-            else:
-                raise ValueError(f"Unknown task type: {task.task_type}")
+            payload = json.loads(task.payload)
+            prev_version_id = payload.get("previous_version_id")
+            new_version_id = payload.get("new_version_id")
+            await self._execute_task(task.session_id, prev_version_id, new_version_id)
 
             await self._storage.complete_outbox_task(task.task_id)
             logger.info("Outbox task %s completed.", task.task_id)

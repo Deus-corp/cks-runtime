@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.34.2] - 2026-08-03
+
+### Fixed
+- **`OutboxEmbeddingWorker._process_next_task`** no longer dequeues an untyped task and branches on `task.task_type == "projection"` -- it now calls `dequeue_next_outbox_task(task_type="projection")` (added in 1.34.0), so any other task type sharing `cks_outbox_tasks` (e.g. a Critic agent's `"gossip_conflict"`/`"inference_conflict"` tasks) is never claimed, and can never be routed into this worker's retry/backoff loop with `ValueError: Unknown task type`. This was the concrete blocker 1.34.0/1.34.1 added the filtering capability for, but the worker itself hadn't been switched over yet.
+- New regression tests in `tests/unit/projection/test_embedding_projection.py` covering: a foreign task type is left untouched (not claimed, not failed) when the worker runs, and the worker still reaches its own `"projection"` task when a foreign-typed task is queued ahead of it.
+
+---
+
 ## [1.34.1] - 2026-08-03
 
 ### Added
