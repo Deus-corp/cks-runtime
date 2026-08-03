@@ -302,5 +302,17 @@ class AsyncRuntimeStorage(ABC):
         """Return sessions with modified_at < cutoff. Empty by default."""
         return []
 
+    async def list_sessions_modified_since(
+        self,
+        watermark: Any,
+        limit: int = 1000,
+    ) -> list[Any]:
+        """
+        Return sessions with modified_at >= watermark, oldest first.
+        Empty by default -- see ``RuntimeStorage.list_sessions_modified_since``
+        (``storage.py``) for the full rationale, identical here.
+        """
+        return []
+
     async def archive_session(self, session: Any) -> None:
         """Archive a session and remove it from active storage. No-op by default."""

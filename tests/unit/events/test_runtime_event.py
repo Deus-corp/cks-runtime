@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from cks_runtime.events.runtime_event import (
+    InferenceConflictDetected,
     RuntimeEvent,
     SessionClosed,
     SessionCreated,
@@ -94,6 +95,46 @@ def test_version_created():
     assert event.session_id == "session-1"
 
     assert event.transaction_id == "tx-1"
+
+
+def test_inference_conflict_detected():
+
+    event = InferenceConflictDetected(
+        session_id="session-1",
+        version_id="version-1",
+        diagnostics=[
+            {
+                "code": "CKS-EXT-INFERENCE-CONFIDENCE-CONFLICT",
+                "severity": "warning",
+                "message": "conflict",
+                "location": "step-1",
+            }
+        ],
+    )
+
+    assert event.session_id == "session-1"
+
+    assert event.version_id == "version-1"
+
+    assert event.diagnostics == [
+        {
+            "code": "CKS-EXT-INFERENCE-CONFIDENCE-CONFLICT",
+            "severity": "warning",
+            "message": "conflict",
+            "location": "step-1",
+        }
+    ]
+
+
+def test_inference_conflict_detected_defaults():
+
+    event = InferenceConflictDetected()
+
+    assert event.session_id == ""
+
+    assert event.version_id == ""
+
+    assert event.diagnostics == []
 
 
 def test_runtime_event_metadata():

@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.33.0] - 2026-08-03
+
+### Added
+- **`InferenceStalenessSweeper`** (ADR-009) – new background process that periodically scans sessions for stale or conflicting inference steps (`InferenceStep`). Uses `list_sessions_modified_since` to incrementally fetch candidates and validates them with `inference_confidence_conflict` and `stale_premise` constraints. Publishes `InferenceConflictDetected` on the `EventBus` for newly discovered issues while suppressing duplicates. Configured via `RuntimeConfig.inference_sweep_interval` (disabled by default).
+- **`InferenceConflictDetected`** – new `RuntimeEvent` carrying `session_id`, `version_id`, and `diagnostics` to notify subscribers about detected reasoning conflicts.
+- **`RuntimeStorage.list_sessions_modified_since`** – new method on `RuntimeStorage` and `AsyncRuntimeStorage` that returns sessions modified on or after a given watermark. Implemented for `SQLiteStorage` and `PostgresStorage`; `InMemoryStorage` returns an empty list.
+- Added `inference_sweep_interval` and `inference_sweep_batch_size` to `RuntimeConfig` for controlling the sweeper.
+- `InferenceStalenessSweeper` exported at the package level, mirroring the existing `GarbageCollector` export.
+
+### Changed
+- `Runtime.__init__`, `Runtime.create()`, and `Runtime.aclose()` now manage the lifecycle of `InferenceStalenessSweeper` when enabled.
+
+---
+
 ## [1.32.0] - 2026-08-02
 
 ### Added

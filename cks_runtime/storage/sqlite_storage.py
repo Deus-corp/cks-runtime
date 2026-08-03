@@ -439,7 +439,35 @@ class SQLiteStorage(RuntimeStorage):
             "WHERE modified_at < ? "
             "ORDER BY modified_at ASC "
             "LIMIT ?",
-            (cutoff.isoformat(), limit),
+            (cutoff.strftime('%Y-%m-%d %H:%M:%S'), limit),
+        ).fetchall()
+        sessions = []
+        for (sid,) in rows:
+            session = self.load_session(sid)
+            if session is not None:
+                sessions.append(session)
+        return sessions
+
+    def list_sessions_modified_since(
+        self,
+        watermark: datetime,
+        limit: int = 1000,
+    ) -> list[RuntimeSession]:
+        """
+        Return sessions whose ``modified_at`` timestamp is at or after
+        *watermark*. Used by ``InferenceStalenessSweeper`` (ADR-009)
+        to find candidates for a reasoning-staleness re-check.
+        Results are ordered oldest-first, same reason as
+        ``list_sessions_modified_before``: a caller advancing its own
+        watermark only past a fully-drained batch makes steady,
+        gap-free progress even when the window exceeds *limit*.
+        """
+        rows = self._conn.execute(
+            "SELECT session_id FROM sessions "
+            "WHERE modified_at >= ? "
+            "ORDER BY modified_at ASC "
+            "LIMIT ?",
+            (watermark.strftime('%Y-%m-%d %H:%M:%S'), limit),
         ).fetchall()
         sessions = []
         for (sid,) in rows:

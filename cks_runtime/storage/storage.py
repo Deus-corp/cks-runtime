@@ -313,6 +313,24 @@ class RuntimeStorage(ABC):
         """Return sessions with modified_at < cutoff. Empty by default."""
         return []
 
+    def list_sessions_modified_since(
+        self,
+        watermark: Any,  # datetime
+        limit: int = 1000,
+    ) -> list[Any]:
+        """
+        Return sessions with modified_at >= watermark, oldest first.
+        Empty by default -- backends that support GC's
+        ``list_sessions_modified_before`` (they share the same
+        indexed ``modified_at`` column, see ``sqlite_storage.py``/
+        ``postgres_storage.py``) implement this too. Used by
+        ``InferenceStalenessSweeper`` (ADR-009) to find candidates for
+        a reasoning-staleness re-check; unlike GC's cutoff, a session
+        is never excluded here for being open -- see that class'
+        module docstring.
+        """
+        return []
+
     def archive_session(self, session: Any) -> None:
         """Archive a session and remove it from active storage. No-op by default."""
 

@@ -45,3 +45,9 @@ class RuntimeConfig:
     gc_retention: timedelta | None = field(default_factory=lambda: timedelta(hours=24))
     gc_sweep_interval: float = 600.0   # seconds between sweeps (default 10 min)
     gc_batch_size: int = 100           # max sessions evicted per sweep
+    # Inference staleness sweeping (ADR-009): background re-check of
+    # recently-modified sessions for InferenceConfidenceConflict /
+    # StalePremise diagnostics (cks-core ADR-001/ADR-002).
+    # Set inference_sweep_interval=None to disable the sweeper entirely.
+    inference_sweep_interval: float | None = 300.0   # seconds between sweeps (default 5 min)
+    inference_sweep_batch_size: int = 100             # initial page size per sweep

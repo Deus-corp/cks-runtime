@@ -482,6 +482,34 @@ class PostgresStorage(AsyncRuntimeStorage):
                 sessions.append(session)
         return sessions
 
+    async def list_sessions_modified_since(
+        self,
+        watermark: datetime,
+        limit: int = 1000,
+    ) -> list[RuntimeSession]:
+        """
+        Return sessions whose ``modified_at`` is at or after
+        *watermark*, oldest first. Used by ``InferenceStalenessSweeper``
+        (ADR-009) -- same indexed ``modified_at`` column
+        ``list_sessions_modified_before`` queries, comparison flipped.
+        """
+        async with self._pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT session_id FROM sessions "
+                    "WHERE modified_at >= %s "
+                    "ORDER BY modified_at ASC "
+                    "LIMIT %s",
+                    (watermark, limit),
+                )
+            ).fetchall()
+        sessions = []
+        for (sid,) in rows:
+            session = await self.load_session(sid)
+            if session is not None:
+                sessions.append(session)
+        return sessions
+
     async def archive_session(self, session: RuntimeSession) -> None:
         async with self._pool.connection() as conn:
             await conn.execute(

@@ -188,3 +188,37 @@ class GossipConflictDetected(RuntimeEvent):
     source_session_id: str = ""
 
     conflicts: list[Any] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceConflictDetected(RuntimeEvent):
+    """
+    Published by ``InferenceStalenessSweeper`` (ADR-009) when a
+    background sweep of a recently-modified session finds a
+    reasoning-staleness diagnostic (``CKS-EXT-INFERENCE-CONFIDENCE-CONFLICT``
+    or ``CKS-EXT-STALE-PREMISE``, see cks-core ADR-001/ADR-002) that
+    wasn't already known from a prior sweep of the same session. A
+    background sweep has no synchronous caller to raise to, the same
+    reason ``GossipConflictDetected`` (ADR-008) is a published event
+    rather than a raised exception -- but this is not that event
+    repurposed: a reasoning conflict is a single-structure semantic
+    condition (ADR-002), not a merge conflict between two replicas'
+    operation logs, so ``source_replica_id``/``source_session_id``
+    don't apply here and aren't included.
+
+    ``session_id`` identifies which session the finding belongs to.
+    ``version_id`` is that session's latest version at the moment the
+    finding was made -- a subscriber handling this later can tell
+    whether the session has since moved on. ``diagnostics`` carries
+    the newly-found entries only (each a ``{"code", "severity",
+    "message", "location"}`` dict, the same shape
+    ``evolve_knowledge``/``validate_knowledge`` already return) --
+    diagnostics the sweeper already reported for this session in an
+    earlier sweep are not repeated here.
+    """
+
+    session_id: str = ""
+
+    version_id: str = ""
+
+    diagnostics: list[Any] = field(default_factory=list)

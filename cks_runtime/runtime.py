@@ -35,6 +35,7 @@ from cks_runtime.pipeline.execution_pipeline import (
 )
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
 from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
+from cks_runtime.reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
 from cks_runtime.session.session import (
     RuntimeSession,
 )
@@ -150,6 +151,7 @@ class Runtime:
         "_events",
         "_executor",
         "_gc",
+        "_inference_sweeper",
         "_metrics",
         "_outbox_worker",
         "_pipeline",
@@ -260,6 +262,20 @@ class Runtime:
                 batch_size=self.config.gc_batch_size,
             )
 
+        # Inference staleness sweeper (ADR-009): background re-check
+        # of recently-modified sessions for InferenceConfidenceConflict /
+        # StalePremise diagnostics. Disabled when
+        # config.inference_sweep_interval is None. Also started lazily
+        # in create() — requires a running event loop.
+        self._inference_sweeper: InferenceStalenessSweeper | None = None
+        if self.config.inference_sweep_interval is not None:
+            self._inference_sweeper = InferenceStalenessSweeper(
+                self._storage,
+                self._events,
+                sweep_interval=self.config.inference_sweep_interval,
+                batch_size=self.config.inference_sweep_batch_size,
+            )
+
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
             core_adapter=self._core_bridge, metrics=self._metrics, storage=self._storage
@@ -330,6 +346,9 @@ class Runtime:
 
         if runtime._gc is not None:
             await runtime._gc.start()
+
+        if runtime._inference_sweeper is not None:
+            await runtime._inference_sweeper.start()
 
         return runtime
 
@@ -781,6 +800,9 @@ class Runtime:
 
         if self._gc is not None:
             await self._gc.stop()
+
+        if self._inference_sweeper is not None:
+            await self._inference_sweeper.stop()
 
         close = getattr(self._storage, "close", None)
         if close is not None:
