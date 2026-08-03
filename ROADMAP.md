@@ -4,9 +4,9 @@
 
 **Project:** CKS Runtime
 
-**Current Target:** Runtime 1.0
+**Current Target:** Version 2.0 buildout (Runtime 1.0 was reached and surpassed; actual latest release is v1.33.0)
 
-**Roadmap Version:** 1.0
+**Roadmap Version:** 1.1
 
 ---
 
@@ -18,6 +18,40 @@ for Canonical Knowledge Structures.
 
 The roadmap serves as the primary strategic planning document for
 Runtime development.
+
+---
+
+# Current Status (August 2026 — v1.33.0)
+
+Phases 1 through 8 below (0.2.x through 1.0.0) are complete — the
+project has shipped well past Runtime 1.0. Verified against
+`CHANGELOG.md`:
+
+- **Distributed Runtime — Replication:** peer discovery
+  (`PeerDiscovery`, `HTTPPeerDiscovery`), weighted peer selection
+  with backoff (`PeerScheduler`), and background anti-entropy cycles
+  (`GossipService`) — **done** (ADR-008).
+- **Reasoning-conflict detection:** `InferenceStalenessSweeper`,
+  running on a configurable interval, escalates
+  `InferenceConflictDetected` findings — **done** (ADR-009). The
+  consumption side (draining this queue into an autonomous agent) is
+  intentionally out of scope for `cks-runtime` and is tracked as the
+  **Critic Agent** milestone in `cks-mcp`'s roadmap — see that
+  repository's `ROADMAP.md`.
+- **Storage:** PostgreSQL backend (async storage ABC, pgvector
+  support) alongside SQLite — **done**.
+- **Execution Engine (partial):** `ValidateOperation`,
+  `EvolveOperation`, `SerializeOperation`, `ExplainOperation`
+  implemented via `CoreBridge` — **in progress**, see Version 2.0
+  below for the remaining scope (dependency resolution, parallel
+  execution, retry/compensation).
+
+The granular sub-items under "Version 1.x — Production Runtime"
+below (1.1–1.9) have **not** all been individually re-verified
+against `CHANGELOG.md` in this pass — Replication (1.4) is
+confirmed done; the rest of that section should get a dedicated
+audit pass rather than being assumed complete just because the
+project is past v1.0.
 
 ---
 
@@ -661,7 +695,10 @@ Audit trail
 
 ### 1.8 Deployment
 
-Docker
+> Docker distribution was considered and intentionally descoped —
+> not needed, and it kept causing confusion about what's actually
+> required to run the project. Not planned for `cks-runtime` or the
+> wider ecosystem.
 
 Kubernetes
 
@@ -686,6 +723,22 @@ API stability
 ## Goal
 
 Runtime becomes self-describing.
+
+**Status of the sub-goals below, verified against `CHANGELOG.md`
+(August 2026):**
+
+| Sub-goal | Status |
+|---|---|
+| Runtime Graph | Not started |
+| Runtime Introspection | Not started |
+| Execution Engine | In progress — `ValidateOperation`/`EvolveOperation`/`SerializeOperation`/`ExplainOperation` shipped via `CoreBridge`; dependency resolution, parallel execution, retry, and compensation still open |
+| Execution Plans | Not started |
+| Runtime Scheduler | Not started as a general-purpose feature (the reasoning-specific `InferenceStalenessSweeper` does periodic background execution, but that's narrower than this goal) |
+| Reactive Runtime | Partial foundation — the Event Bus is extensively used, but "everything event-driven" is not yet the case |
+| Runtime DSL | Not started |
+| Distributed Runtime | In progress — Replication shipped (gossip, ADR-008); Runtime Cluster, Shared Storage, and a general Distributed Event Bus still open |
+| Observability Platform | Not started as a unified platform (basic metrics/event logs exist in `cks-mcp` via `get_metrics`, but no Timeline/Replay/Heatmap/Explorer/Profiler) |
+| Runtime Studio | Not started |
 
 ## Runtime Graph
 
