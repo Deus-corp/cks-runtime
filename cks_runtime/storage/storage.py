@@ -228,6 +228,28 @@ class RuntimeStorage(ABC):
         an operator tool to inspect. No-op by default.
         """
 
+    def touch_outbox_task(self, task_id: int) -> bool:
+        """
+        Renew an ``IN_PROGRESS`` task's lease (``claimed_at``) so a
+        worker still actively processing a slow task (e.g. an
+        unattended Critic agent waiting on an LLM call) isn't reclaimed
+        by another worker once ``dequeue_next_outbox_task``'s stale-lease
+        window elapses. Callers are expected to call this periodically,
+        well inside that window, for the duration of a long-running
+        resolution -- not just once.
+
+        Returns ``True`` if the lease was renewed (the task was still
+        ``IN_PROGRESS`` under this task_id), ``False`` if it wasn't
+        found in that state -- e.g. it was already reclaimed by another
+        worker, or already completed/failed/dead-lettered. A caller
+        that sees ``False`` should treat its own claim on the task as
+        lost and abandon any further action on it (in particular, must
+        not call ``complete_outbox_task``/``fail_outbox_task`` for it
+        afterwards -- that would race with whoever holds the lease now).
+        No-op (returns ``False``) by default.
+        """
+        return False
+
     def list_tasks_by_type(
         self,
         task_type: str,

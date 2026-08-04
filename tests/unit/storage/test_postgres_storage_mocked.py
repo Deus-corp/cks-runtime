@@ -87,3 +87,39 @@ async def test_record_operations_empty_list_is_noop():
     await storage.record_operations(session_id="sess-1", version_id="ver-1", operations=[])
 
     pool.connection.assert_not_called()
+
+
+async def test_touch_outbox_task_uses_connection_execute_and_reads_rowcount():
+    """
+    touch_outbox_task() must call execute() on the connection (not some
+    nonexistent cursor-returning helper) and report success/failure
+    from the returned cursor's rowcount -- spec=psycopg.AsyncConnection
+    means anything not on the real driver raises AttributeError here
+    exactly as it would live.
+    """
+    conn = AsyncMock(spec=psycopg.AsyncConnection)
+    cur = MagicMock()
+    cur.rowcount = 1
+    conn.execute.return_value = cur
+
+    storage = PostgresStorage(_mock_pool(conn))
+
+    renewed = await storage.touch_outbox_task(42)
+
+    assert renewed is True
+    conn.execute.assert_awaited_once()
+    args, _ = conn.execute.await_args
+    assert "IN_PROGRESS" in args[0]
+    assert args[1] == (42,)
+    conn.commit.assert_awaited_once()
+
+
+async def test_touch_outbox_task_false_when_no_row_matched():
+    conn = AsyncMock(spec=psycopg.AsyncConnection)
+    cur = MagicMock()
+    cur.rowcount = 0
+    conn.execute.return_value = cur
+
+    storage = PostgresStorage(_mock_pool(conn))
+
+    assert await storage.touch_outbox_task(42) is False

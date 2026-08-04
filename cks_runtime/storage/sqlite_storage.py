@@ -765,6 +765,30 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    def touch_outbox_task(self, task_id: int) -> bool:
+        """
+        Renew the lease on an ``IN_PROGRESS`` task by bumping
+        ``claimed_at`` to now, so ``dequeue_next_outbox_task``'s
+        stale-lease reclaim (``_OUTBOX_LEASE_TIMEOUT_MODIFIER``) doesn't
+        fire while a worker is still actively processing it. Only
+        touches a row that is still ``IN_PROGRESS`` -- if it's since
+        been completed, failed, dead-lettered, or reclaimed by another
+        worker, this is a no-op and returns ``False``.
+        """
+        def _write() -> bool:
+            cur = self._conn.execute(
+                """
+                UPDATE cks_outbox_tasks
+                SET claimed_at = datetime('now')
+                WHERE task_id = ? AND status = 'IN_PROGRESS'
+                """,
+                (task_id,),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+        return _retry_on_locked(_write)
+
     def list_tasks_by_type(
         self,
         task_type: str,

@@ -125,6 +125,9 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
     async def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
         await asyncio.to_thread(self._sync.dead_letter_outbox_task, task_id, error)
 
+    async def touch_outbox_task(self, task_id: int) -> bool:
+        return await asyncio.to_thread(self._sync.touch_outbox_task, task_id)
+
     async def list_tasks_by_type(
         self,
         task_type: str,

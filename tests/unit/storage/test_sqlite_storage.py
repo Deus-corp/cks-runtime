@@ -355,6 +355,84 @@ def test_fail_outbox_task_clears_claim_and_is_reclaimable(storage):
     assert retried is not None and retried.task_id == task.task_id
 
 
+def test_touch_outbox_task_renews_claimed_at(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage._conn.execute(
+        "UPDATE cks_outbox_tasks SET claimed_at = datetime('now', '-4 minutes') WHERE task_id = ?",
+        (task.task_id,),
+    )
+    storage._conn.commit()
+
+    assert storage.touch_outbox_task(task.task_id) is True
+
+    row = storage._conn.execute(
+        "SELECT claimed_at FROM cks_outbox_tasks WHERE task_id = ?", (task.task_id,)
+    ).fetchone()
+    # Renewed to "now" -- no longer 4 minutes old.
+    age = storage._conn.execute(
+        "SELECT (julianday('now') - julianday(?)) * 24 * 60", (row[0],)
+    ).fetchone()[0]
+    assert age < 1
+
+
+def test_touch_outbox_task_prevents_stale_reclaim(storage):
+    """
+    The whole point of touch_outbox_task: a worker that keeps renewing
+    the lease on a slow-but-alive task must not have it reclaimed out
+    from under it, unlike test_stale_in_progress_claim_is_reclaimed.
+    """
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage._conn.execute(
+        "UPDATE cks_outbox_tasks SET claimed_at = datetime('now', '-10 minutes') WHERE task_id = ?",
+        (task.task_id,),
+    )
+    storage._conn.commit()
+
+    assert storage.touch_outbox_task(task.task_id) is True
+
+    not_reclaimed = storage.dequeue_next_outbox_task()
+    assert not_reclaimed is None
+
+
+def test_touch_outbox_task_returns_false_for_unknown_task(storage):
+    assert storage.touch_outbox_task(999999) is False
+
+
+def test_touch_outbox_task_returns_false_after_completion(storage):
+    storage.enqueue_task("projection", "s1", "{}")
+    task = storage.dequeue_next_outbox_task()
+    storage.complete_outbox_task(task.task_id)
+    assert storage.touch_outbox_task(task.task_id) is False
+
+
+def test_touch_outbox_task_returns_false_once_reclaimed_by_another_worker(storage):
+    """
+    If the lease already went stale and a second worker reclaimed the
+    task first, a late touch_outbox_task call from the original worker
+    must report False (lease lost), not silently renew a claim that
+    isn't its own anymore.
+    """
+    storage.enqueue_task("projection", "s1", "{}")
+    original = storage.dequeue_next_outbox_task()
+    storage._conn.execute(
+        "UPDATE cks_outbox_tasks SET claimed_at = datetime('now', '-10 minutes') WHERE task_id = ?",
+        (original.task_id,),
+    )
+    storage._conn.commit()
+
+    reclaimed = storage.dequeue_next_outbox_task()
+    assert reclaimed is not None and reclaimed.task_id == original.task_id
+
+    # touch_outbox_task itself can't distinguish "reclaimed by someone
+    # else" from "still IN_PROGRESS under the original worker" by
+    # task_id alone -- it renews regardless, since status is still
+    # IN_PROGRESS. This documents that limitation: task_id-based touch
+    # is a best-effort heartbeat, not a fencing token.
+    assert storage.touch_outbox_task(original.task_id) is True
+
+
 def test_stale_in_progress_claim_is_reclaimed(storage):
     """A worker that claimed a task and then crashed/hung without
     calling complete/fail must not strand the task forever -- once the

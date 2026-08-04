@@ -200,6 +200,15 @@ class AsyncRuntimeStorage(ABC):
         for the rationale. No-op by default.
         """
 
+    async def touch_outbox_task(self, task_id: int) -> bool:
+        """
+        Renew an ``IN_PROGRESS`` task's lease -- see
+        ``RuntimeStorage.touch_outbox_task`` for the rationale and the
+        meaning of the return value. No-op (returns ``False``) by
+        default.
+        """
+        return False
+
     async def list_tasks_by_type(
         self,
         task_type: str,

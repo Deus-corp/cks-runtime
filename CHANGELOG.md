@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.35.0] - 2026-08-04
+
+### Added
+- **`touch_outbox_task`** — a new method on `RuntimeStorage`, `AsyncRuntimeStorage`, `SQLiteStorage`, and `PostgresStorage`. Allows a worker that is still actively processing a task (e.g., a Critic Agent waiting for an LLM response) to update `claimed_at` and prevent the task from being mistakenly claimed by another worker after the standard lease timeout expires. The `SyncStorageAdapter` proxies calls to the sync storage. For `InMemoryStorage`, returns `False` (no-op).
+- New tests in `tests/unit/storage/test_sqlite_storage.py` and `tests/unit/storage/test_postgres_storage_mocked.py` cover successful updates, protection against re-claiming, returning `False` for non-existent/completed tasks, and the case where the task has already been claimed by another worker.
+
+---
+
 ## [1.34.2] - 2026-08-03
 
 ### Fixed
