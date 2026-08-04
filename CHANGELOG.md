@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.36.0] - 2026-08-04
+
+### Added
+- **`ProvenanceStalenessSweeper`** (ADR-010) — background sweeper that detects expired `VerificationRecord` objects and escalates them as `provenance_conflict` tasks into the persistent outbox for the Critic Agent to resolve. Mirrors `InferenceStalenessSweeper` (ADR-009) in lifecycle and wiring: configurable TTL (`provenance_ttl_seconds`, default 30 days) and sweep interval (`provenance_sweep_interval`, default 1 hour); starts automatically with `Runtime` when `provenance_sweep_interval` is not `None` (default: enabled); no-ops silently on storage backends without outbox support (e.g. `InMemoryStorage`).
+- **`RuntimeConfig.provenance_sweep_interval` / `provenance_ttl_seconds` / `provenance_sweep_batch_size`** — new configuration fields controlling the sweeper. Set `provenance_sweep_interval=None` to disable.
+- New unit tests in `tests/unit/reasoning/test_provenance_staleness_sweeper.py` covering: detection of expired records, fresh records left untouched, outbox task enqueued with correct `task_type="provenance_conflict"`, deduplication across sweeps, and no-op on unsupported storage.
+
+---
+
 ## [1.35.0] - 2026-08-04
 
 ### Added

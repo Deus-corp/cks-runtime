@@ -36,6 +36,9 @@ from cks_runtime.pipeline.execution_pipeline import (
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
 from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
 from cks_runtime.reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
+from cks_runtime.reasoning.provenance_staleness_sweeper import (
+    ProvenanceStalenessSweeper,
+)
 from cks_runtime.session.session import (
     RuntimeSession,
 )
@@ -155,6 +158,7 @@ class Runtime:
         "_metrics",
         "_outbox_worker",
         "_pipeline",
+        "_provenance_sweeper",
         "_registry",
         "_replica_id",
         "_sessions",
@@ -276,6 +280,19 @@ class Runtime:
                 batch_size=self.config.inference_sweep_batch_size,
             )
 
+        # Provenance staleness sweeper (ADR-010): background re-check of
+        # VerificationRecords whose `checked_at` has exceeded a TTL,
+        # escalated as `provenance_conflict` outbox tasks. Disabled when
+        # config.provenance_sweep_interval is None. Also started lazily
+        # in create() — requires a running event loop.
+        self._provenance_sweeper: ProvenanceStalenessSweeper | None = None
+        if self.config.provenance_sweep_interval is not None:
+            self._provenance_sweeper = ProvenanceStalenessSweeper(
+                self._storage,
+                ttl_seconds=self.config.provenance_ttl_seconds,
+                interval_seconds=int(self.config.provenance_sweep_interval),
+            )
+
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
             core_adapter=self._core_bridge, metrics=self._metrics, storage=self._storage
@@ -349,6 +366,9 @@ class Runtime:
 
         if runtime._inference_sweeper is not None:
             await runtime._inference_sweeper.start()
+
+        if runtime._provenance_sweeper is not None:
+            await runtime._provenance_sweeper.start()
 
         return runtime
 
@@ -803,6 +823,9 @@ class Runtime:
 
         if self._inference_sweeper is not None:
             await self._inference_sweeper.stop()
+
+        if self._provenance_sweeper is not None:
+            await self._provenance_sweeper.stop()
 
         close = getattr(self._storage, "close", None)
         if close is not None:

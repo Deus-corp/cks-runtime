@@ -51,3 +51,9 @@ class RuntimeConfig:
     # Set inference_sweep_interval=None to disable the sweeper entirely.
     inference_sweep_interval: float | None = 300.0   # seconds between sweeps (default 5 min)
     inference_sweep_batch_size: int = 100             # initial page size per sweep
+    # Provenance staleness sweeping (ADR-010): background re-check of
+    # VerificationRecords whose `checked_at` has exceeded a TTL, escalated
+    # as `provenance_conflict` outbox tasks for cks-mcp's critic_agent.
+    # Set provenance_sweep_interval=None to disable the sweeper entirely.
+    provenance_sweep_interval: float | None = 3600.0   # seconds between sweeps (default 1 hour)
+    provenance_ttl_seconds: int = 30 * 24 * 3600        # 30 days before a record is stale
