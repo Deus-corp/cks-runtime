@@ -39,6 +39,9 @@ from cks_runtime.reasoning.inference_staleness_sweeper import InferenceStaleness
 from cks_runtime.reasoning.provenance_staleness_sweeper import (
     ProvenanceStalenessSweeper,
 )
+from cks_runtime.reasoning.temporal_staleness_sweeper import (
+    TemporalStalenessSweeper,
+)
 from cks_runtime.session.session import (
     RuntimeSession,
 )
@@ -163,6 +166,7 @@ class Runtime:
         "_replica_id",
         "_sessions",
         "_storage",
+        "_temporal_sweeper",
         "_transactions",
         "_versions",
         "config",
@@ -293,6 +297,19 @@ class Runtime:
                 interval_seconds=int(self.config.provenance_sweep_interval),
             )
 
+        # Temporal staleness sweeper (ADR-011): background re-check of
+        # objects whose `valid_until` has passed, escalated as
+        # `temporal_conflict` outbox tasks. Disabled when
+        # config.temporal_sweep_interval is None. Also started lazily
+        # in create() — requires a running event loop.
+        self._temporal_sweeper: TemporalStalenessSweeper | None = None
+        if self.config.temporal_sweep_interval is not None:
+            self._temporal_sweeper = TemporalStalenessSweeper(
+                self._storage,
+                interval_seconds=int(self.config.temporal_sweep_interval),
+                batch_size=self.config.temporal_sweep_batch_size,
+            )
+
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
             core_adapter=self._core_bridge, metrics=self._metrics, storage=self._storage
@@ -369,6 +386,9 @@ class Runtime:
 
         if runtime._provenance_sweeper is not None:
             await runtime._provenance_sweeper.start()
+
+        if runtime._temporal_sweeper is not None:
+            await runtime._temporal_sweeper.start()
 
         return runtime
 
@@ -826,6 +846,9 @@ class Runtime:
 
         if self._provenance_sweeper is not None:
             await self._provenance_sweeper.stop()
+
+        if self._temporal_sweeper is not None:
+            await self._temporal_sweeper.stop()
 
         close = getattr(self._storage, "close", None)
         if close is not None:

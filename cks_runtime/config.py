@@ -57,3 +57,10 @@ class RuntimeConfig:
     # Set provenance_sweep_interval=None to disable the sweeper entirely.
     provenance_sweep_interval: float | None = 3600.0   # seconds between sweeps (default 1 hour)
     provenance_ttl_seconds: int = 30 * 24 * 3600        # 30 days before a record is stale
+    # Temporal staleness sweeping (ADR-011): background re-check of objects
+    # whose `valid_until` has passed (cks-core ADR-003,
+    # TemporalValidityConstraint), escalated as `temporal_conflict` outbox
+    # tasks for cks-mcp's critic_agent.
+    # Set temporal_sweep_interval=None to disable the sweeper entirely.
+    temporal_sweep_interval: float | None = 3600.0     # seconds between sweeps (default 1 hour)
+    temporal_sweep_batch_size: int = 100                # initial page size per sweep

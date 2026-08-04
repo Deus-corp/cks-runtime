@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.37.0] - 2026-08-04
+
+### Added
+- **`TemporalStalenessSweeper`** (ADR-011) — background sweeper that detects objects whose `valid_until` has passed (via cks-core's opt-in `TemporalValidityConstraint`, ADR-003) and escalates them as `temporal_conflict` tasks into the persistent outbox for the Critic Agent to resolve. Mirrors `ProvenanceStalenessSweeper` (ADR-010) in lifecycle and wiring: configurable sweep interval (`temporal_sweep_interval`, default 1 hour); starts automatically with `Runtime` when `temporal_sweep_interval` is not `None` (default: enabled); no-ops silently on storage backends without outbox support (e.g. `InMemoryStorage`).
+- **`RuntimeConfig.temporal_sweep_interval` / `temporal_sweep_batch_size`** — new configuration fields controlling the sweeper. Set `temporal_sweep_interval=None` to disable.
+- New unit tests in `tests/unit/reasoning/test_temporal_staleness_sweeper.py` covering: detection of expired facts, fresh facts left untouched, malformed `valid_until` skipped without crashing, outbox task enqueued with correct `task_type="temporal_conflict"`, deduplication across sweeps, and no-op on unsupported storage.
+- New `docs/adr/ADR-011 Temporal Staleness Detection.md` documenting the design.
+
+### Requires
+- `cks-core >= 1.20.0` for `cks.constraints.temporal.TemporalValidityConstraint`.
+
+---
+
 ## [1.36.0] - 2026-08-04
 
 ### Added

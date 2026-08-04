@@ -12,6 +12,7 @@ from __future__ import annotations
 from .config import RuntimeConfig
 from .gc.garbage_collector import GarbageCollector
 from .reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
+from .reasoning.temporal_staleness_sweeper import TemporalStalenessSweeper
 from .runtime import Runtime
 
 __version__ = RuntimeConfig().runtime_version
@@ -21,5 +22,6 @@ __all__ = (
     "InferenceStalenessSweeper",
     "Runtime",
     "RuntimeConfig",
+    "TemporalStalenessSweeper",
     "__version__",
 )
