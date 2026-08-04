@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.38.0] - 2026-08-04
+
+### Added
+- **Graph registry (`graph_registry`)** – new table in `SQLiteStorage`, `PostgresStorage`, and `InMemoryStorage` for persisting named session references (`name → session_id`). Methods `register_graph`, `get_graph`, and `list_graphs` allow registering knowledge graphs under memorable names, looking them up by name, and filtering by tag. This is the storage foundation for Memory Agent v1 in `cks-mcp`, which will let LLMs reuse graphs across conversations without rebuilding them from scratch.
+- Abstract no-op defaults added to `RuntimeStorage` and `AsyncRuntimeStorage`, with delegation through `SyncStorageAdapter`.
+
+---
+
 ## [1.37.0] - 2026-08-04
 
 ### Added

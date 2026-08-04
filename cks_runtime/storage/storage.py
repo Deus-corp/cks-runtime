@@ -411,6 +411,46 @@ class RuntimeStorage(ABC):
     def archive_session(self, session: Any) -> None:
         """Archive a session and remove it from active storage. No-op by default."""
 
+    #
+    # ------------------------------------------------------------------
+    # Graph registry (Memory Agent v1)
+    # ------------------------------------------------------------------
+    #
+
+    def register_graph(
+        self,
+        name: str,
+        session_id: str,
+        description: str = "",
+        tags: str = "",
+    ) -> None:
+        """
+        Register (or update) a ``name -> session_id`` mapping so a
+        previously-built Knowledge Graph can be looked up by a
+        memorable name in a later session, instead of being rebuilt
+        from scratch. Registering an already-used ``name`` replaces
+        its existing entry. No-op by default -- backends that support
+        the graph registry override this.
+        """
+
+    def get_graph(self, name: str) -> dict | None:
+        """
+        Look up a registered graph by name. Returns a dict with keys
+        ``name``, ``session_id``, ``description``, ``tags``,
+        ``created_at``, ``updated_at``, or ``None`` if no graph is
+        registered under that name. ``None`` by default -- backends
+        that support the graph registry override this.
+        """
+        return None
+
+    def list_graphs(self, tag: str | None = None) -> list[dict]:
+        """
+        List every registered graph, optionally filtered to those
+        whose ``tags`` field contains ``tag``. Empty by default --
+        backends that support the graph registry override this.
+        """
+        return []
+
 
 @dataclass(frozen=True, slots=True)
 class OutboxTask:

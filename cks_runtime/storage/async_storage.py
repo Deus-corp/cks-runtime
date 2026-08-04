@@ -365,3 +365,36 @@ class AsyncRuntimeStorage(ABC):
 
     async def archive_session(self, session: Any) -> None:
         """Archive a session and remove it from active storage. No-op by default."""
+
+    #
+    # ------------------------------------------------------------------
+    # Graph registry (Memory Agent v1)
+    # ------------------------------------------------------------------
+    #
+
+    async def register_graph(
+        self,
+        name: str,
+        session_id: str,
+        description: str = "",
+        tags: str = "",
+    ) -> None:
+        """
+        Register (or update) a ``name -> session_id`` mapping. No-op by
+        default -- see ``RuntimeStorage.register_graph`` (``storage.py``)
+        for the full rationale, identical here.
+        """
+
+    async def get_graph(self, name: str) -> dict | None:
+        """
+        Look up a registered graph by name. ``None`` by default -- see
+        ``RuntimeStorage.get_graph`` (``storage.py``).
+        """
+        return None
+
+    async def list_graphs(self, tag: str | None = None) -> list[dict]:
+        """
+        List registered graphs, optionally filtered by tag. Empty by
+        default -- see ``RuntimeStorage.list_graphs`` (``storage.py``).
+        """
+        return []

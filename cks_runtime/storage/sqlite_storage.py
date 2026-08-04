@@ -213,6 +213,21 @@ class SQLiteStorage(RuntimeStorage):
             )
             """
         )
+        # Graph registry (Memory Agent v1): name -> session_id lookup so
+        # a previously-built Knowledge Graph can be found by a memorable
+        # name in a later session, instead of being rebuilt from scratch.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_registry (
+                name        TEXT PRIMARY KEY,
+                session_id  TEXT NOT NULL,
+                description TEXT,
+                tags        TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
         self._conn.commit()
 
     def _migrate_embeddings_pk_if_needed(self) -> None:
@@ -1114,3 +1129,73 @@ class SQLiteStorage(RuntimeStorage):
                 return str(row[0])
 
         return _retry_on_locked(_get_or_create)
+
+    # ------------------------------------------------------------------
+    # Graph registry (Memory Agent v1)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _graph_row_to_dict(row: tuple) -> dict:
+        return {
+            "name": row[0],
+            "session_id": row[1],
+            "description": row[2] or "",
+            "tags": row[3] or "",
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+
+    def register_graph(
+        self,
+        name: str,
+        session_id: str,
+        description: str = "",
+        tags: str = "",
+    ) -> None:
+        def _write() -> None:
+            self._conn.execute(
+                """
+                INSERT INTO graph_registry (name, session_id, description, tags, updated_at)
+                VALUES (?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(name) DO UPDATE SET
+                    session_id = excluded.session_id,
+                    description = excluded.description,
+                    tags = excluded.tags,
+                    updated_at = datetime('now')
+                """,
+                (name, session_id, description, tags),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
+    def get_graph(self, name: str) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT name, session_id, description, tags, created_at, updated_at
+            FROM graph_registry WHERE name = ?
+            """,
+            (name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._graph_row_to_dict(row)
+
+    def list_graphs(self, tag: str | None = None) -> list[dict]:
+        if tag is None:
+            rows = self._conn.execute(
+                """
+                SELECT name, session_id, description, tags, created_at, updated_at
+                FROM graph_registry ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT name, session_id, description, tags, created_at, updated_at
+                FROM graph_registry
+                WHERE tags LIKE ? ORDER BY updated_at DESC
+                """,
+                (f"%{tag}%",),
+            ).fetchall()
+        return [self._graph_row_to_dict(row) for row in rows]

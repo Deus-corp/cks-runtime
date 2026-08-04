@@ -236,6 +236,21 @@ _MIGRATE_SESSIONS_MODIFIED_AT = """
     ALTER TABLE sessions ADD COLUMN modified_at TIMESTAMPTZ NOT NULL DEFAULT now()
 """
 
+# ---------------------------------------------------------------------------
+# DDL — graph registry (Memory Agent v1)
+# ---------------------------------------------------------------------------
+
+_DDL_GRAPH_REGISTRY = """
+    CREATE TABLE IF NOT EXISTS graph_registry (
+        name        TEXT PRIMARY KEY,
+        session_id  TEXT NOT NULL,
+        description TEXT,
+        tags        TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+"""
+
 
 class PostgresStorage(AsyncRuntimeStorage):
     """
@@ -315,6 +330,9 @@ class PostgresStorage(AsyncRuntimeStorage):
                 await conn.execute(_MIGRATE_SESSIONS_MODIFIED_AT)
             except psycopg.errors.DuplicateColumn:
                 await conn.rollback()
+            # Graph registry (Memory Agent v1)
+            await conn.execute(_DDL_GRAPH_REGISTRY)
+            await conn.commit()
         # Restore cached dimension from DB (survives restarts)
         await self._load_embed_dim()
 
@@ -1192,6 +1210,90 @@ class PostgresStorage(AsyncRuntimeStorage):
             await conn.commit()
 
         self._embed_dim = dim
+
+    # ------------------------------------------------------------------
+    # Graph registry (Memory Agent v1)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _graph_row_to_dict(row: tuple) -> dict:
+        return {
+            "name": row[0],
+            "session_id": row[1],
+            "description": row[2] or "",
+            "tags": row[3] or "",
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+
+    async def register_graph(
+        self,
+        name: str,
+        session_id: str,
+        description: str = "",
+        tags: str = "",
+    ) -> None:
+        async def _write() -> None:
+            async with self._pool.connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO graph_registry (name, session_id, description, tags, updated_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (name) DO UPDATE SET
+                        session_id = EXCLUDED.session_id,
+                        description = EXCLUDED.description,
+                        tags = EXCLUDED.tags,
+                        updated_at = now()
+                    """,
+                    (name, session_id, description, tags),
+                )
+                await conn.commit()
+
+        await _retry_on_transient(_write)
+
+    async def get_graph(self, name: str) -> dict | None:
+        async def _read() -> tuple | None:
+            async with self._pool.connection() as conn:
+                return await (
+                    await conn.execute(
+                        """
+                        SELECT name, session_id, description, tags, created_at, updated_at
+                        FROM graph_registry WHERE name = %s
+                        """,
+                        (name,),
+                    )
+                ).fetchone()
+
+        row = await _retry_on_transient(_read)
+        if row is None:
+            return None
+        return self._graph_row_to_dict(row)
+
+    async def list_graphs(self, tag: str | None = None) -> list[dict]:
+        async def _read() -> list[tuple]:
+            async with self._pool.connection() as conn:
+                if tag is None:
+                    return await (
+                        await conn.execute(
+                            """
+                            SELECT name, session_id, description, tags, created_at, updated_at
+                            FROM graph_registry ORDER BY updated_at DESC
+                            """
+                        )
+                    ).fetchall()
+                return await (
+                    await conn.execute(
+                        """
+                        SELECT name, session_id, description, tags, created_at, updated_at
+                        FROM graph_registry
+                        WHERE tags LIKE %s ORDER BY updated_at DESC
+                        """,
+                        (f"%{tag}%",),
+                    )
+                ).fetchall()
+
+        rows = await _retry_on_transient(_read)
+        return [self._graph_row_to_dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------

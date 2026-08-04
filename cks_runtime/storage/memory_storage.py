@@ -10,6 +10,7 @@ objects and is primarily intended for testing.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from cks_runtime.session.session import RuntimeSession
@@ -33,6 +34,7 @@ class InMemoryStorage(RuntimeStorage):
         self._sessions: dict[str, RuntimeSession] = {}
         self._versions: dict[str, RuntimeVersion] = {}
         self._replica_id: str | None = None
+        self._graphs: dict[str, dict] = {}
 
     #
     # ------------------------------------------------------------------
@@ -182,6 +184,7 @@ class InMemoryStorage(RuntimeStorage):
         self._sessions.clear()
         self._versions.clear()
         self._replica_id = None
+        self._graphs.clear()
 
     #
     # ------------------------------------------------------------------
@@ -204,3 +207,38 @@ class InMemoryStorage(RuntimeStorage):
         if self._replica_id is None:
             self._replica_id = str(uuid4())
         return self._replica_id
+
+    #
+    # ------------------------------------------------------------------
+    # Graph registry (Memory Agent v1)
+    # ------------------------------------------------------------------
+    #
+
+    def register_graph(
+        self,
+        name: str,
+        session_id: str,
+        description: str = "",
+        tags: str = "",
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        existing = self._graphs.get(name)
+        created_at = existing["created_at"] if existing is not None else now
+        self._graphs[name] = {
+            "name": name,
+            "session_id": session_id,
+            "description": description,
+            "tags": tags,
+            "created_at": created_at,
+            "updated_at": now,
+        }
+
+    def get_graph(self, name: str) -> dict | None:
+        entry = self._graphs.get(name)
+        return deepcopy(entry) if entry is not None else None
+
+    def list_graphs(self, tag: str | None = None) -> list[dict]:
+        entries = list(self._graphs.values())
+        if tag is not None:
+            entries = [e for e in entries if tag in (e.get("tags") or "")]
+        return [deepcopy(e) for e in sorted(entries, key=lambda e: e["updated_at"], reverse=True)]

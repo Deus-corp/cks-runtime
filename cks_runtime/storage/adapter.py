@@ -217,3 +217,24 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
     @property
     def supports_embedding_search(self) -> bool:
         return hasattr(self._sync, "search_embeddings")
+
+    # ------------------------------------------------------------------
+    # Graph registry (Memory Agent v1)
+    # ------------------------------------------------------------------
+
+    async def register_graph(
+        self,
+        name: str,
+        session_id: str,
+        description: str = "",
+        tags: str = "",
+    ) -> None:
+        await asyncio.to_thread(
+            self._sync.register_graph, name, session_id, description, tags
+        )
+
+    async def get_graph(self, name: str) -> dict | None:
+        return await asyncio.to_thread(self._sync.get_graph, name)
+
+    async def list_graphs(self, tag: str | None = None) -> list[dict]:
+        return await asyncio.to_thread(self._sync.list_graphs, tag)
