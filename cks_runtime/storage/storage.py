@@ -423,6 +423,7 @@ class RuntimeStorage(ABC):
         session_id: str,
         description: str = "",
         tags: str = "",
+        public: bool = False,
     ) -> None:
         """
         Register (or update) a ``name -> session_id`` mapping so a
@@ -431,23 +432,34 @@ class RuntimeStorage(ABC):
         from scratch. Registering an already-used ``name`` replaces
         its existing entry. No-op by default -- backends that support
         the graph registry override this.
+
+        ``public`` (Memory Agent v2) marks the graph as eligible for
+        the gallery -- discoverable via ``list_graphs(public_only=True)``
+        / ``search_graphs`` by callers other than the one that
+        registered it. Defaults to ``False`` for backward
+        compatibility with existing graphs and callers.
         """
 
     def get_graph(self, name: str) -> dict | None:
         """
         Look up a registered graph by name. Returns a dict with keys
         ``name``, ``session_id``, ``description``, ``tags``,
-        ``created_at``, ``updated_at``, or ``None`` if no graph is
-        registered under that name. ``None`` by default -- backends
-        that support the graph registry override this.
+        ``public``, ``created_at``, ``updated_at``, or ``None`` if no
+        graph is registered under that name. ``None`` by default --
+        backends that support the graph registry override this.
         """
         return None
 
-    def list_graphs(self, tag: str | None = None) -> list[dict]:
+    def list_graphs(
+        self,
+        tag: str | None = None,
+        public_only: bool = False,
+    ) -> list[dict]:
         """
         List every registered graph, optionally filtered to those
-        whose ``tags`` field contains ``tag``. Empty by default --
-        backends that support the graph registry override this.
+        whose ``tags`` field contains ``tag`` and/or (Memory Agent v2)
+        to only ``public`` graphs. Empty by default -- backends that
+        support the graph registry override this.
         """
         return []
 

@@ -251,6 +251,13 @@ _DDL_GRAPH_REGISTRY = """
     )
 """
 
+# `public` for the gallery (Memory Agent v2). Defaults to false so every
+# pre-existing registered graph stays private, preserving backward
+# compatibility -- same rationale as SQLiteStorage's migration.
+_MIGRATE_GRAPH_REGISTRY_PUBLIC = """
+    ALTER TABLE graph_registry ADD COLUMN public BOOLEAN NOT NULL DEFAULT false
+"""
+
 
 class PostgresStorage(AsyncRuntimeStorage):
     """
@@ -333,6 +340,11 @@ class PostgresStorage(AsyncRuntimeStorage):
             # Graph registry (Memory Agent v1)
             await conn.execute(_DDL_GRAPH_REGISTRY)
             await conn.commit()
+            try:
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_PUBLIC)
+                await conn.commit()
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
         # Restore cached dimension from DB (survives restarts)
         await self._load_embed_dim()
 
@@ -1224,6 +1236,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             "tags": row[3] or "",
             "created_at": row[4],
             "updated_at": row[5],
+            "public": bool(row[6]),
         }
 
     async def register_graph(
@@ -1232,20 +1245,22 @@ class PostgresStorage(AsyncRuntimeStorage):
         session_id: str,
         description: str = "",
         tags: str = "",
+        public: bool = False,
     ) -> None:
         async def _write() -> None:
             async with self._pool.connection() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, updated_at)
-                    VALUES (%s, %s, %s, %s, now())
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, now())
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
                         tags = EXCLUDED.tags,
+                        public = EXCLUDED.public,
                         updated_at = now()
                     """,
-                    (name, session_id, description, tags),
+                    (name, session_id, description, tags, public),
                 )
                 await conn.commit()
 
@@ -1257,7 +1272,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                 return await (
                     await conn.execute(
                         """
-                        SELECT name, session_id, description, tags, created_at, updated_at
+                        SELECT name, session_id, description, tags, created_at, updated_at, public
                         FROM graph_registry WHERE name = %s
                         """,
                         (name,),
@@ -1269,28 +1284,26 @@ class PostgresStorage(AsyncRuntimeStorage):
             return None
         return self._graph_row_to_dict(row)
 
-    async def list_graphs(self, tag: str | None = None) -> list[dict]:
+    async def list_graphs(
+        self, tag: str | None = None, public_only: bool = False
+    ) -> list[dict]:
         async def _read() -> list[tuple]:
+            select = (
+                "SELECT name, session_id, description, tags, created_at, updated_at, public "
+                "FROM graph_registry"
+            )
+            clauses: list[str] = []
+            params: list[object] = []
+            if tag is not None:
+                clauses.append("tags LIKE %s")
+                params.append(f"%{tag}%")
+            if public_only:
+                clauses.append("public = true")
+            if clauses:
+                select += " WHERE " + " AND ".join(clauses)
+            select += " ORDER BY updated_at DESC"
             async with self._pool.connection() as conn:
-                if tag is None:
-                    return await (
-                        await conn.execute(
-                            """
-                            SELECT name, session_id, description, tags, created_at, updated_at
-                            FROM graph_registry ORDER BY updated_at DESC
-                            """
-                        )
-                    ).fetchall()
-                return await (
-                    await conn.execute(
-                        """
-                        SELECT name, session_id, description, tags, created_at, updated_at
-                        FROM graph_registry
-                        WHERE tags LIKE %s ORDER BY updated_at DESC
-                        """,
-                        (f"%{tag}%",),
-                    )
-                ).fetchall()
+                return await (await conn.execute(select, params)).fetchall()
 
         rows = await _retry_on_transient(_read)
         return [self._graph_row_to_dict(row) for row in rows]

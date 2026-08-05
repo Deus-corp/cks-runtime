@@ -64,3 +64,10 @@ class RuntimeConfig:
     # Set temporal_sweep_interval=None to disable the sweeper entirely.
     temporal_sweep_interval: float | None = 3600.0     # seconds between sweeps (default 1 hour)
     temporal_sweep_batch_size: int = 100                # initial page size per sweep
+    # Graph freshness sweeping (Memory Agent v2): background re-check of
+    # registered graphs (graph_registry, Memory Agent v1) whose `updated_at`
+    # has exceeded a TTL, escalated as `graph_outdated` outbox tasks for a
+    # future cks-mcp update agent.
+    # Set graph_freshness_interval=None to disable the sweeper entirely.
+    graph_freshness_interval: float | None = 3600.0     # seconds between sweeps (default 1 hour)
+    graph_freshness_ttl_seconds: int = 7 * 24 * 3600     # 7 days before a graph is outdated

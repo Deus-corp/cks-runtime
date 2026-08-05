@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.39.0] - 2026-08-04
+
+### Added
+- **`GraphFreshnessSweeper`** (Memory Agent v2) — background sweeper that walks the `graph_registry` table (Memory Agent v1) looking for entries whose `updated_at` has exceeded a TTL, and escalates a `graph_outdated` task into the persistent outbox for a future cks-mcp update agent to act on. Detection-only, same as `ProvenanceStalenessSweeper`/`TemporalStalenessSweeper`: does not refresh the graph or make any outbound HTTP requests itself. Mirrors those sweepers' lifecycle and wiring: configurable interval (`graph_freshness_interval`, default 1 hour) and TTL (`graph_freshness_ttl_seconds`, default 7 days); starts automatically with `Runtime` when `graph_freshness_interval` is not `None` (default: enabled); no-ops silently on storage backends without outbox support (e.g. `InMemoryStorage`). Unlike the session-content sweepers, it only requires `list_graphs` (implemented by every backend, including `InMemoryStorage`) rather than `list_sessions_modified_since`.
+- **`RuntimeConfig.graph_freshness_interval` / `graph_freshness_ttl_seconds`** — new configuration fields controlling the sweeper. Set `graph_freshness_interval=None` to disable.
+- **`public` field on `graph_registry`** — new boolean column (default `false`) in `SQLiteStorage`, `PostgresStorage`, and `InMemoryStorage`, migrated in-place for existing databases so every pre-existing registered graph stays private. `register_graph` accepts an optional `public: bool = False` parameter; `list_graphs` accepts an optional `public_only: bool = False` filter. This is the storage foundation for the Memory Agent gallery in `cks-mcp`.
+- New unit tests in `tests/unit/reasoning/test_graph_freshness_sweeper.py` covering: detection of outdated graphs, fresh graphs left untouched, custom TTLs, malformed `updated_at` skipped without crashing, outbox task enqueued with correct `task_type="graph_outdated"`, deduplication and re-escalation across sweeps, no sweeper-side mutation of the registry, and no-op on unsupported storage.
+- New unit tests in `tests/unit/storage/test_graph_registry.py` covering the `public` field's default, round-trip, `list_graphs(public_only=...)` filtering (alone and combined with `tag`), and backward compatibility with pre-existing v1 SQLite databases.
+
+---
+
 ## [1.38.0] - 2026-08-04
 
 ### Added

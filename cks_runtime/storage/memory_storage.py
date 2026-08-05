@@ -220,6 +220,7 @@ class InMemoryStorage(RuntimeStorage):
         session_id: str,
         description: str = "",
         tags: str = "",
+        public: bool = False,
     ) -> None:
         now = datetime.now(UTC).isoformat()
         existing = self._graphs.get(name)
@@ -229,6 +230,7 @@ class InMemoryStorage(RuntimeStorage):
             "session_id": session_id,
             "description": description,
             "tags": tags,
+            "public": public,
             "created_at": created_at,
             "updated_at": now,
         }
@@ -237,8 +239,12 @@ class InMemoryStorage(RuntimeStorage):
         entry = self._graphs.get(name)
         return deepcopy(entry) if entry is not None else None
 
-    def list_graphs(self, tag: str | None = None) -> list[dict]:
+    def list_graphs(
+        self, tag: str | None = None, public_only: bool = False
+    ) -> list[dict]:
         entries = list(self._graphs.values())
         if tag is not None:
             entries = [e for e in entries if tag in (e.get("tags") or "")]
+        if public_only:
+            entries = [e for e in entries if e.get("public")]
         return [deepcopy(e) for e in sorted(entries, key=lambda e: e["updated_at"], reverse=True)]

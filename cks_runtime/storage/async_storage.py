@@ -378,6 +378,7 @@ class AsyncRuntimeStorage(ABC):
         session_id: str,
         description: str = "",
         tags: str = "",
+        public: bool = False,
     ) -> None:
         """
         Register (or update) a ``name -> session_id`` mapping. No-op by
@@ -392,9 +393,14 @@ class AsyncRuntimeStorage(ABC):
         """
         return None
 
-    async def list_graphs(self, tag: str | None = None) -> list[dict]:
+    async def list_graphs(
+        self,
+        tag: str | None = None,
+        public_only: bool = False,
+    ) -> list[dict]:
         """
-        List registered graphs, optionally filtered by tag. Empty by
-        default -- see ``RuntimeStorage.list_graphs`` (``storage.py``).
+        List registered graphs, optionally filtered by tag and/or to
+        only public graphs. Empty by default -- see
+        ``RuntimeStorage.list_graphs`` (``storage.py``).
         """
         return []

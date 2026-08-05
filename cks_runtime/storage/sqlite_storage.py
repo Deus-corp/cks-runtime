@@ -228,6 +228,17 @@ class SQLiteStorage(RuntimeStorage):
             )
             """
         )
+        # Add `public` for the gallery (Memory Agent v2) to an existing
+        # graph_registry table if it's missing -- same migration pattern
+        # as sessions.latest_version_id above. Defaults to 0 (false) so
+        # every pre-existing registered graph stays private, preserving
+        # backward compatibility.
+        cur = self._conn.execute("PRAGMA table_info(graph_registry)")
+        graph_cols = [row[1] for row in cur.fetchall()]
+        if "public" not in graph_cols:
+            self._conn.execute(
+                "ALTER TABLE graph_registry ADD COLUMN public INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def _migrate_embeddings_pk_if_needed(self) -> None:
@@ -1143,6 +1154,7 @@ class SQLiteStorage(RuntimeStorage):
             "tags": row[3] or "",
             "created_at": row[4],
             "updated_at": row[5],
+            "public": bool(row[6]),
         }
 
     def register_graph(
@@ -1151,19 +1163,21 @@ class SQLiteStorage(RuntimeStorage):
         session_id: str,
         description: str = "",
         tags: str = "",
+        public: bool = False,
     ) -> None:
         def _write() -> None:
             self._conn.execute(
                 """
-                INSERT INTO graph_registry (name, session_id, description, tags, updated_at)
-                VALUES (?, ?, ?, ?, datetime('now'))
+                INSERT INTO graph_registry (name, session_id, description, tags, public, updated_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     session_id = excluded.session_id,
                     description = excluded.description,
                     tags = excluded.tags,
+                    public = excluded.public,
                     updated_at = datetime('now')
                 """,
-                (name, session_id, description, tags),
+                (name, session_id, description, tags, int(public)),
             )
             self._conn.commit()
 
@@ -1172,7 +1186,7 @@ class SQLiteStorage(RuntimeStorage):
     def get_graph(self, name: str) -> dict | None:
         row = self._conn.execute(
             """
-            SELECT name, session_id, description, tags, created_at, updated_at
+            SELECT name, session_id, description, tags, created_at, updated_at, public
             FROM graph_registry WHERE name = ?
             """,
             (name,),
@@ -1181,21 +1195,22 @@ class SQLiteStorage(RuntimeStorage):
             return None
         return self._graph_row_to_dict(row)
 
-    def list_graphs(self, tag: str | None = None) -> list[dict]:
-        if tag is None:
-            rows = self._conn.execute(
-                """
-                SELECT name, session_id, description, tags, created_at, updated_at
-                FROM graph_registry ORDER BY updated_at DESC
-                """
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                """
-                SELECT name, session_id, description, tags, created_at, updated_at
-                FROM graph_registry
-                WHERE tags LIKE ? ORDER BY updated_at DESC
-                """,
-                (f"%{tag}%",),
-            ).fetchall()
+    def list_graphs(
+        self, tag: str | None = None, public_only: bool = False
+    ) -> list[dict]:
+        select = (
+            "SELECT name, session_id, description, tags, created_at, updated_at, public "
+            "FROM graph_registry"
+        )
+        clauses: list[str] = []
+        params: list[object] = []
+        if tag is not None:
+            clauses.append("tags LIKE ?")
+            params.append(f"%{tag}%")
+        if public_only:
+            clauses.append("public = 1")
+        if clauses:
+            select += " WHERE " + " AND ".join(clauses)
+        select += " ORDER BY updated_at DESC"
+        rows = self._conn.execute(select, params).fetchall()
         return [self._graph_row_to_dict(row) for row in rows]

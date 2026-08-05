@@ -228,13 +228,16 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         session_id: str,
         description: str = "",
         tags: str = "",
+        public: bool = False,
     ) -> None:
         await asyncio.to_thread(
-            self._sync.register_graph, name, session_id, description, tags
+            self._sync.register_graph, name, session_id, description, tags, public
         )
 
     async def get_graph(self, name: str) -> dict | None:
         return await asyncio.to_thread(self._sync.get_graph, name)
 
-    async def list_graphs(self, tag: str | None = None) -> list[dict]:
-        return await asyncio.to_thread(self._sync.list_graphs, tag)
+    async def list_graphs(
+        self, tag: str | None = None, public_only: bool = False
+    ) -> list[dict]:
+        return await asyncio.to_thread(self._sync.list_graphs, tag, public_only)
