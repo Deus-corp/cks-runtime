@@ -382,6 +382,40 @@ class RuntimeStorage(ABC):
             )
         return operations
 
+    # ------------------------------------------------------------------
+    # Backup / Disaster Recovery (ADR-012)
+    # ------------------------------------------------------------------
+
+    def export_storage(self) -> dict:
+        """
+        Return a complete, JSON-serialisable snapshot of every table
+        this backend owns (sessions, versions, graph registry,
+        embeddings, outbox tasks).
+
+        The returned dict is backend-agnostic: any backend that
+        implements ``import_storage`` can restore from it regardless of
+        which backend produced it. Raises ``NotImplementedError`` by
+        default -- backends that support backup override this.
+        """
+        raise NotImplementedError
+
+    def import_storage(self, data: dict, mode: str = "merge") -> None:
+        """
+        Restore a snapshot produced by ``export_storage`` into this backend.
+
+        ``mode`` controls collision handling:
+
+        - ``"clear"``  — truncate every table first, then insert the
+          snapshot. Use for disaster recovery.
+        - ``"merge"`` — insert only rows whose primary key doesn't yet
+          exist in the target; skip duplicates silently. Use for
+          migrating or merging stores.
+
+        Raises ``NotImplementedError`` by default -- backends that
+        support backup override this.
+        """
+        raise NotImplementedError
+
     def list_sessions_modified_before(
         self,
         cutoff: Any,  # datetime

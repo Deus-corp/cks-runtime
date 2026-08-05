@@ -9,6 +9,7 @@ objects and is primarily intended for testing.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -248,3 +249,128 @@ class InMemoryStorage(RuntimeStorage):
         if public_only:
             entries = [e for e in entries if e.get("public")]
         return [deepcopy(e) for e in sorted(entries, key=lambda e: e["updated_at"], reverse=True)]
+
+    # ------------------------------------------------------------------
+    # Backup / Disaster Recovery (ADR-012)
+    # ------------------------------------------------------------------
+
+    def export_storage(self) -> dict:
+        """
+        Return a JSON-serialisable snapshot of every in-memory table.
+
+        Sessions and versions are stored as their canonical JSON strings
+        (same format as SQLiteStorage's ``data`` column), so the dump is
+        backend-agnostic: an SQLiteStorage can import what an
+        InMemoryStorage exported and vice-versa.
+        """
+        import cks
+
+        exported_sessions: list[str] = []
+        for session in self._sessions.values():
+            ks_json = cks.serialize(session.knowledge_structure)
+            data = {
+                "session_id": session.session_id,
+                "knowledge_structure": ks_json,
+                "metadata": session.metadata,
+                "snapshot_interval": session.snapshot_interval,
+                "diagnostics": [],
+                "version_history_ids": [v.version_id for v in session.version_history],
+                "parent_session_id": session.parent_session_id,
+                "parent_version_id": session.parent_version_id,
+                "closed": session.closed,
+            }
+            exported_sessions.append(json.dumps(data, ensure_ascii=False))
+
+        exported_versions: list[str] = []
+        for version in self._versions.values():
+            from cks_runtime.storage.patch_codec import serialize_operators
+            if version.knowledge_structure is not None:
+                ks_json = cks.serialize(version.knowledge_structure)
+                patch_json = None
+            else:
+                ks_json = None
+                patch_json = serialize_operators(version.patch) if version.patch else None
+            data = {
+                "version_id": version.version_id,
+                "session_id": version.session_id,
+                "transaction_id": version.transaction_id,
+                "knowledge_structure": ks_json,
+                "metadata": dict(version.metadata),
+                "created_at": version.created_at.isoformat(),
+                "state_hash": version.state_hash,
+                "patch": patch_json,
+            }
+            exported_versions.append(json.dumps(data, ensure_ascii=False))
+
+        return {
+            "version": 1,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "sessions": exported_sessions,
+            "versions": exported_versions,
+            "graphs": [deepcopy(g) for g in self._graphs.values()],
+            "embeddings": [],   # InMemoryStorage doesn't persist embeddings
+            "outbox_tasks": [], # InMemoryStorage doesn't persist outbox tasks
+        }
+
+    def import_storage(self, data: dict, mode: str = "merge") -> None:
+        """
+        Restore a snapshot into this in-memory store.
+
+        ``mode="clear"`` wipes existing data first; ``mode="merge"``
+        skips sessions/versions/graphs whose primary key already exists.
+        """
+        from datetime import datetime as _dt
+
+        import cks
+
+        from cks_runtime.session.session import RuntimeSession
+        from cks_runtime.storage.patch_codec import deserialize_operators
+        from cks_runtime.versioning.version import RuntimeVersion
+
+        if mode == "clear":
+            self._sessions.clear()
+            self._versions.clear()
+            self._graphs.clear()
+
+        for raw in data.get("sessions", []):
+            d = json.loads(raw) if isinstance(raw, str) else raw
+            sid = d["session_id"]
+            if mode == "merge" and sid in self._sessions:
+                continue
+            ks = cks.parse(d["knowledge_structure"])
+            session = RuntimeSession(
+                knowledge_structure=ks,
+                session_id=sid,
+                metadata=d.get("metadata", {}),
+                snapshot_interval=d.get("snapshot_interval", 10),
+            )
+            session.closed = d.get("closed", False)
+            session.parent_session_id = d.get("parent_session_id")
+            session.parent_version_id = d.get("parent_version_id")
+            self._sessions[sid] = session
+
+        for raw in data.get("versions", []):
+            d = json.loads(raw) if isinstance(raw, str) else raw
+            vid = d["version_id"]
+            if mode == "merge" and vid in self._versions:
+                continue
+            ks = cks.parse(d["knowledge_structure"]) if d.get("knowledge_structure") else None
+            patch = deserialize_operators(d["patch"]) if d.get("patch") else None
+            created_at = _dt.fromisoformat(d["created_at"])
+            version = RuntimeVersion(
+                session_id=d["session_id"],
+                transaction_id=d["transaction_id"],
+                knowledge_structure=ks,
+                metadata=d["metadata"],
+                version_id=vid,
+                created_at=created_at,
+                state_hash=d.get("state_hash"),
+                patch=patch,
+            )
+            self._versions[vid] = version
+
+        for graph in data.get("graphs", []):
+            name = graph["name"]
+            if mode == "merge" and name in self._graphs:
+                continue
+            self._graphs[name] = deepcopy(graph)

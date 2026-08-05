@@ -55,10 +55,11 @@ list_sessions (N+1 fix)
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import struct
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -1307,6 +1308,200 @@ class PostgresStorage(AsyncRuntimeStorage):
 
         rows = await _retry_on_transient(_read)
         return [self._graph_row_to_dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Backup / restore (ADR-012)
+    # ------------------------------------------------------------------
+
+    async def export_storage(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dictionary containing every
+        session, version, graph, embedding, and outbox task in this
+        database, for backup or migration to another backend.
+        """
+        async with self._pool.connection() as conn:
+            # Sessions
+            session_rows = await (
+                await conn.execute(
+                    "SELECT session_id, data, latest_version_id, modified_at FROM sessions"
+                )
+            ).fetchall()
+            sessions = [
+                {
+                    "session_id": row[0],
+                    "data": row[1],
+                    "latest_version_id": row[2],
+                    "modified_at": row[3].isoformat() if row[3] else None,
+                }
+                for row in session_rows
+            ]
+
+            # Versions
+            version_rows = await (
+                await conn.execute("SELECT version_id, session_id, data FROM versions")
+            ).fetchall()
+            versions = [
+                {
+                    "version_id": row[0],
+                    "session_id": row[1],
+                    "data": row[2],
+                }
+                for row in version_rows
+            ]
+
+            # Graph registry
+            graph_rows = await (
+                await conn.execute(
+                    "SELECT name, session_id, description, tags, created_at, updated_at, public "
+                    "FROM graph_registry"
+                )
+            ).fetchall()
+            graphs = [self._graph_row_to_dict(row) for row in graph_rows]
+
+            # Embeddings (base64-encoded, same as SQLiteStorage)
+            emb_rows = await (
+                await conn.execute(
+                    "SELECT object_id, session_id, embedding, updated_at "
+                    "FROM cks_object_embeddings"
+                )
+            ).fetchall()
+            embeddings = [
+                {
+                    "object_id": row[0],
+                    "session_id": row[1],
+                    "embedding_b64": base64.b64encode(row[2]).decode("ascii") if row[2] else None,
+                    "updated_at": row[3].isoformat() if row[3] else None,
+                }
+                for row in emb_rows
+            ]
+
+            # Outbox (PENDING/FAILED only, same as SQLiteStorage)
+            outbox_rows = await (
+                await conn.execute(
+                    "SELECT task_type, session_id, payload, status, retry_count "
+                    "FROM cks_outbox_tasks WHERE status IN ('PENDING', 'FAILED')"
+                )
+            ).fetchall()
+            outbox = [
+                {
+                    "task_type": row[0],
+                    "session_id": row[1],
+                    "payload": row[2],
+                    "status": row[3],
+                    "retry_count": row[4],
+                }
+                for row in outbox_rows
+            ]
+
+        return {
+            "sessions": sessions,
+            "versions": versions,
+            "graphs": graphs,
+            "embeddings": embeddings,
+            "outbox": outbox,
+        }
+
+    async def import_storage(self, data: dict[str, Any], mode: str = "merge") -> None:
+        """Import data previously exported via ``export_storage`` into
+        this Postgres backend.
+
+        ``mode`` is ``"clear"`` (delete all existing rows first) or
+        ``"merge"`` (add/update alongside existing data).
+        """
+        async with self._pool.connection() as conn:
+            if mode == "clear":
+                await conn.execute("DELETE FROM cks_outbox_tasks")
+                await conn.execute("DELETE FROM cks_object_embeddings")
+                await conn.execute("DELETE FROM graph_registry")
+                await conn.execute("DELETE FROM versions")
+                await conn.execute("DELETE FROM sessions")
+
+            # Sessions
+            for s in data.get("sessions") or []:
+                await conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, data, latest_version_id, modified_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (session_id) DO UPDATE SET
+                        data = EXCLUDED.data,
+                        latest_version_id = EXCLUDED.latest_version_id,
+                        modified_at = EXCLUDED.modified_at
+                    """,
+                    (
+                        s["session_id"],
+                        Jsonb(s["data"]),
+                        s.get("latest_version_id"),
+                        s.get("modified_at"),
+                    ),
+                )
+
+            # Versions
+            for v in data.get("versions") or []:
+                await conn.execute(
+                    """
+                    INSERT INTO versions (version_id, session_id, data)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (version_id) DO UPDATE SET
+                        data = EXCLUDED.data
+                    """,
+                    (v["version_id"], v["session_id"], Jsonb(v["data"])),
+                )
+
+            # Graph registry
+            for g in data.get("graphs") or []:
+                await conn.execute(
+                    """
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (name) DO UPDATE SET
+                        session_id = EXCLUDED.session_id,
+                        description = EXCLUDED.description,
+                        tags = EXCLUDED.tags,
+                        public = EXCLUDED.public,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (
+                        g["name"],
+                        g["session_id"],
+                        g.get("description", ""),
+                        g.get("tags", ""),
+                        g.get("public", False),
+                        g.get("updated_at", datetime.now(UTC).isoformat()),
+                    ),
+                )
+
+            # Embeddings
+            for e in data.get("embeddings") or []:
+                emb_bytes = base64.b64decode(e["embedding_b64"]) if e.get("embedding_b64") else None
+                if emb_bytes is None:
+                    continue
+                # We need the vector dimension to be set up first;
+                # ensure_embedding_column will create the column + index
+                # if this is the first embedding.
+                dim = len(emb_bytes) // 4
+                await self._ensure_embedding_column(dim)
+                vec_literal = _bytes_to_pg_vector(emb_bytes)
+                await conn.execute(
+                    """
+                    INSERT INTO cks_object_embeddings (object_id, session_id, embedding, updated_at)
+                    VALUES (%s, %s, %s::vector, %s)
+                    ON CONFLICT (object_id, session_id) DO UPDATE SET
+                        embedding = EXCLUDED.embedding,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (e["object_id"], e["session_id"], vec_literal, e.get("updated_at", datetime.now(UTC).isoformat())),
+                )
+
+            # Outbox
+            for o in data.get("outbox") or []:
+                await conn.execute(
+                    """
+                    INSERT INTO cks_outbox_tasks (task_type, session_id, payload, status, retry_count)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (o["task_type"], o["session_id"], o["payload"], o["status"], o.get("retry_count", 0)),
+                )
+
+            await conn.commit()
 
 
 # ---------------------------------------------------------------------------

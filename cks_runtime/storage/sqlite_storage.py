@@ -1032,6 +1032,172 @@ class SQLiteStorage(RuntimeStorage):
         return True
 
 
+    # ------------------------------------------------------------------
+    # Backup / Disaster Recovery (ADR-012)
+    # ------------------------------------------------------------------
+
+    def export_storage(self) -> dict:
+        """
+        Return a JSON-serialisable snapshot of every SQLite table.
+
+        Sessions and versions are exported as their raw ``data`` JSON
+        strings (same payload as written by ``save_session`` /
+        ``save_version``), making the dump backend-agnostic.
+        Embeddings are base64-encoded. Only PENDING and FAILED outbox
+        tasks are exported -- IN_PROGRESS, DEAD, and COMPLETED tasks
+        are omitted (claimed or terminal).
+        """
+        import base64
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        sessions = [
+            row[0]
+            for row in self._conn.execute("SELECT data FROM sessions").fetchall()
+        ]
+        versions = [
+            row[0]
+            for row in self._conn.execute("SELECT data FROM versions").fetchall()
+        ]
+        graphs = [
+            self._graph_row_to_dict(row)
+            for row in self._conn.execute(
+                "SELECT name, session_id, description, tags, created_at, updated_at, public "
+                "FROM graph_registry ORDER BY updated_at DESC"
+            ).fetchall()
+        ]
+        embeddings = [
+            {
+                "object_id": row[0],
+                "session_id": row[1],
+                "embedding_b64": base64.b64encode(row[2]).decode(),
+                "updated_at": row[3],
+            }
+            for row in self._conn.execute(
+                "SELECT object_id, session_id, embedding, updated_at "
+                "FROM cks_object_embeddings"
+            ).fetchall()
+        ]
+        outbox_tasks = [
+            {
+                "task_type": row[0],
+                "session_id": row[1],
+                "payload": row[2],
+                "status": row[3],
+                "retry_count": row[4],
+                "next_retry_at": row[5],
+                "created_at": row[6],
+            }
+            for row in self._conn.execute(
+                "SELECT task_type, session_id, payload, status, retry_count, "
+                "next_retry_at, created_at "
+                "FROM cks_outbox_tasks "
+                "WHERE status IN ('PENDING', 'FAILED')"
+            ).fetchall()
+        ]
+
+        return {
+            "version": 1,
+            "exported_at": _dt.now(_UTC).isoformat(),
+            "sessions": sessions,
+            "versions": versions,
+            "graphs": graphs,
+            "embeddings": embeddings,
+            "outbox_tasks": outbox_tasks,
+        }
+
+    def import_storage(self, data: dict, mode: str = "merge") -> None:
+        """
+        Restore a snapshot produced by ``export_storage``.
+
+        ``mode="clear"`` truncates every table first (atomic, wrapped in
+        a single transaction). ``mode="merge"`` uses INSERT OR IGNORE to
+        skip rows whose primary key already exists.
+        """
+        import base64 as _b64
+
+        def _write() -> None:
+            if mode == "clear":
+                self._conn.execute("DELETE FROM cks_outbox_tasks")
+                self._conn.execute("DELETE FROM cks_object_embeddings")
+                self._conn.execute("DELETE FROM graph_registry")
+                self._conn.execute("DELETE FROM versions")
+                self._conn.execute("DELETE FROM sessions")
+
+            # Sessions
+            for raw in data.get("sessions", []):
+                payload = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+                d = json.loads(payload)
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO sessions "
+                    "(session_id, data, latest_version_id, modified_at) "
+                    "VALUES (?, ?, ?, datetime('now'))",
+                    (
+                        d["session_id"],
+                        payload,
+                        d.get("version_history_ids", [None])[-1]
+                        if d.get("version_history_ids")
+                        else None,
+                    ),
+                )
+
+            # Versions
+            for raw in data.get("versions", []):
+                payload = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+                d = json.loads(payload)
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO versions (version_id, session_id, data) "
+                    "VALUES (?, ?, ?)",
+                    (d["version_id"], d["session_id"], payload),
+                )
+
+            # Graphs
+            for g in data.get("graphs", []):
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO graph_registry "
+                    "(name, session_id, description, tags, public, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        g["name"],
+                        g["session_id"],
+                        g.get("description", ""),
+                        g.get("tags", ""),
+                        int(g.get("public", False)),
+                        g.get("created_at", ""),
+                        g.get("updated_at", ""),
+                    ),
+                )
+
+            # Embeddings
+            for e in data.get("embeddings", []):
+                blob = _b64.b64decode(e["embedding_b64"])
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO cks_object_embeddings "
+                    "(object_id, session_id, embedding, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (e["object_id"], e["session_id"], blob, e.get("updated_at", "")),
+                )
+
+            # Outbox tasks (only PENDING / FAILED from the dump)
+            for t in data.get("outbox_tasks", []):
+                self._conn.execute(
+                    "INSERT INTO cks_outbox_tasks "
+                    "(task_type, session_id, payload, status, retry_count, next_retry_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        t["task_type"],
+                        t["session_id"],
+                        t["payload"],
+                        "PENDING",  # always reset to PENDING on restore
+                        0,
+                        t.get("next_retry_at", ""),
+                    ),
+                )
+
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
     def search_embeddings(
         self,
         query_embedding: bytes,

@@ -241,3 +241,13 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         self, tag: str | None = None, public_only: bool = False
     ) -> list[dict]:
         return await asyncio.to_thread(self._sync.list_graphs, tag, public_only)
+
+    # ------------------------------------------------------------------
+    # Backup / Disaster Recovery (ADR-012)
+    # ------------------------------------------------------------------
+
+    async def export_storage(self) -> dict:
+        return await asyncio.to_thread(self._sync.export_storage)
+
+    async def import_storage(self, data: dict, mode: str = "merge") -> None:
+        await asyncio.to_thread(self._sync.import_storage, data, mode)

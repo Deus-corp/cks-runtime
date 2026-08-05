@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.41.0] - 2026-08-05
+
+### Added
+- **ADR-012 (Backup and Disaster Recovery)** – new ADR documenting the strategy for exporting/importing data between storage backends and for backup/restore workflows.
+- **`export_storage()` and `import_storage(data, mode)`** – new methods on `RuntimeStorage`, `AsyncRuntimeStorage`, `InMemoryStorage`, `SQLiteStorage`, and `PostgresStorage`. `export_storage()` returns a complete dictionary dump of all sessions, versions, graphs, embeddings, and outbox tasks. `import_storage(data, mode)` restores data into the backend (`mode="clear"` wipes existing data first; `mode="merge"` adds to it). `SyncStorageAdapter` delegates calls to the sync backend.
+- New tests in `tests/unit/storage/test_storage_export_import.py` (23 tests) cover round‑trip, merge/clear modes, and preservation of `graph_registry`, embeddings, and outbox tasks.
+
+---
+
 ## [1.40.0] - 2026-08-05
 
 ### Added

@@ -343,6 +343,27 @@ class AsyncRuntimeStorage(ABC):
         return False
 
 
+    # ------------------------------------------------------------------
+    # Backup / Disaster Recovery (ADR-012)
+    # ------------------------------------------------------------------
+
+    async def export_storage(self) -> dict:
+        """
+        Return a complete, JSON-serialisable snapshot of every table
+        this backend owns. Raises ``NotImplementedError`` by default --
+        see ``RuntimeStorage.export_storage`` (``storage.py``) for the
+        full rationale, identical here.
+        """
+        raise NotImplementedError
+
+    async def import_storage(self, data: dict, mode: str = "merge") -> None:
+        """
+        Restore a snapshot produced by ``export_storage``.
+        Raises ``NotImplementedError`` by default -- see
+        ``RuntimeStorage.import_storage`` (``storage.py``).
+        """
+        raise NotImplementedError
+
     async def list_sessions_modified_before(
         self,
         cutoff: Any,
