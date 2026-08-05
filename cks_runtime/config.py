@@ -71,6 +71,21 @@ class RuntimeConfig:
     # Set graph_freshness_interval=None to disable the sweeper entirely.
     graph_freshness_interval: float | None = 3600.0     # seconds between sweeps (default 1 hour)
     graph_freshness_ttl_seconds: int = 7 * 24 * 3600     # 7 days before a graph is outdated
+    # Graph auto-update sweeping: background cross-check of each
+    # registered graph's `Component` objects' recorded `version` against
+    # the real `__version__` published in the matching GitHub repository
+    # (the same check cks-mcp's `check_component_versions` performs on
+    # demand), escalated as `graph_outdated` outbox tasks for a future
+    # cks-mcp update agent (or `update_registered_graph` directly, once
+    # this sweeper is wired to call it -- see GraphAutoUpdateSweeper's
+    # module docstring).
+    # Set graph_auto_update_interval=None to disable the sweeper entirely.
+    graph_auto_update_interval: float | None = 3600.0    # seconds between sweeps (default 1 hour)
+    # If True, ask for outdated components to be applied automatically
+    # rather than only surfaced for review. Safe default is False:
+    # detect and escalate only. See GraphAutoUpdateSweeper's module
+    # docstring for the current (escalation-only) scope of this flag.
+    graph_auto_update_apply: bool = False
     # Contradiction detection sweeping: background re-check of recently-
     # modified sessions for MutualExclusionRule/FunctionalRelationRule
     # violations (cks-core's opt-in mutual_exclusion/functional_relation

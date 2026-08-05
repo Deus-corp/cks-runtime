@@ -36,6 +36,7 @@ from cks_runtime.pipeline.execution_pipeline import (
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
 from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
 from cks_runtime.reasoning.contradiction_sweeper import ContradictionSweeper
+from cks_runtime.reasoning.graph_auto_update_sweeper import GraphAutoUpdateSweeper
 from cks_runtime.reasoning.graph_freshness_sweeper import GraphFreshnessSweeper
 from cks_runtime.reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
 from cks_runtime.reasoning.provenance_staleness_sweeper import (
@@ -160,6 +161,7 @@ class Runtime:
         "_events",
         "_executor",
         "_gc",
+        "_graph_auto_update_sweeper",
         "_graph_freshness_sweeper",
         "_inference_sweeper",
         "_metrics",
@@ -327,6 +329,20 @@ class Runtime:
                 interval_seconds=int(self.config.graph_freshness_interval),
             )
 
+        # Graph auto-update sweeper: background cross-check of each
+        # registered graph's Component objects' recorded `version`
+        # against the real version published in the matching GitHub
+        # repository, escalated as `graph_outdated` outbox tasks.
+        # Disabled when config.graph_auto_update_interval is None. Also
+        # started lazily in create() — requires a running event loop.
+        self._graph_auto_update_sweeper: GraphAutoUpdateSweeper | None = None
+        if self.config.graph_auto_update_interval is not None:
+            self._graph_auto_update_sweeper = GraphAutoUpdateSweeper(
+                self._storage,
+                interval_seconds=int(self.config.graph_auto_update_interval),
+                apply_updates=self.config.graph_auto_update_apply,
+            )
+
         # Contradiction detection sweeper: background re-check of
         # recently-modified sessions for MutualExclusionRule/
         # FunctionalRelationRule violations, escalated as
@@ -423,6 +439,9 @@ class Runtime:
 
         if runtime._graph_freshness_sweeper is not None:
             await runtime._graph_freshness_sweeper.start()
+
+        if runtime._graph_auto_update_sweeper is not None:
+            await runtime._graph_auto_update_sweeper.start()
 
         if runtime._contradiction_sweeper is not None:
             await runtime._contradiction_sweeper.start()
@@ -889,6 +908,9 @@ class Runtime:
 
         if self._graph_freshness_sweeper is not None:
             await self._graph_freshness_sweeper.stop()
+
+        if self._graph_auto_update_sweeper is not None:
+            await self._graph_auto_update_sweeper.stop()
 
         if self._contradiction_sweeper is not None:
             await self._contradiction_sweeper.stop()

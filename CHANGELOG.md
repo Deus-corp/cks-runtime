@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.42.0] - 2026-08-05
+
+### Added
+- **`GraphAutoUpdateSweeper`** (Memory Agent v2) – background sweeper that cross‑checks every registered graph's `Component` objects' recorded `version` against the real `__version__` published in the matching GitHub repository (the same check `check_component_versions` performs on demand). Escalates a `graph_outdated` outbox task for each graph with at least one outdated component. Mirrors `GraphFreshnessSweeper`'s lifecycle, dedup strategy, and no‑op‑on‑unsupported‑storage behaviour.
+- **`RuntimeConfig.graph_auto_update_interval` / `graph_auto_update_apply`** – new configuration fields controlling the sweeper. `graph_auto_update_apply` (default `False`) currently records `auto_apply_requested` on the escalated payload for a future cks‑mcp consumer (the actual update still requires `update_registered_graph` in cks‑mcp, consistent with Runtime never originating LLM calls or outbound HTTP beyond raw version fetches).
+- **`cks_runtime.net.safe_fetch`** – SSRF/DNS‑rebinding‑safe outbound HTTP GET, ported from `cks_mcp.tools.verify_source.handler._safe_request`, so `GraphAutoUpdateSweeper` can fetch `_version.py` from raw.githubusercontent.com without opening an SSRF hole.
+- New unit tests in `tests/unit/reasoning/test_graph_auto_update_sweeper.py` covering outdated and up‑to‑date components, `repo_url` resolution, deduplication, re‑escalation after regression, `auto_apply` flag propagation, GitHub‑unreachable resilience, and no‑op on `InMemoryStorage`.
+
+---
+
 ## [1.41.0] - 2026-08-05
 
 ### Added
