@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.40.0] - 2026-08-05
+
+### Added
+- **`ContradictionSweeper`** – new background worker that proactively scans recently‑modified sessions for `MutualExclusionRule`/`FunctionalRelationRule` violations (the same `mutual_exclusion`/`functional_relation` constraints that `detect_contradictions` checks in cks‑mcp). Found contradictions are escalated as `contradiction_detected` tasks into the persistent outbox for the Critic Agent to resolve via `resolve_contradiction`. Runs automatically when `contradiction_sweep_interval` is not `None` (default: 1 hour); set it to `None` to disable.
+- **`RuntimeConfig.contradiction_sweep_interval` / `contradiction_sweep_batch_size`** – new configuration fields controlling the sweeper.
+- New unit tests in `tests/unit/reasoning/test_contradiction_sweeper.py` covering mutual‑exclusion and functional‑relation detection, no false positives, deduplication, re‑escalation after resolution, and no‑op on `InMemoryStorage`.
+
+---
+
 ## [1.39.0] - 2026-08-04
 
 ### Added

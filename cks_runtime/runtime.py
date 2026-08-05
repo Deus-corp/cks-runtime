@@ -35,6 +35,7 @@ from cks_runtime.pipeline.execution_pipeline import (
 )
 from cks_runtime.projection.embedding_projection import EmbeddingProjection
 from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
+from cks_runtime.reasoning.contradiction_sweeper import ContradictionSweeper
 from cks_runtime.reasoning.graph_freshness_sweeper import GraphFreshnessSweeper
 from cks_runtime.reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
 from cks_runtime.reasoning.provenance_staleness_sweeper import (
@@ -150,6 +151,7 @@ class Runtime:
     """
 
     __slots__ = (
+        "_contradiction_sweeper",
         "_core_bridge",
         "_diagnostics",
         "_dispatcher",
@@ -325,6 +327,20 @@ class Runtime:
                 interval_seconds=int(self.config.graph_freshness_interval),
             )
 
+        # Contradiction detection sweeper: background re-check of
+        # recently-modified sessions for MutualExclusionRule/
+        # FunctionalRelationRule violations, escalated as
+        # `contradiction_detected` outbox tasks. Disabled when
+        # config.contradiction_sweep_interval is None. Also started lazily
+        # in create() — requires a running event loop.
+        self._contradiction_sweeper: ContradictionSweeper | None = None
+        if self.config.contradiction_sweep_interval is not None:
+            self._contradiction_sweeper = ContradictionSweeper(
+                self._storage,
+                interval_seconds=int(self.config.contradiction_sweep_interval),
+                batch_size=self.config.contradiction_sweep_batch_size,
+            )
+
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
             core_adapter=self._core_bridge, metrics=self._metrics, storage=self._storage
@@ -407,6 +423,9 @@ class Runtime:
 
         if runtime._graph_freshness_sweeper is not None:
             await runtime._graph_freshness_sweeper.start()
+
+        if runtime._contradiction_sweeper is not None:
+            await runtime._contradiction_sweeper.start()
 
         return runtime
 
@@ -870,6 +889,9 @@ class Runtime:
 
         if self._graph_freshness_sweeper is not None:
             await self._graph_freshness_sweeper.stop()
+
+        if self._contradiction_sweeper is not None:
+            await self._contradiction_sweeper.stop()
 
         close = getattr(self._storage, "close", None)
         if close is not None:

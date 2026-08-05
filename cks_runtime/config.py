@@ -71,3 +71,11 @@ class RuntimeConfig:
     # Set graph_freshness_interval=None to disable the sweeper entirely.
     graph_freshness_interval: float | None = 3600.0     # seconds between sweeps (default 1 hour)
     graph_freshness_ttl_seconds: int = 7 * 24 * 3600     # 7 days before a graph is outdated
+    # Contradiction detection sweeping: background re-check of recently-
+    # modified sessions for MutualExclusionRule/FunctionalRelationRule
+    # violations (cks-core's opt-in mutual_exclusion/functional_relation
+    # extension constraints), escalated as `contradiction_detected` outbox
+    # tasks for cks-mcp's critic_agent.
+    # Set contradiction_sweep_interval=None to disable the sweeper entirely.
+    contradiction_sweep_interval: float | None = 3600.0  # seconds between sweeps (default 1 hour)
+    contradiction_sweep_batch_size: int = 100            # initial page size per sweep
