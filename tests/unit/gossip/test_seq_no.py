@@ -1,16 +1,35 @@
 """
 Unit tests for ``SeqNoCounter`` (see ``seq_no.py``'s module docstring
-for the two bugs it fixes: two independent counters for one
-``replica_id``, and no persistence across restarts).
+for the three bugs it fixes: two independent counters for one
+``replica_id``, no persistence across restarts, and no cross-process
+locking around the persisted file).
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import pytest
 
-from cks_runtime.gossip.seq_no import SeqNoCounter, default_seq_no_path
+from cks_runtime.gossip.seq_no import _HAS_FLOCK, SeqNoCounter, default_seq_no_path
+
+
+def _issue_seq_nos(args: tuple[str, int]) -> list[int]:
+    """
+    Module-level (picklable) worker: build a fresh ``SeqNoCounter`` for
+    ``replica-race`` in this process and issue ``n`` seq_nos from it.
+
+    Deliberately a brand-new ``SeqNoCounter`` per worker process (not
+    one shared/pickled instance) -- the scenario under test is
+    *independent processes* racing on the same persisted file, exactly
+    like a real deployment where each process constructs its own
+    ``SeqNoCounter`` from the same durable ``replica_id``/data
+    directory.
+    """
+    path_str, n = args
+    counter = SeqNoCounter("replica-race", path=Path(path_str))
+    return [counter.next() for _ in range(n)]
 
 
 class TestBasicIncrement:
@@ -149,3 +168,39 @@ class TestDefaultPath:
 
         monkeypatch.setenv("CKS_RUNTIME_DATA_DIR", str(tmp_path))
         assert default_seq_no_path().parent == default_secret_path().parent
+
+
+class TestCrossProcessLocking:
+    """
+    Reproduces the "two OS processes sharing one replica_id/path both
+    compute the same next value" race from the code review, fixed by
+    wrapping ``next()``'s critical section in an ``fcntl.flock``
+    (``seq_no.py``'s "third bug"). Uses real, separate OS processes
+    (not threads) -- a ``threading.Lock`` alone cannot protect against
+    this race by construction, so only a multi-process reproduction
+    actually exercises the fix.
+    """
+
+    @pytest.mark.skipif(
+        not _HAS_FLOCK, reason="fcntl-based cross-process locking is POSIX-only"
+    )
+    def test_concurrent_processes_never_issue_duplicate_seq_no(self, tmp_path: Path):
+        path = tmp_path / "seq_no.json"
+        n_workers = 8
+        calls_per_worker = 25
+
+        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            results = list(
+                pool.map(
+                    _issue_seq_nos,
+                    [(str(path), calls_per_worker)] * n_workers,
+                )
+            )
+
+        all_issued = [seq for worker_result in results for seq in worker_result]
+
+        assert len(all_issued) == n_workers * calls_per_worker
+        assert len(set(all_issued)) == len(all_issued), (
+            "duplicate seq_no issued across processes -- cross-process "
+            "lock failed to serialize next()"
+        )

@@ -17,6 +17,44 @@ request handler would be equally valid ordering-wise, but this repo
 checks the HMAC signature first: a forged envelope should never get
 to occupy a slot in the nonce cache or advance a sequence counter at
 all, forged or not.
+
+Sequence checking: a bounded reorder window, not a strict cursor
+------------------------------------------------------------------
+The original port from that other project rejected any ``seq_no`` not
+*strictly greater* than the highest one seen so far. That is too
+strict for how ``seq_no`` is actually produced and delivered here.
+
+``SeqNoCounter`` (``seq_no.py``) deliberately hands out one shared
+``seq_no`` stream per ``replica_id`` across *every* role that signs an
+envelope under that identity -- both a ``GossipService`` initiating
+its own rounds and a ``GossipServer`` replying to a peer-initiated
+round share one counter (see that module's docstring for why: two
+independent per-role counters were bug #1 it fixed). In a bidirectional
+mesh -- replica A gossiping outbound to peer B while B's own
+``GossipService`` is, at the same moment, gossiping inbound to A's
+``GossipServer`` and receiving a reply -- both of A's outgoing streams
+to B are in flight concurrently, over independent HTTP requests, with
+no ordering relationship between when each was *allocated* its
+``seq_no`` and when it actually *arrives* at B. A slower request
+carrying a lower ``seq_no`` can legitimately land after a faster one
+carrying a higher ``seq_no`` -- this is exactly the "ordinary shape of
+a mesh under load, not an edge case" that ``GossipAdapter._lock_for``
+already documents needing to handle for the merge side; the filter
+needs the equivalent tolerance for delivery order.
+
+A strict cursor treats that reordering identically to an actual
+replay and drops the slower message permanently -- there is no retry
+path anywhere in this package that would recover it. So instead:
+every accepted ``seq_no`` is remembered (bounded, LRU-evicted, same
+shape as the nonce cache) within a window behind the highest
+``seq_no`` seen so far (``max_seq_reorder_window``). A ``seq_no``
+already in that window is a genuine replay (rejected); one within the
+window but not yet seen is accepted regardless of whether it is above
+or below the current high-water mark; one far enough behind the
+high-water mark to have fallen out of the window is rejected as too
+old to plausibly be legitimate reordering. This keeps the same replay
+guarantee (no ``seq_no`` is ever accepted twice) while no longer
+mistaking "arrived a little late" for "replayed".
 """
 
 from __future__ import annotations
@@ -28,6 +66,17 @@ from typing import Final
 
 logger: Final = logging.getLogger(__name__)
 
+#: How far behind the highest seq_no seen so far an incoming seq_no
+#: may still land and be accepted, to absorb ordinary network/async
+#: reordering between concurrent senders sharing one seq_no stream
+#: (see module docstring). Not meant to be large -- realistic
+#: reordering here is "a handful of concurrent in-flight requests",
+#: not thousands -- so this also bounds how far a genuinely late
+#: replay of an old seq_no could still land within the window (it
+#: still has to guess an exact, not-yet-seen value to get through,
+#: same as the nonce cache's own protection).
+DEFAULT_SEQ_REORDER_WINDOW = 64
+
 
 class GossipFilter:
     """Validate incoming gossip envelope metadata before it is applied."""
@@ -35,15 +84,30 @@ class GossipFilter:
     __slots__ = (
         "_last_seq",
         "_seen_nonces",
+        "_seen_seq",
         "max_clock_skew_ms",
         "max_nonce_cache",
+        "max_seq_reorder_window",
     )
 
-    def __init__(self, max_clock_skew_ms: int = 10_000, max_nonce_cache: int = 10_000) -> None:
+    def __init__(
+        self,
+        max_clock_skew_ms: int = 10_000,
+        max_nonce_cache: int = 10_000,
+        max_seq_reorder_window: int = DEFAULT_SEQ_REORDER_WINDOW,
+    ) -> None:
         self.max_clock_skew_ms = max(0, int(max_clock_skew_ms))
         self.max_nonce_cache = max(1, int(max_nonce_cache))
+        self.max_seq_reorder_window = max(1, int(max_seq_reorder_window))
         self._seen_nonces: dict[str, OrderedDict[str, None]] = {}
+        # sender -> highest seq_no ever accepted (the high-water mark
+        # the reorder window is measured back from).
         self._last_seq: dict[str, int] = {}
+        # sender -> bounded LRU of individual seq_no values accepted
+        # within the current window, for exact-duplicate detection
+        # independent of where a value sits relative to the high-water
+        # mark.
+        self._seen_seq: dict[str, OrderedDict[int, None]] = {}
 
     def check(
         self,
@@ -82,12 +146,14 @@ class GossipFilter:
 
         self._seen_nonces.pop(sender, None)
         self._last_seq.pop(sender, None)
+        self._seen_seq.pop(sender, None)
         logger.info("GossipFilter state reset for sender=%s", sender)
 
     def clear(self) -> None:
         """Clear all cached replay/order state."""
         self._seen_nonces.clear()
         self._last_seq.clear()
+        self._seen_seq.clear()
         logger.info("GossipFilter state cleared.")
 
     def stats(self) -> dict[str, int]:
@@ -98,6 +164,7 @@ class GossipFilter:
             "nonce_count": sum(len(items) for items in self._seen_nonces.values()),
             "max_nonce_cache": self.max_nonce_cache,
             "max_clock_skew_ms": self.max_clock_skew_ms,
+            "max_seq_reorder_window": self.max_seq_reorder_window,
         }
 
     def _check_timestamp(
@@ -172,14 +239,30 @@ class GossipFilter:
             return False
 
         last_seq = self._last_seq.get(sender, -1)
-        if seq <= last_seq:
+        floor = last_seq - self.max_seq_reorder_window
+        if seq <= floor:
             logger.debug(
-                "Gossip rejection: non-monotonic seq_no from %s seq=%s last=%s",
+                "Gossip rejection: seq_no from %s too far behind window "
+                "seq=%s high_water=%s window=%s",
                 sender,
                 seq,
                 last_seq,
+                self.max_seq_reorder_window,
             )
             return False
 
-        self._last_seq[sender] = seq
+        seen = self._seen_seq.setdefault(sender, OrderedDict())
+        if seq in seen:
+            logger.debug(
+                "Gossip rejection: replayed seq_no from %s seq=%s", sender, seq
+            )
+            return False
+
+        seen[seq] = None
+        seen.move_to_end(seq)
+        while len(seen) > self.max_seq_reorder_window:
+            seen.popitem(last=False)
+
+        if seq > last_seq:
+            self._last_seq[sender] = seq
         return True

@@ -48,11 +48,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
+from cks_runtime.crdt.quarantine import CRDTQuarantine, _SupportsAddObject
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.events.runtime_event import CRDTForkDetected, GossipConflictDetected
 from cks_runtime.execution.operation_executor import OperationStatus
@@ -131,6 +132,25 @@ class GossipAdapter:
         # and async (`PostgresCRDTStore`) backends work without this
         # module needing to special-case either.
         self._crdt_store = crdt_store
+        # ADR-013 Stage 2: gate every object this replica ever admits
+        # into `crdt_store` through CRDTQuarantine -- structural
+        # validity (`runtime.core_bridge.validate`) plus a recomputed
+        # identity check (`object_id_for`, see crdt_store.py) -- before
+        # `_merge_crdt_objects` is allowed to add it. Built lazily,
+        # once, alongside `crdt_store` itself: a GossipAdapter with no
+        # `crdt_store` still has nothing to quarantine (same as
+        # before), and one *with* a `crdt_store` now always merges
+        # through quarantine rather than optionally, so a remote peer
+        # can no longer poison the Merkle tree / MV-Register with a
+        # payload that fails `cks.validate()` or whose claimed id
+        # doesn't match its own content -- see the module's ADR-013
+        # Stage 2 history for why this was previously wired up but
+        # never actually reachable from the gossip path.
+        self._quarantine = (
+            CRDTQuarantine(cast(_SupportsAddObject, crdt_store), runtime.core_bridge)
+            if crdt_store is not None
+            else None
+        )
         # session_id -> lock serializing apply_remote_session for that
         # session (see _lock_for below). Deliberately per-session, not
         # one lock for the whole adapter.
@@ -294,9 +314,16 @@ class GossipAdapter:
         if self._crdt_store is None:
             return 0
         objects = remote_session.knowledge_structure.objects
-        result = self._crdt_store.merge_objects(list(objects))
-        if hasattr(result, "__await__"):
-            result = await result
+        # Every object gossiped in from a peer goes through
+        # CRDTQuarantine first (structural validity + a recomputed
+        # identity check), not straight into `crdt_store.merge_objects`
+        # -- see `self._quarantine`'s construction in `__init__`.
+        # `_quarantine` is only ever None when `_crdt_store` is also
+        # None (guarded above), so this assert documents that
+        # invariant for readers rather than silently no-op'ing if it
+        # were ever violated.
+        assert self._quarantine is not None
+        result = await self._quarantine.process_batch(list(objects))
 
         # ADR-013 Stage 2: also advance each object's identity-scoped
         # MV-Register pointer (`identity.id`, the application-level

@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.47.0] - 2026-08-06
+
+### Fixed
+- **CRDT quarantine now actually wired into the gossip path** (ADR‑013). Previously `CRDTQuarantine` was implemented but never called by `GossipAdapter._merge_crdt_objects` — incoming objects from remote peers bypassed structural validation and identity checks entirely. Now every object admitted into the CRDT store goes through `quarantine.process_batch`, which runs `cks.validate()` on a properly constructed `KnowledgeStructure` and verifies that the object's recomputed SHA‑256 hash matches its claimed id. A single invalid object in a batch no longer aborts the whole merge.
+- **`object_id_for()` no longer trusts bare `dict` payloads.** For live `cks.KnowledgeObject` instances the leaf hash was already used; for plain `dict`s (the typical deserialised gossip payload) the function now recomputes the hash from `identity`/`structure` and raises `ObjectIdentityMismatch` on mismatch, instead of blindly trusting a caller‑supplied `"id"` field.
+- **`GossipFilter._check_sequence` now uses a sliding window** instead of strict monotonic ordering, so a legitimate message that arrives slightly out‑of‑order under concurrent gossip rounds is no longer permanently dropped.
+- **`SeqNoCounter.next()` now guards its read‑increment‑write with a cross‑process file lock** (`fcntl.flock` / `portalocker`), preventing duplicate sequence numbers when two OS processes share the same `CKS_RUNTIME_DATA_DIR`.
+
+### Changed
+- `merge_objects` in all three CRDT‑store backends now logs and skips individual objects that raise `ObjectIdentityMismatch`, instead of failing the entire batch.
+
+---
+
 ## [1.46.0] - 2026-08-06
 
 ### Added

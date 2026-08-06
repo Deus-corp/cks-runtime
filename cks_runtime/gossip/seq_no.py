@@ -47,6 +47,36 @@ stream:
   (``CKS_RUNTIME_DATA_DIR``, matching ``secret.py``'s own resolution
   rule).
 
+A third bug: cross-process races on the file itself
+------------------------------------------------------
+The read-increment-write in ``next()`` was originally guarded only by
+a ``threading.Lock`` -- correct for two ``SeqNoCounter``\\ s in the
+*same* process (e.g. fix 1's ``GossipService``/``GossipServer` pair),
+but not for two separate OS processes sharing one ``replica_id`` and
+data directory (e.g. a replica run behind a process supervisor that
+restarts it while a graceful old instance is still shutting down, or
+any deployment that intentionally runs more than one process under
+one identity). Two processes can both read the same on-disk value,
+both compute the same ``floor + 1``, and both write it back -- two
+envelopes signed under the same ``replica_id`` with the *same*
+``seq_no``, which is exactly the collision this module exists to
+prevent, and which a peer's ``GossipFilter`` can only partially absorb
+(one of the two is silently dropped as a duplicate rather than both
+being delivered).
+
+Fixed the same way most single-writer-JSON-file patterns are: the
+read-increment-write critical section in ``next()`` is now also
+wrapped in an OS-level advisory file lock (``fcntl.flock`` on the
+platforms that have it -- effectively all supported deployment
+targets; on a platform without ``fcntl`` this degrades to
+thread-only locking, same as before this fix, rather than raising).
+The lock is taken on a dedicated ``*.lock`` file (not the data file
+itself) so a lock held across a slow write never blocks a concurrent
+*reader* that only wants to peek at ``current`` -- ``flock`` is
+non-reentrant advisory locking scoped to the file descriptor, and
+using a separate handle keeps ``_read_all``/``_write_all`` free to
+open the data file however is simplest for JSON (de)serialization.
+
 Deliberately not a module-level singleton, mirroring ``secret.py``'s
 own stated reasoning: callers hold a ``SeqNoCounter`` explicitly
 (``GossipService``/``GossipServer`` build one from ``adapter.replica_id``
@@ -61,11 +91,21 @@ available again.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 from cks_runtime.gossip.secret import default_secret_path
+
+try:
+    import fcntl
+
+    _HAS_FLOCK = True
+except ImportError:  # pragma: no cover - exercised only on non-POSIX platforms
+    fcntl = None  # type: ignore[assignment]
+    _HAS_FLOCK = False
 
 _SEQ_NO_FILENAME = "gossip_seq_no"
 
@@ -118,6 +158,7 @@ class SeqNoCounter:
         self._replica_id = str(replica_id)
         self._persist = persist
         self._path = path if path is not None else default_seq_no_path()
+        self._lock_path = self._path.with_name(self._path.name + ".lock")
         self._lock = threading.Lock()
 
         initial = self._read_one(self._replica_id) if persist else 0
@@ -142,9 +183,14 @@ class SeqNoCounter:
         construction -- so a sibling ``SeqNoCounter`` for the same
         ``replica_id`` that has advanced further (a different role in
         this same process, or this same replica in a prior run) is
-        always respected, never overwritten backwards.
+        always respected, never overwritten backwards. The whole
+        read-increment-write is additionally serialized across
+        *processes* via an OS-level file lock (see module docstring's
+        "third bug"), not just across threads in this process --
+        without it, two processes sharing one ``replica_id`` could
+        both compute and persist the same next value.
         """
-        with self._lock:
+        with self._lock, self._cross_process_lock():
             floor = self._value
             if self._persist:
                 all_values = self._read_all()
@@ -159,6 +205,49 @@ class SeqNoCounter:
                 self._write_all(all_values)
 
             return self._value
+
+    @contextlib.contextmanager
+    def _cross_process_lock(self) -> Iterator[None]:
+        """
+        Hold an OS-level advisory lock (``fcntl.flock``) for the
+        duration of one ``next()`` call's critical section, so two
+        separate *processes* sharing this ``replica_id``'s persisted
+        state can never both compute the same next value the way two
+        ``threading.Lock``-only instances could (see module docstring).
+
+        A no-op context (no cross-process exclusion, same as before
+        this fix) when persistence is disabled -- there is no shared
+        file to race over -- or on a platform without ``fcntl``
+        (non-POSIX; thread-level locking still applies via
+        ``self._lock``).
+        """
+        if not self._persist or not _HAS_FLOCK:
+            yield
+            return
+
+        try:
+            self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+            # Opened for append rather than write/truncate: the lock
+            # file's *content* is irrelevant (it exists purely to be
+            # locked), and append mode never destroys another
+            # process's already-open handle to the same inode the way
+            # a fresh 'w'-mode open racing a rename/replace could.
+            lock_file = open(self._lock_path, "a")  # noqa: SIM115 -- lifetime spans the whole `with`
+        except OSError:
+            # Same fallback policy as _write_all: a non-writable
+            # filesystem degrades to thread-only locking rather than
+            # raising out of next().
+            yield
+            return
+
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_file.close()
 
     # ------------------------------------------------------------------
     # Persistence (JSON, keyed by replica_id -- see module docstring)

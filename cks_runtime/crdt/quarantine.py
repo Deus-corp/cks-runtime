@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
-from cks_runtime.crdt.crdt_store import object_id_for
+from cks_runtime.crdt.crdt_store import ObjectIdentityMismatch, object_id_for
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class _SupportsAddObject(Protocol):
 
 
 class _SupportsValidate(Protocol):
-    def validate(self, knowledge_object: Any) -> Any: ...
+    def validate(self, knowledge_structure: Any) -> Any: ...
 
 
 class CRDTQuarantine:
@@ -97,7 +97,29 @@ class CRDTQuarantine:
             # still applies unconditionally.
             return True
         try:
-            result = validate(knowledge_object)
+            # ``validate`` (e.g. ``CoreBridge.validate``, the usual
+            # ``cks`` passed in here -- see the class docstring)
+            # validates a *KnowledgeStructure*, not a bare
+            # KnowledgeObject -- there is no single-object validation
+            # entry point in the Core interface. Wrap the incoming
+            # object in a throwaway single-object structure so the
+            # real validator (structural invariants, cross-object
+            # constraints that happen to degenerate sensibly for one
+            # object, etc.) actually runs, instead of being handed a
+            # shape it was never written to accept. A dict payload
+            # (no live cks.KnowledgeObject to wrap) skips this step --
+            # it isn't something cks.KnowledgeStructure can hold to
+            # begin with -- and relies on the identity check below
+            # alone; that's an accepted, narrower gap for that input
+            # shape, not a regression versus before this change.
+            structure_input = knowledge_object
+            if not isinstance(knowledge_object, dict) and hasattr(
+                knowledge_object, "identity"
+            ):
+                import cks
+
+                structure_input = cks.KnowledgeStructure(objects=[knowledge_object])
+            result = validate(structure_input)
         except Exception:
             logger.exception("CRDTQuarantine: cks.validate() raised")
             return False
@@ -117,14 +139,17 @@ class CRDTQuarantine:
     def _has_consistent_identity(self, knowledge_object: Any) -> bool:
         try:
             object_id_for(knowledge_object)
-        except TypeError:
+        except (TypeError, ObjectIdentityMismatch):
             return False
-        # object_id_for already derives the id *from* the object's own
-        # Merkle leaf hash (`_hash`) rather than trusting a
-        # separately-carried id field -- so successfully computing it
-        # at all is the identity check: there is no way for a caller
-        # to pass a mismatched (object, claimed-id) pair through this
-        # path, unlike a dict payload carrying an attacker-controlled
-        # "id" key that was never hashed to begin with. A raw dict
-        # without a precomputed 'id' correctly fails above.
+        # object_id_for now verifies -- not just derives -- the id for
+        # both input shapes: for a live cks.KnowledgeObject it reads
+        # the object's own Merkle leaf hash (`_hash`) directly, and
+        # for a dict payload (e.g. a gossip-carried record) it
+        # recomputes that same hash from the dict's own
+        # identity/structure fields and raises ObjectIdentityMismatch
+        # if the claimed 'id' doesn't match. So successfully computing
+        # it at all is now genuinely the identity check for either
+        # shape -- there is no path left where a caller-controlled
+        # "id" key is trusted without being checked against the
+        # content it's supposed to describe.
         return True

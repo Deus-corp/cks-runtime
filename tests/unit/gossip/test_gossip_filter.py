@@ -74,11 +74,10 @@ class TestNonceReplayProtection:
 
 
 class TestSequenceProtection:
-    def test_rejects_non_monotonic_sequence(self):
+    def test_rejects_exact_duplicate_sequence(self):
         f = GossipFilter()
         assert f.check("replica-a", "n1", 5, _now_ms()) is True
         assert f.check("replica-a", "n2", 5, _now_ms()) is False
-        assert f.check("replica-a", "n3", 4, _now_ms()) is False
 
     def test_accepts_increasing_sequence(self):
         f = GossipFilter()
@@ -89,6 +88,45 @@ class TestSequenceProtection:
     def test_rejects_negative_sequence(self):
         f = GossipFilter()
         assert f.check("replica-a", "n1", -1, _now_ms()) is False
+
+    def test_accepts_slightly_out_of_order_sequence_within_window(self):
+        """
+        A seq_no arriving a little behind the current high-water mark
+        (e.g. a slower of two concurrent requests from senders sharing
+        one seq_no stream, see GossipFilter's module docstring) is
+        legitimate reordering, not a replay, and must be accepted the
+        first time it's seen.
+        """
+        f = GossipFilter(max_seq_reorder_window=10)
+        assert f.check("replica-a", "n1", 5, _now_ms()) is True
+        # 4 hasn't been seen before and is within the reorder window
+        # behind the high-water mark (5) -- accepted.
+        assert f.check("replica-a", "n2", 4, _now_ms()) is True
+        # The high-water mark itself does not move backwards.
+        assert f.check("replica-a", "n3", 6, _now_ms()) is True
+
+    def test_rejects_replay_of_an_already_accepted_out_of_order_sequence(self):
+        f = GossipFilter(max_seq_reorder_window=10)
+        assert f.check("replica-a", "n1", 5, _now_ms()) is True
+        assert f.check("replica-a", "n2", 4, _now_ms()) is True
+        # seq=4 was already accepted once -- replaying it is rejected
+        # even though it's still within the reorder window.
+        assert f.check("replica-a", "n3", 4, _now_ms()) is False
+
+    def test_rejects_sequence_too_far_behind_the_window(self):
+        f = GossipFilter(max_seq_reorder_window=3)
+        assert f.check("replica-a", "n1", 100, _now_ms()) is True
+        # 96 is more than 3 behind the high-water mark (100) -- too
+        # old to plausibly be ordinary reordering, rejected outright.
+        assert f.check("replica-a", "n2", 96, _now_ms()) is False
+
+    def test_reorder_window_is_bounded_per_sender(self):
+        f = GossipFilter(max_seq_reorder_window=2)
+        assert f.check("replica-a", "n1", 1, _now_ms()) is True
+        assert f.check("replica-a", "n2", 2, _now_ms()) is True
+        assert f.check("replica-a", "n3", 3, _now_ms()) is True
+        stats = f.stats()
+        assert stats["max_seq_reorder_window"] == 2
 
 
 class TestResetAndClear:

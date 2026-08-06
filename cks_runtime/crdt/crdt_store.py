@@ -30,7 +30,9 @@ plugged in, aside from sync vs. async.
 
 from __future__ import annotations
 
+import hmac
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -48,6 +50,8 @@ from cks_runtime.crdt.version_vector import VersionVector
 
 if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Retry helpers (same tuning/shape as sqlite_storage.py / postgres_storage.py;
@@ -93,23 +97,102 @@ async def _retry_on_transient(fn: Callable[[], Awaitable[Any]]) -> Any:
     raise last_exc
 
 
+class ObjectIdentityMismatch(ValueError):
+    """
+    Raised by ``object_id_for`` when a dict payload's declared ``id``
+    does not match the SHA-256 leaf hash recomputed from its own
+    ``identity``/``structure`` fields.
+
+    Distinct from ``TypeError`` (which means "this isn't a recognisable
+    payload shape at all") so callers -- notably ``CRDTQuarantine`` --
+    can tell "malformed" apart from "well-formed but lying about its
+    own id" if they ever need to (e.g. for metrics/alerting on the
+    latter, which is the more interesting signal of the two: it means
+    something -- an attacker or a bit-flip -- actively tampered with a
+    payload rather than just sending garbage).
+    """
+
+
 def object_id_for(knowledge_object: Any) -> str:
     """
     Compute the CRDT record id for a ``cks.KnowledgeObject`` -- its
-    hex-encoded SHA-256 leaf hash. Falls back to hashing a dict
-    payload's ``id``/``identity`` field for callers that pass a plain
-    dict (e.g. reconstructed gossip payloads) rather than a live
-    ``cks.KnowledgeObject`` instance.
+    hex-encoded SHA-256 leaf hash.
+
+    For a plain dict payload (e.g. a gossip envelope's
+    ``knowledge_structure_json`` decoded into ``{"id", "identity",
+    "structure"}`` records, or any other caller that hands this a
+    dict instead of a live ``cks.KnowledgeObject``), the hash is
+    **recomputed** from the dict's own ``identity``/``structure``
+    fields via ``cks.KnowledgeObject`` and checked against the
+    dict's claimed ``id`` -- it is never trusted blindly. A dict
+    whose ``id`` doesn't match its own content raises
+    ``ObjectIdentityMismatch`` rather than silently propagating a
+    caller-controlled id into the G-Set/Merkle tree, which would
+    break the "identical content -> identical record" convergence
+    guarantee the whole store's merge semantics rely on (see this
+    module's docstring) and let a tampered or corrupted payload sit
+    at an id that doesn't actually describe it.
     """
     leaf_hash = getattr(knowledge_object, "_hash", None)
     if isinstance(leaf_hash, bytes):
         return leaf_hash.hex()
+
     if isinstance(knowledge_object, dict) and isinstance(knowledge_object.get("id"), str):
-        return knowledge_object["id"]
+        claimed_id = knowledge_object["id"]
+        recomputed_id = _recompute_dict_object_id(knowledge_object)
+        if recomputed_id is None:
+            # Identity/structure fields missing or malformed -- can't
+            # verify, so don't trust the claim either. Same treatment
+            # as any other unrecognisable payload shape.
+            raise TypeError(
+                "object_id_for: dict payload is missing a well-formed "
+                "'identity'/'structure' to verify its claimed 'id' "
+                f"{claimed_id!r} against"
+            )
+        if not hmac.compare_digest(recomputed_id, claimed_id):
+            raise ObjectIdentityMismatch(
+                f"object_id_for: dict payload claims id {claimed_id!r} but "
+                f"its identity/structure hashes to {recomputed_id!r}"
+            )
+        return claimed_id
+
     raise TypeError(
         "object_id_for expects a cks.KnowledgeObject or a dict with a "
         f"precomputed 'id', got {type(knowledge_object)!r}"
     )
+
+
+def _recompute_dict_object_id(record: dict[str, Any]) -> str | None:
+    """
+    Rebuild a ``cks.KnowledgeObject`` from a dict record's
+    ``identity``/``structure`` fields and return its real leaf hash,
+    or ``None`` if the record doesn't carry enough to reconstruct one
+    (missing/malformed ``identity``, non-mapping ``structure``, ...).
+
+    Delegates the actual hashing to ``cks.KnowledgeObject`` itself
+    (imported lazily to avoid a hard import-time dependency for
+    callers of this module that never touch a dict payload) rather
+    than reimplementing the canonical hash here, so this can never
+    silently drift from cks-core's own leaf-hash definition.
+    """
+    import cks
+
+    identity = record.get("identity")
+    structure = record.get("structure")
+    if not isinstance(identity, dict) or not isinstance(structure, dict):
+        return None
+    try:
+        obj = cks.KnowledgeObject(
+            identity=cks.ObjectIdentity(
+                id=str(identity["id"]),
+                type=str(identity["type"]),
+                name=str(identity["name"]),
+            ),
+            structure=structure,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    return obj._hash.hex()
 
 
 def _serialize_object(knowledge_object: Any, object_id: str) -> dict[str, Any]:
@@ -245,8 +328,29 @@ class SQLiteCRDTStore:
         return [json.loads(row[0]) for row in cur.fetchall()]
 
     def merge_objects(self, objects: list[Any]) -> int:
-        """Add every object in ``objects``; return how many were new."""
-        return sum(1 for obj in objects if self.add_object(obj))
+        """
+        Add every object in ``objects``; return how many were new.
+
+        One object failing ``object_id_for``'s checks (a malformed
+        payload, or -- for a dict record -- an ``id`` that doesn't
+        match its own recomputed hash, see ``ObjectIdentityMismatch``)
+        is logged and skipped rather than aborting the rest of the
+        batch: a single tampered or corrupted object from a peer must
+        not cost every *other*, perfectly valid object in the same
+        gossip round its chance to merge.
+        """
+        count = 0
+        for obj in objects:
+            try:
+                if self.add_object(obj):
+                    count += 1
+            except (TypeError, ObjectIdentityMismatch):
+                logger.warning(
+                    "SQLiteCRDTStore.merge_objects: skipping object that "
+                    "failed identity/shape validation.",
+                    exc_info=True,
+                )
+        return count
 
     # -- Merkle delegation ---------------------------------------------------
 
@@ -550,10 +654,18 @@ class PostgresCRDTStore:
         return await _retry_on_transient(_read)
 
     async def merge_objects(self, objects: list[Any]) -> int:
+        """Async counterpart of ``SQLiteCRDTStore.merge_objects`` -- see its docstring."""
         count = 0
         for obj in objects:
-            if await self.add_object(obj):
-                count += 1
+            try:
+                if await self.add_object(obj):
+                    count += 1
+            except (TypeError, ObjectIdentityMismatch):
+                logger.warning(
+                    "PostgresCRDTStore.merge_objects: skipping object that "
+                    "failed identity/shape validation.",
+                    exc_info=True,
+                )
         return count
 
     async def get_root_hash(self) -> str:
@@ -847,7 +959,19 @@ class InMemoryCRDTStore:
         return list(self._objects.values())
 
     def merge_objects(self, objects: list[Any]) -> int:
-        return sum(1 for obj in objects if self.add_object(obj))
+        """In-memory counterpart of ``SQLiteCRDTStore.merge_objects`` -- see its docstring."""
+        count = 0
+        for obj in objects:
+            try:
+                if self.add_object(obj):
+                    count += 1
+            except (TypeError, ObjectIdentityMismatch):
+                logger.warning(
+                    "InMemoryCRDTStore.merge_objects: skipping object that "
+                    "failed identity/shape validation.",
+                    exc_info=True,
+                )
+        return count
 
     def _rebuild_tree(self) -> None:
         from cks_runtime.crdt.merkle_tree import (
