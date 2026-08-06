@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.43.0] - 2026-08-05
+
+### Added
+- **`last_error` field on `OutboxTask`** — `list_dead_letter_tasks()` in `SQLiteStorage` and `PostgresStorage` now populates the `last_error` field from the outbox row, so a reader (e.g. `cks-mcp`'s new `review_dead_letter` tool) can see why a task was dead-lettered without a separate query. `OutboxTask` dataclass gains an optional `last_error: str | None` field (default `None` for backward compatibility with existing callers that construct `OutboxTask` from other queries).
+
+---
+
 ## [1.42.0] - 2026-08-05
 
 ### Added

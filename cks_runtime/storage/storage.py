@@ -506,3 +506,4 @@ class OutboxTask:
     session_id: str
     payload: str
     retry_count: int = 0
+    last_error: str | None = None

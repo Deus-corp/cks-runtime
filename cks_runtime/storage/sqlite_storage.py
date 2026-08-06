@@ -877,7 +877,7 @@ class SQLiteStorage(RuntimeStorage):
             if task_type is None:
                 rows = self._conn.execute(
                     """
-                    SELECT task_id, task_type, session_id, payload, retry_count
+                    SELECT task_id, task_type, session_id, payload, retry_count, last_error
                     FROM cks_outbox_tasks
                     WHERE status = 'DEAD'
                     ORDER BY created_at ASC
@@ -886,7 +886,7 @@ class SQLiteStorage(RuntimeStorage):
             else:
                 rows = self._conn.execute(
                     """
-                    SELECT task_id, task_type, session_id, payload, retry_count
+                    SELECT task_id, task_type, session_id, payload, retry_count, last_error
                     FROM cks_outbox_tasks
                     WHERE status = 'DEAD' AND task_type = ?
                     ORDER BY created_at ASC
@@ -903,6 +903,7 @@ class SQLiteStorage(RuntimeStorage):
                 session_id=row[2],
                 payload=row[3],
                 retry_count=row[4],
+                last_error=row[5],
             )
             for row in rows
         ]
