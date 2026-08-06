@@ -33,10 +33,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from cks_runtime.crdt.causality import CONCURRENT, DOMINATED, causality_check
 from cks_runtime.crdt.merkle_tree import (
     DDL_STATEMENTS,
     PostgresMerkleTree,
@@ -164,6 +166,38 @@ class SQLiteCRDTStore:
             )
             """
         )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_mv_register (
+                pointer_key  TEXT NOT NULL,
+                object_id    TEXT NOT NULL,
+                vector_clock TEXT NOT NULL,
+                origin_node  TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (pointer_key, object_id)
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mv_register_lookup "
+            "ON cks_mv_register(pointer_key)"
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_conflict_events (
+                event_id               TEXT PRIMARY KEY,
+                pointer_key            TEXT NOT NULL,
+                conflicting_object_ids TEXT NOT NULL,
+                vector_clocks          TEXT NOT NULL,
+                status                 TEXT NOT NULL DEFAULT 'PENDING',
+                created_at             TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conflicts_pending "
+            "ON cks_conflict_events(status) WHERE status = 'PENDING'"
+        )
         self._conn.commit()
 
     # -- G-Set -------------------------------------------------------------
@@ -249,6 +283,198 @@ class SQLiteCRDTStore:
             return VersionVector()
         return VersionVector.from_dict(json.loads(row[0]))
 
+    # -- MV-Register (ADR-013 Stage 2) ---------------------------------------
+
+    def update_pointer(
+        self, pointer_key: str, object_id: str, vv: VersionVector, origin_node: str
+    ) -> bool:
+        """
+        Record ``object_id`` as a version of ``pointer_key``, dropping
+        any existing pointer(s) this new one causally dominates.
+
+        Returns True iff the new record was actually added -- False
+        when an existing record for this exact ``object_id`` already
+        dominates or equals ``vv`` (the write is a stale/duplicate
+        replay and is discarded, mirroring the G-Set's own "already
+        known" no-op). A record that is *concurrent* with one or more
+        existing pointers is added alongside them (a fork), never in
+        place of them -- see ``causality_check``.
+        """
+
+        def _write() -> bool:
+            cur = self._conn.execute(
+                "SELECT object_id, vector_clock FROM cks_mv_register WHERE pointer_key = ?",
+                (pointer_key,),
+            )
+            existing = [(row[0], VersionVector.from_dict(json.loads(row[1]))) for row in cur.fetchall()]
+
+            to_delete: list[str] = []
+            for existing_id, existing_vv in existing:
+                relation = causality_check(vv, existing_vv)
+                if relation == DOMINATED and existing_id != object_id:
+                    # An existing pointer is causally newer than this
+                    # write -- this write is stale, discard it outright.
+                    return False
+                if relation != CONCURRENT and existing_id != object_id:
+                    # This write dominates (or equals) the existing
+                    # pointer -- the existing one is now superseded.
+                    to_delete.append(existing_id)
+
+            for stale_id in to_delete:
+                self._conn.execute(
+                    "DELETE FROM cks_mv_register WHERE pointer_key = ? AND object_id = ?",
+                    (pointer_key, stale_id),
+                )
+
+            self._conn.execute(
+                """
+                INSERT INTO cks_mv_register
+                    (pointer_key, object_id, vector_clock, origin_node, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(pointer_key, object_id) DO UPDATE SET
+                    vector_clock = excluded.vector_clock,
+                    origin_node  = excluded.origin_node
+                """,
+                (
+                    pointer_key,
+                    object_id,
+                    json.dumps(vv.to_dict()),
+                    origin_node,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            self._conn.commit()
+            return True
+
+        return _retry_on_locked(_write)
+
+    def get_pointers(self, pointer_key: str) -> list[dict[str, Any]]:
+        cur = self._conn.execute(
+            "SELECT object_id, vector_clock, origin_node, created_at "
+            "FROM cks_mv_register WHERE pointer_key = ? ORDER BY created_at",
+            (pointer_key,),
+        )
+        return [
+            {
+                "pointer_key": pointer_key,
+                "object_id": row[0],
+                "vector_clock": json.loads(row[1]),
+                "origin_node": row[2],
+                "created_at": row[3],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def resolve_pointer(self, pointer_key: str, winner_object_id: str) -> bool:
+        """
+        Collapse ``pointer_key`` down to exactly ``winner_object_id``,
+        discarding every other competing pointer -- called by
+        ``CriticAgent`` once a fork has been arbitrated. Returns True
+        iff a record for ``winner_object_id`` existed and now stands
+        alone.
+        """
+
+        def _write() -> bool:
+            cur = self._conn.execute(
+                "SELECT 1 FROM cks_mv_register WHERE pointer_key = ? AND object_id = ?",
+                (pointer_key, winner_object_id),
+            )
+            if cur.fetchone() is None:
+                return False
+
+            self._conn.execute(
+                "DELETE FROM cks_mv_register WHERE pointer_key = ? AND object_id != ?",
+                (pointer_key, winner_object_id),
+            )
+            self._conn.commit()
+            return True
+
+        return _retry_on_locked(_write)
+
+    # -- Conflict events (ADR-013 Stage 2) -----------------------------------
+
+    def escalate_fork(
+        self,
+        pointer_key: str,
+        object_ids: list[str],
+        vector_clocks: list[dict[str, int]],
+    ) -> str:
+        """
+        Record a detected fork (concurrent pointers for ``pointer_key``)
+        as a PENDING ``cks_conflict_events`` row and return its
+        ``event_id``. SQLite has no NOTIFY equivalent -- a consumer
+        (``cks-mcp``) is expected to poll ``list_pending_forks``.
+        """
+        event_id = str(uuid.uuid4())
+
+        def _write() -> None:
+            self._conn.execute(
+                """
+                INSERT INTO cks_conflict_events
+                    (event_id, pointer_key, conflicting_object_ids, vector_clocks, status, created_at)
+                VALUES (?, ?, ?, ?, 'PENDING', ?)
+                """,
+                (
+                    event_id,
+                    pointer_key,
+                    json.dumps(object_ids),
+                    json.dumps(vector_clocks),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+        return event_id
+
+    def list_pending_forks(self) -> list[dict[str, Any]]:
+        cur = self._conn.execute(
+            "SELECT event_id, pointer_key, conflicting_object_ids, vector_clocks, created_at "
+            "FROM cks_conflict_events WHERE status = 'PENDING' ORDER BY created_at"
+        )
+        return [
+            {
+                "event_id": row[0],
+                "pointer_key": row[1],
+                "conflicting_object_ids": json.loads(row[2]),
+                "vector_clocks": json.loads(row[3]),
+                "created_at": row[4],
+            }
+            for row in cur.fetchall()
+        ]
+
+    def mark_fork_resolved(self, event_id: str) -> None:
+        def _write() -> None:
+            self._conn.execute(
+                "UPDATE cks_conflict_events SET status = 'RESOLVED' WHERE event_id = ?",
+                (event_id,),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
+    # -- Multi-process refresh (ADR-013 Stage 2) -----------------------------
+
+    def refresh_from_storage(self) -> int:
+        """
+        No-op for SQLite: every read (``get_object``/``list_objects``/
+        ``get_pointers``/...) already queries the connection live, so
+        there is no separate in-memory cache to resync here. Present
+        (and documented as a no-op) purely so callers -- e.g.
+        ``GossipAdapter`` -- can call it unconditionally regardless of
+        which backend is plugged in, the same way
+        ``InMemoryCRDTStore.refresh_from_storage`` is a no-op below for
+        the opposite reason (nothing persistent to read from). Kept as
+        a *method on the connection-backed store*, not a module-level
+        helper, because a future incremental in-memory read cache
+        (e.g. to avoid re-parsing JSON on every ``list_objects`` call)
+        would need exactly this hook to invalidate itself -- see
+        ``BlackSwan``'s ``CRDTAdapter.refresh_from_storage`` for the
+        equivalent multi-process cache-invalidation need this mirrors.
+        Always returns 0 (nothing to refresh).
+        """
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # PostgreSQL backend (async)
@@ -266,6 +492,10 @@ class PostgresCRDTStore:
         async with self._pool.connection() as conn:
             await conn.execute(_DDL_KNOWLEDGE_OBJECTS)
             await conn.execute(_DDL_CRDT_STATE)
+            await conn.execute(_DDL_MV_REGISTER)
+            await conn.execute(_DDL_MV_REGISTER_INDEX)
+            await conn.execute(_DDL_CONFLICT_EVENTS)
+            await conn.execute(_DDL_CONFLICT_EVENTS_INDEX)
             for statement in DDL_STATEMENTS:
                 await conn.execute(statement)
 
@@ -363,6 +593,170 @@ class PostgresCRDTStore:
 
         return await _retry_on_transient(_read)
 
+    # -- MV-Register (ADR-013 Stage 2) ---------------------------------------
+
+    async def update_pointer(
+        self, pointer_key: str, object_id: str, vv: VersionVector, origin_node: str
+    ) -> bool:
+        """Async counterpart of ``SQLiteCRDTStore.update_pointer`` -- see its docstring."""
+
+        async def _write() -> bool:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT object_id, vector_clock FROM cks_mv_register WHERE pointer_key = %s",
+                    (pointer_key,),
+                )
+                rows = await cur.fetchall()
+                existing = [(row[0], VersionVector.from_dict(row[1])) for row in rows]
+
+                to_delete: list[str] = []
+                for existing_id, existing_vv in existing:
+                    relation = causality_check(vv, existing_vv)
+                    if relation == DOMINATED and existing_id != object_id:
+                        return False
+                    if relation != CONCURRENT and existing_id != object_id:
+                        to_delete.append(existing_id)
+
+                for stale_id in to_delete:
+                    await conn.execute(
+                        "DELETE FROM cks_mv_register WHERE pointer_key = %s AND object_id = %s",
+                        (pointer_key, stale_id),
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO cks_mv_register
+                        (pointer_key, object_id, vector_clock, origin_node, created_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (pointer_key, object_id) DO UPDATE SET
+                        vector_clock = EXCLUDED.vector_clock,
+                        origin_node  = EXCLUDED.origin_node
+                    """,
+                    (pointer_key, object_id, json.dumps(vv.to_dict()), origin_node),
+                )
+                await conn.commit()
+                return True
+
+        return await _retry_on_transient(_write)
+
+    async def get_pointers(self, pointer_key: str) -> list[dict[str, Any]]:
+        async def _read() -> list[dict[str, Any]]:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT object_id, vector_clock, origin_node, created_at "
+                    "FROM cks_mv_register WHERE pointer_key = %s ORDER BY created_at",
+                    (pointer_key,),
+                )
+                rows = await cur.fetchall()
+                return [
+                    {
+                        "pointer_key": pointer_key,
+                        "object_id": row[0],
+                        "vector_clock": row[1],
+                        "origin_node": row[2],
+                        "created_at": row[3].isoformat() if hasattr(row[3], "isoformat") else row[3],
+                    }
+                    for row in rows
+                ]
+
+        return await _retry_on_transient(_read)
+
+    async def resolve_pointer(self, pointer_key: str, winner_object_id: str) -> bool:
+        async def _write() -> bool:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT 1 FROM cks_mv_register WHERE pointer_key = %s AND object_id = %s",
+                    (pointer_key, winner_object_id),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    return False
+
+                await conn.execute(
+                    "DELETE FROM cks_mv_register WHERE pointer_key = %s AND object_id != %s",
+                    (pointer_key, winner_object_id),
+                )
+                await conn.commit()
+                return True
+
+        return await _retry_on_transient(_write)
+
+    # -- Conflict events (ADR-013 Stage 2) -----------------------------------
+
+    async def escalate_fork(
+        self,
+        pointer_key: str,
+        object_ids: list[str],
+        vector_clocks: list[dict[str, int]],
+    ) -> str:
+        """
+        Record a detected fork and send ``NOTIFY cks_fork_detected,
+        '<event_id>'`` so a listening ``cks-mcp`` process can react
+        immediately instead of waiting for its next poll of
+        ``list_pending_forks``.
+        """
+        event_id = str(uuid.uuid4())
+
+        async def _write() -> None:
+            async with self._pool.connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO cks_conflict_events
+                        (event_id, pointer_key, conflicting_object_ids, vector_clocks, status, created_at)
+                    VALUES (%s, %s, %s, %s, 'PENDING', now())
+                    """,
+                    (event_id, pointer_key, json.dumps(object_ids), json.dumps(vector_clocks)),
+                )
+                await conn.execute("SELECT pg_notify('cks_fork_detected', %s)", (event_id,))
+                await conn.commit()
+
+        await _retry_on_transient(_write)
+        return event_id
+
+    async def list_pending_forks(self) -> list[dict[str, Any]]:
+        async def _read() -> list[dict[str, Any]]:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT event_id, pointer_key, conflicting_object_ids, vector_clocks, created_at "
+                    "FROM cks_conflict_events WHERE status = 'PENDING' ORDER BY created_at"
+                )
+                rows = await cur.fetchall()
+                return [
+                    {
+                        "event_id": str(row[0]),
+                        "pointer_key": row[1],
+                        "conflicting_object_ids": row[2],
+                        "vector_clocks": row[3],
+                        "created_at": row[4].isoformat() if hasattr(row[4], "isoformat") else row[4],
+                    }
+                    for row in rows
+                ]
+
+        return await _retry_on_transient(_read)
+
+    async def mark_fork_resolved(self, event_id: str) -> None:
+        async def _write() -> None:
+            async with self._pool.connection() as conn:
+                await conn.execute(
+                    "UPDATE cks_conflict_events SET status = 'RESOLVED' WHERE event_id = %s",
+                    (event_id,),
+                )
+                await conn.commit()
+
+        await _retry_on_transient(_write)
+
+    # -- Multi-process refresh (ADR-013 Stage 2) -----------------------------
+
+    async def refresh_from_storage(self) -> int:
+        """
+        No-op for PostgreSQL, for the same reason as
+        ``SQLiteCRDTStore.refresh_from_storage``: every read already
+        goes straight to the database via the connection pool, so
+        there is nothing cached in-process to resync. Present for
+        interface symmetry with the sync backends. Always returns 0.
+        """
+        return 0
+
 
 _DDL_KNOWLEDGE_OBJECTS = """
     CREATE TABLE IF NOT EXISTS cks_knowledge_objects (
@@ -379,6 +773,38 @@ _DDL_CRDT_STATE = """
         version_vector JSONB NOT NULL,
         updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
     )
+"""
+
+_DDL_MV_REGISTER = """
+    CREATE TABLE IF NOT EXISTS cks_mv_register (
+        pointer_key  VARCHAR(255) NOT NULL,
+        object_id    VARCHAR(64) NOT NULL,
+        vector_clock JSONB NOT NULL,
+        origin_node  VARCHAR(64) NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (pointer_key, object_id)
+    )
+"""
+
+_DDL_MV_REGISTER_INDEX = """
+    CREATE INDEX IF NOT EXISTS idx_mv_register_lookup
+        ON cks_mv_register(pointer_key)
+"""
+
+_DDL_CONFLICT_EVENTS = """
+    CREATE TABLE IF NOT EXISTS cks_conflict_events (
+        event_id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pointer_key             VARCHAR(255) NOT NULL,
+        conflicting_object_ids JSONB NOT NULL,
+        vector_clocks          JSONB NOT NULL,
+        status                  VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+"""
+
+_DDL_CONFLICT_EVENTS_INDEX = """
+    CREATE INDEX IF NOT EXISTS idx_conflicts_pending
+        ON cks_conflict_events(status) WHERE status = 'PENDING'
 """
 
 
@@ -401,6 +827,10 @@ class InMemoryCRDTStore:
         # id -> hash, rebuilt lazily by _tree()
         self._tree_dirty = True
         self._nodes: dict[str, str] = {}
+        # pointer_key -> {object_id: (vv, origin_node, created_at)}
+        self._pointers: dict[str, dict[str, tuple[VersionVector, str, str]]] = {}
+        # event_id -> record
+        self._conflict_events: dict[str, dict[str, Any]] = {}
 
     def add_object(self, knowledge_object: Any) -> bool:
         object_id = object_id_for(knowledge_object)
@@ -461,6 +891,93 @@ class InMemoryCRDTStore:
 
     def get_version_vector(self, node_id: str) -> VersionVector:
         return self._vectors.get(node_id, VersionVector())
+
+    # -- MV-Register (ADR-013 Stage 2) ---------------------------------------
+
+    def update_pointer(
+        self, pointer_key: str, object_id: str, vv: VersionVector, origin_node: str
+    ) -> bool:
+        bucket = self._pointers.setdefault(pointer_key, {})
+
+        to_delete: list[str] = []
+        for existing_id, (existing_vv, _origin, _ts) in bucket.items():
+            relation = causality_check(vv, existing_vv)
+            if relation == DOMINATED and existing_id != object_id:
+                return False
+            if relation != CONCURRENT and existing_id != object_id:
+                to_delete.append(existing_id)
+
+        for stale_id in to_delete:
+            del bucket[stale_id]
+
+        bucket[object_id] = (
+            VersionVector(clocks=dict(vv.clocks)),
+            origin_node,
+            datetime.now(UTC).isoformat(),
+        )
+        return True
+
+    def get_pointers(self, pointer_key: str) -> list[dict[str, Any]]:
+        bucket = self._pointers.get(pointer_key, {})
+        return [
+            {
+                "pointer_key": pointer_key,
+                "object_id": object_id,
+                "vector_clock": vv.to_dict(),
+                "origin_node": origin_node,
+                "created_at": created_at,
+            }
+            for object_id, (vv, origin_node, created_at) in bucket.items()
+        ]
+
+    def resolve_pointer(self, pointer_key: str, winner_object_id: str) -> bool:
+        bucket = self._pointers.get(pointer_key)
+        if not bucket or winner_object_id not in bucket:
+            return False
+        winner = bucket[winner_object_id]
+        self._pointers[pointer_key] = {winner_object_id: winner}
+        return True
+
+    # -- Conflict events (ADR-013 Stage 2) -----------------------------------
+
+    def escalate_fork(
+        self,
+        pointer_key: str,
+        object_ids: list[str],
+        vector_clocks: list[dict[str, int]],
+    ) -> str:
+        event_id = str(uuid.uuid4())
+        self._conflict_events[event_id] = {
+            "event_id": event_id,
+            "pointer_key": pointer_key,
+            "conflicting_object_ids": list(object_ids),
+            "vector_clocks": [dict(vc) for vc in vector_clocks],
+            "status": "PENDING",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        return event_id
+
+    def list_pending_forks(self) -> list[dict[str, Any]]:
+        return [
+            {k: v for k, v in record.items() if k != "status"}
+            for record in self._conflict_events.values()
+            if record["status"] == "PENDING"
+        ]
+
+    def mark_fork_resolved(self, event_id: str) -> None:
+        record = self._conflict_events.get(event_id)
+        if record is not None:
+            record["status"] = "RESOLVED"
+
+    # -- Multi-process refresh (ADR-013 Stage 2) -----------------------------
+
+    def refresh_from_storage(self) -> int:
+        """
+        Not applicable for the in-memory backend -- there is no
+        persistent storage to refresh from, and no second process can
+        ever share this instance's memory. Always returns 0.
+        """
+        return 0
 
 
 #: Union type alias for call sites that accept any sync backend.

@@ -222,3 +222,36 @@ class InferenceConflictDetected(RuntimeEvent):
     version_id: str = ""
 
     diagnostics: list[Any] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class CRDTForkDetected(RuntimeEvent):
+    """
+    Published by ``GossipAdapter._handle_fork`` (ADR-013, Stage 2) when
+    ``CRDTStore.update_pointer`` reports a *concurrent* MV-Register
+    write -- two (or more) object_ids for the same ``pointer_key``,
+    neither causally dominating the other (see
+    ``cks_runtime.crdt.causality.causality_check``). Unlike
+    ``GossipConflictDetected``, this is not a session-merge conflict:
+    it is a fork in *which object a pointer currently names*, detected
+    entirely within the CRDT layer (G-Set + MV-Register), independent
+    of any ``RuntimeSession``.
+
+    ``pointer_key`` identifies which MV-Register pointer forked.
+    ``conflicting_object_ids`` are every object_id currently competing
+    for that pointer (already persisted, alongside their vector
+    clocks, in ``cks_conflict_events`` via
+    ``CRDTStore.escalate_fork`` -- this event is a live notification
+    of that same row, not a substitute for it; a subscriber that
+    missed this event can still find the row via
+    ``list_pending_forks``). ``conflict_event_id`` is the
+    ``cks_conflict_events.event_id`` of that row, so a subscriber can
+    call ``mark_fork_resolved`` once it's dealt with, without a
+    separate lookup.
+    """
+
+    pointer_key: str = ""
+
+    conflicting_object_ids: list[str] = field(default_factory=list)
+
+    conflict_event_id: str = ""

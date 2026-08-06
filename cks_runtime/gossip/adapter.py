@@ -54,7 +54,7 @@ from uuid import uuid4
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.events.event_bus import EventBus
-from cks_runtime.events.runtime_event import GossipConflictDetected
+from cks_runtime.events.runtime_event import CRDTForkDetected, GossipConflictDetected
 from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import (
     EMPTY_STATE_VERSION_ID,
@@ -297,7 +297,93 @@ class GossipAdapter:
         result = self._crdt_store.merge_objects(list(objects))
         if hasattr(result, "__await__"):
             result = await result
+
+        # ADR-013 Stage 2: also advance each object's identity-scoped
+        # MV-Register pointer (`identity.id`, the application-level
+        # object identity -- distinct from the G-Set's Merkle-hash
+        # `object_id`) to this node's remote vector clock, escalating
+        # to `_handle_fork` whenever `update_pointer` reports a
+        # concurrent write. Best-effort: a store without MV-Register
+        # support (or a duck-typed test double) is skipped silently,
+        # since this is additive to the Stage 1 G-Set merge above, not
+        # a replacement for it.
+        update_pointer = getattr(self._crdt_store, "update_pointer", None)
+        if callable(update_pointer):
+            from cks_runtime.crdt.crdt_store import object_id_for
+            from cks_runtime.crdt.version_vector import (
+                VersionVector as CrdtVersionVector,
+            )
+
+            remote_vv = CrdtVersionVector.from_dict(
+                remote_session.metadata.get("crdt_version_vector")
+            )
+            for obj in objects:
+                identity = getattr(obj, "identity", None)
+                pointer_key = getattr(identity, "id", None)
+                if not pointer_key:
+                    continue
+                try:
+                    object_id = object_id_for(obj)
+                except TypeError:
+                    continue
+                added = update_pointer(pointer_key, object_id, remote_vv, self._replica_id)
+                if hasattr(added, "__await__"):
+                    added = await added
+                if added:
+                    await self._detect_and_handle_fork(pointer_key)
+
         return result
+
+    async def _detect_and_handle_fork(self, pointer_key: str) -> None:
+        """
+        After a successful ``update_pointer`` write, check whether
+        ``pointer_key`` now has more than one live pointer (a fork)
+        and, if so, hand it to ``_handle_fork``. Kept as a separate
+        step rather than inline in ``_merge_crdt_objects`` so tests can
+        call it directly against a store pre-seeded with concurrent
+        pointers, without needing a full remote session round-trip.
+        """
+        get_pointers = getattr(self._crdt_store, "get_pointers", None)
+        if not callable(get_pointers):
+            return
+        pointers = get_pointers(pointer_key)
+        if hasattr(pointers, "__await__"):
+            pointers = await pointers
+        if len(pointers) <= 1:
+            return
+        object_ids = [p["object_id"] for p in pointers]
+        vector_clocks = [p["vector_clock"] for p in pointers]
+        await self._handle_fork(pointer_key, object_ids, vector_clocks)
+
+    async def _handle_fork(
+        self,
+        pointer_key: str,
+        object_ids: list[str],
+        vector_clocks: list[dict[str, int]],
+    ) -> None:
+        """
+        Escalate a detected MV-Register fork (ADR-013, Stage 2): persist
+        it via ``CRDTStore.escalate_fork`` (which also sends `NOTIFY
+        cks_fork_detected` for the Postgres backend) and publish
+        ``CRDTForkDetected`` on this Runtime's event bus for any
+        in-process subscriber (mirroring how ``GossipConflictDetected``
+        is published below for session-level conflicts).
+        """
+        escalate_fork = getattr(self._crdt_store, "escalate_fork", None)
+        if not callable(escalate_fork):
+            return
+        event_id = escalate_fork(pointer_key, object_ids, vector_clocks)
+        if hasattr(event_id, "__await__"):
+            event_id = await event_id
+
+        if self._event_bus is not None:
+            await self._event_bus.publish(
+                CRDTForkDetected(
+                    pointer_key=pointer_key,
+                    conflicting_object_ids=object_ids,
+                    conflict_event_id=event_id,
+                )
+            )
 
     async def _apply_remote_session_locked(self, remote_session: RuntimeSession) -> bool:
         await self._merge_crdt_objects(remote_session)

@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.46.0] - 2026-08-06
+
+### Added
+- **CRDT adapter – Stage 2: MV‑Register, fork detection, and Conflict Event bus (ADR‑013).** The `cks_runtime/crdt/` module now supports pointer management via a multi‑value register (`cks_mv_register`), causal ordering through `causality_check()` (replacing simple Last‑Write‑Wins), automatic fork detection when two nodes produce concurrent versions of the same pointer, and a transactional outbox table (`cks_conflict_events`) that records conflicts for later resolution. PostgreSQL backends additionally emit `NOTIFY cks_fork_detected` so that listeners can react immediately.
+- **`CRDTForkDetected`** runtime event – published on the `EventBus` whenever a gossip merge discovers a concurrent fork, carrying the pointer key, conflicting object ids, and the conflict event id.
+- **`CRDTQuarantine`** (`cks_runtime/crdt/quarantine.py`) – validates incoming `KnowledgeObject`s through `cks.validate()` and Merkle‑identity checks before adding them to the CRDT store.
+- **`GossipAdapter._detect_and_handle_fork`** – wired into the existing CRDT merge path so that MV‑Register updates automatically escalate concurrent situations into conflict events.
+- New unit tests: `tests/unit/crdt/test_causality.py`, `tests/unit/crdt/test_mv_register.py`, `tests/unit/crdt/test_fork_detection.py`, `tests/unit/crdt/test_quarantine.py`, and `tests/unit/gossip/test_gossip_fork_integration.py` (239 tests total, all passing).
+
+---
+
 ## [1.45.0] - 2026-08-06
 
 ### Added
