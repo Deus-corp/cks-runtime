@@ -6,7 +6,7 @@
 
 **Current Target:** Version 2.0 buildout (Runtime 1.0 was reached and surpassed; actual latest release is v1.33.0)
 
-**Roadmap Version:** 1.1
+**Roadmap Version:** 1.2
 
 ---
 
