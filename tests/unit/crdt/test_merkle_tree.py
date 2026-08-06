@@ -85,3 +85,52 @@ def test_readding_same_object_is_idempotent_for_root_hash(tree: SQLiteMerkleTree
 def test_rejects_non_sha256_id(tree: SQLiteMerkleTree):
     with pytest.raises(ValueError):
         tree.update_merkle_path("not-a-valid-hex-id")
+
+
+def test_get_children_hashes_uses_one_query_not_sixteen(tree: SQLiteMerkleTree):
+    """
+    Regression/perf test: ``get_children_hashes`` must fetch all 16
+    nibble children in a single SQL statement, not one query per
+    nibble -- the latter meant ``update_merkle_path`` (which calls
+    ``get_children_hashes`` once per level, 64 times per inserted
+    object) issued up to 1,024 sequential queries for a single insert.
+    """
+    tree.update_merkle_path(_id_for("object-1"))
+
+    queries: list[str] = []
+    tree._conn.set_trace_callback(queries.append)
+    try:
+        tree.get_children_hashes("")
+    finally:
+        tree._conn.set_trace_callback(None)
+
+    select_queries = [q for q in queries if q.strip().upper().startswith("SELECT")]
+    assert len(select_queries) == 1
+
+
+def test_get_children_hashes_pattern_does_not_leak_across_prefixes(
+    tree: SQLiteMerkleTree,
+):
+    """
+    The batched LIKE-based lookup must still only match true children
+    of the requested prefix -- not any other same-length node whose
+    path happens to share a suffix, nor a node at a different level
+    entirely. Two ids that diverge at the first nibble must not affect
+    each other's children lookup at that prefix.
+    """
+    id_a = _id_for("object-a")
+    id_b = _id_for("object-b")
+    assume_different_first_nibble = id_a[0] != id_b[0]
+    if not assume_different_first_nibble:
+        # Extremely unlikely for SHA-256 outputs of different inputs,
+        # but keep the test deterministic rather than flaky.
+        id_b = "f" + id_b[1:] if id_a[0] != "f" else "0" + id_b[1:]
+
+    tree.update_merkle_path(id_a)
+    tree.update_merkle_path(id_b)
+
+    children_of_a_first_nibble = tree.get_children_hashes(id_a[0])
+    # None of object B's path nodes should show up under object A's
+    # first-nibble prefix.
+    for child_hash in children_of_a_first_nibble:
+        assert child_hash != id_b

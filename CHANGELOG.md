@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.0] - 2026-08-06
+
+### Changed
+- **SQLiteMerkleTree.get_children_hashes now fetches all 16 nibble children in a single query** instead of 16 sequential `_get_hash` calls. This reduces `update_merkle_path` from up to 1,024 SQL statements per inserted object to 64, matching the existing Postgres implementation.
+- **GossipFilter seen-set eviction is now driven by sequence number value, not insertion order.** Previously an insertion-order LRU could evict a legitimate in-window sequence number because it arrived first, letting a later replay of that value slip through as new. Now values are pruned only when they genuinely fall behind the reorder window, preserving the documented guarantee that no sequence number is ever accepted twice.
+
+### Added
+- New regression tests: `test_get_children_hashes_uses_one_query_not_sixteen`, `test_get_children_hashes_pattern_does_not_leak_across_prefixes`, and `test_replay_of_an_in_window_seq_no_is_rejected_regardless_of_arrival_order`.
+
+---
+
 ## [1.47.0] - 2026-08-06
 
 ### Fixed

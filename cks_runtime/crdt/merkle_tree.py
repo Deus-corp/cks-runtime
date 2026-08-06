@@ -68,6 +68,24 @@ def _validate_id(object_id: str) -> None:
         )
 
 
+def _like_children_pattern(prefix_path: str) -> str:
+    """
+    Build a ``LIKE`` pattern matching exactly ``prefix_path + <one char>``.
+
+    Escapes SQLite's ``LIKE`` wildcards (``%``, ``_``) and the escape
+    character itself in ``prefix_path`` before appending the trailing
+    ``_`` (single-char wildcard) -- ``prefix_path`` is expected to be
+    hex nibbles only (see ``_validate_id``), which contain none of
+    these characters, but ``get_children_hashes`` can be called with a
+    caller-supplied prefix (e.g. gossip-side subtree comparison), so
+    this does not assume that invariant holds.
+    """
+    escaped = (
+        prefix_path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+    return escaped + "_"
+
+
 def _node_hash(prefix: str, children: list[str]) -> str:
     """Hash a node from its (already-computed) children's hashes."""
     payload = prefix.encode("ascii") + "".join(children).encode("ascii")
@@ -126,8 +144,26 @@ class SQLiteMerkleTree:
         Return the 16 child-node hashes (nibbles '0'..'f', in order)
         for ``prefix_path``, for gossip-side subtree comparison.
         Missing children come back as ``EMPTY_SUBTREE_HASH``.
+
+        Fetches all 16 rows in a single query (filtered by ``level``
+        so a stray same-length prefix from a different branch can
+        never match) rather than 16 sequential ``_get_hash`` round-
+        trips -- ``update_merkle_path`` calls this once per level (64
+        times per inserted object), so the previous per-nibble
+        querying meant up to 1,024 individual SQL statements for one
+        insert. Mirrors ``PostgresMerkleTree.get_children_hashes``,
+        which already batched this the same way.
         """
-        return [self._get_hash(prefix_path + nibble) for nibble in _NIBBLES]
+        child_level = len(prefix_path) + 1
+        cur = self._conn.execute(
+            "SELECT prefix_path, hash FROM cks_merkle_tree "
+            "WHERE level = ? AND prefix_path LIKE ? ESCAPE '\\'",
+            (child_level, _like_children_pattern(prefix_path)),
+        )
+        found = {row[0]: row[1] for row in cur.fetchall()}
+        return [
+            found.get(prefix_path + nibble, EMPTY_SUBTREE_HASH) for nibble in _NIBBLES
+        ]
 
     # -- writes ------------------------------------------------------------
 

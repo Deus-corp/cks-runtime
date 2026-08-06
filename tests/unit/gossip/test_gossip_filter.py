@@ -128,6 +128,35 @@ class TestSequenceProtection:
         stats = f.stats()
         assert stats["max_seq_reorder_window"] == 2
 
+    def test_replay_of_an_in_window_seq_no_is_rejected_regardless_of_arrival_order(self):
+        """
+        Regression test: eviction from the "already seen" set must be
+        driven by how far a value has fallen behind the high-water
+        mark, never by insertion order.
+
+        Sequence of events (window=3):
+          1. seq=4 arrives first -> high-water mark 4, floor=1.
+          2. seq=2 and seq=3 arrive (both legitimately inside the
+             window, both new) -- `seen` now holds {4, 2, 3} (3
+             entries, at the window's natural capacity).
+          3. seq=5 arrives -> new high-water mark 5, floor=2. `seq=4`
+             is still > floor (2) and so is still legitimately inside
+             the window and must stay remembered.
+
+        An insertion-order LRU (the pre-fix behaviour) would evict
+        `seq=4` here purely because it was the *first* value inserted,
+        even though it is still inside the window by value -- letting
+        a replay of `seq=4` slip back through as if it were new.
+        """
+        f = GossipFilter(max_seq_reorder_window=3)
+        assert f.check("replica-a", "n1", 4, _now_ms()) is True
+        assert f.check("replica-a", "n2", 2, _now_ms()) is True
+        assert f.check("replica-a", "n3", 3, _now_ms()) is True
+        assert f.check("replica-a", "n4", 5, _now_ms()) is True
+        # seq=4 is still inside the window (floor is now 2) and was
+        # already accepted once -- a replay must be rejected.
+        assert f.check("replica-a", "n5", 4, _now_ms()) is False
+
 
 class TestResetAndClear:
     def test_reset_clears_one_sender_only(self):

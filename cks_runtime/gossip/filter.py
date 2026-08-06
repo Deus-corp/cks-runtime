@@ -103,10 +103,13 @@ class GossipFilter:
         # sender -> highest seq_no ever accepted (the high-water mark
         # the reorder window is measured back from).
         self._last_seq: dict[str, int] = {}
-        # sender -> bounded LRU of individual seq_no values accepted
-        # within the current window, for exact-duplicate detection
-        # independent of where a value sits relative to the high-water
-        # mark.
+        # sender -> individual seq_no values accepted within the
+        # current reorder window, for exact-duplicate detection.
+        # Bounded by *value* relative to the high-water mark (see
+        # _check_sequence), not by insertion-order LRU -- a value only
+        # ever leaves this set once it has genuinely fallen behind the
+        # window, never because other values happened to arrive after
+        # it.
         self._seen_seq: dict[str, OrderedDict[int, None]] = {}
 
     def check(
@@ -259,10 +262,28 @@ class GossipFilter:
             return False
 
         seen[seq] = None
-        seen.move_to_end(seq)
-        while len(seen) > self.max_seq_reorder_window:
-            seen.popitem(last=False)
 
         if seq > last_seq:
             self._last_seq[sender] = seq
+
+        # Evict by *value* relative to the (possibly just-advanced)
+        # high-water mark, not by insertion order. An insertion-order
+        # LRU (the previous `popitem(last=False)` policy) can evict a
+        # low seq_no that is still inside the reorder window -- e.g.
+        # it arrived first but many higher, out-of-order values landed
+        # right after it and pushed it out of a fixed-size LRU purely
+        # because of *when* it arrived, not because it fell behind the
+        # window. Once evicted, a replay of that exact value would
+        # pass both the `seq in seen` check (no longer present) and
+        # the `seq <= floor` check (still within window), silently
+        # breaking the "no seq_no is ever accepted twice" guarantee
+        # this module documents. Pruning by value keeps `seen` bounded
+        # to the same window (a rejected-at-entry `seq <= floor` check
+        # above already caps how far behind a value can be admitted in
+        # the first place) while guaranteeing every value still inside
+        # the window stays tracked for exact-duplicate detection.
+        new_floor = self._last_seq[sender] - self.max_seq_reorder_window
+        for stale_seq in [s for s in seen if s <= new_floor]:
+            del seen[stale_seq]
+
         return True
