@@ -66,6 +66,16 @@ from cks_runtime.versioning.version_vector import VersionVector
 if TYPE_CHECKING:
     from cks_runtime.runtime import Runtime
 
+if TYPE_CHECKING:
+    from cks_runtime.crdt.crdt_store import (
+        InMemoryCRDTStore,
+        PostgresCRDTStore,
+        SQLiteCRDTStore,
+    )
+    _CrdtStore = SQLiteCRDTStore | InMemoryCRDTStore | PostgresCRDTStore
+else:
+    _CrdtStore = object  # для рантайма
+
 
 class GossipAdapter:
     """
@@ -106,10 +116,21 @@ class GossipAdapter:
         runtime: Runtime,
         replica_id: str,
         event_bus: EventBus | None = None,
+        crdt_store: _CrdtStore | None = None,
     ) -> None:
         self._runtime = runtime
         self._replica_id = replica_id
         self._event_bus = event_bus if event_bus is not None else runtime.events
+        # ADR-013 Stage 1: optional G-Set of KnowledgeObjects, kept in
+        # sync alongside (not instead of) the ADR-007/ADR-008 session
+        # merge below. `None` by default -- a GossipAdapter built
+        # without a `crdt_store` behaves exactly as before this
+        # module changed; `_merge_crdt_objects` becomes a no-op.
+        # Duck-typed rather than importing a concrete crdt_store type
+        # here, so both the sync (`SQLiteCRDTStore`/`InMemoryCRDTStore`)
+        # and async (`PostgresCRDTStore`) backends work without this
+        # module needing to special-case either.
+        self._crdt_store = crdt_store
         # session_id -> lock serializing apply_remote_session for that
         # session (see _lock_for below). Deliberately per-session, not
         # one lock for the whole adapter.
@@ -254,7 +275,33 @@ class GossipAdapter:
         async with self._lock_for(remote_session.session_id):
             return await self._apply_remote_session_locked(remote_session)
 
+    async def _merge_crdt_objects(self, remote_session: RuntimeSession) -> int:
+        """
+        Add every KnowledgeObject in ``remote_session`` into the local
+        CRDT G-Set (ADR-013 Stage 1), if a ``crdt_store`` was
+        configured. Returns how many were new.
+
+        This is deliberately unconditional and side-effect-only: it
+        never reads or depends on version vectors, merge outcomes, or
+        conflicts -- a G-Set only grows, so every object this replica
+        has ever seen (from any remote session snapshot, converged,
+        fast-forwarded, or later found to conflict at the session
+        level) belongs in it. Running this before the ordinary session
+        merge/conflict handling below means the G-Set is complete even
+        when the *session* reconciliation reports a conflict and
+        leaves ``local`` untouched.
+        """
+        if self._crdt_store is None:
+            return 0
+        objects = remote_session.knowledge_structure.objects
+        result = self._crdt_store.merge_objects(list(objects))
+        if hasattr(result, "__await__"):
+            result = await result
+        return result
+
     async def _apply_remote_session_locked(self, remote_session: RuntimeSession) -> bool:
+        await self._merge_crdt_objects(remote_session)
+
         local = self._runtime.get_session(remote_session.session_id)
         if local is None:
             return await self._bootstrap_remote_session(remote_session)

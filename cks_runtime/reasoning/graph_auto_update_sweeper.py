@@ -152,6 +152,7 @@ def _fetch_version_sync(repo: str, candidate_paths: tuple[str, ...]) -> tuple[st
 def _version_tuple(version: Any) -> tuple[int, ...] | None:
     if not isinstance(version, str):
         return None
+    version = version.lstrip("v")
     parts = []
     for chunk in version.split("."):
         try:
@@ -171,6 +172,11 @@ def _is_outdated(graph_version: Any, actual_version: str) -> bool:
     """
     if graph_version == actual_version:
         return False
+
+    if isinstance(graph_version, str):
+        graph_version = graph_version.lstrip("v")
+    if isinstance(actual_version, str):
+        actual_version = actual_version.lstrip("v")
 
     graph_tuple = _version_tuple(graph_version)
     actual_tuple = _version_tuple(actual_version)

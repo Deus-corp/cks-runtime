@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.45.0] - 2026-08-06
+
+### Added
+- **CRDT adapter – Stage 1: G-Set + Merkle Tree (ADR-013).** A new `cks_runtime/crdt/` module that adds a conflict-free, grow-only set of `KnowledgeObject`s underneath the existing gossip transport, with a content-addressed Merkle prefix tree for efficient cross-node reconciliation.
+  - `CRDTStore` – a G‑Set keyed by each object's own SHA‑256 leaf hash. Three backends: `SQLiteCRDTStore`, `PostgresCRDTStore` (async), and `InMemoryCRDTStore` (tests). Insertion is idempotent; two replicas that independently produce bit‑identical objects converge on one record automatically.
+  - `MerkleTree` – a radix‑16 prefix tree over the 64‑hex‑character object ids. Inserting one object touches exactly 65 nodes (`update_merkle_path`); `get_root_hash` and `get_children_hashes` let gossip peers compare state cheaply. Order‑independent by construction — the same set of objects always produces the same root hash. PostgreSQL gets a PL/pgSQL trigger for automatic maintenance; SQLite recomputes in Python.
+  - `VersionVector` (`cks_runtime/crdt/version_vector.py`) — a small, separate per‑node logical clock for CRDT replication progress, persisted in `cks_crdt_state`. Deliberately distinct from the ADR‑007 `VersionVector` used by `MergeOperation`.
+  - **Gossip integration** — `GossipAdapter` now accepts an optional `crdt_store` and calls `_merge_crdt_objects` *before* the session‑level merge, guaranteeing every observed object is durably recorded even when the session reconciliation itself reports a conflict. Existing callers are unaffected (`crdt_store=None` by default).
+- New ADR: `docs/adr/ADR-013 CRDT Adapter for Distributed Knowledge Objects.md`.
+- New tests: `tests/unit/crdt/test_version_vector.py`, `tests/unit/crdt/test_merkle_tree.py`, `tests/unit/crdt/test_crdt_store.py`, and `tests/unit/gossip/test_gossip_crdt_integration.py`.
+
+---
+
 ## [1.44.0] - 2026-08-06
 
 ### Added
