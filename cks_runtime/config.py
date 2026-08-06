@@ -94,3 +94,12 @@ class RuntimeConfig:
     # Set contradiction_sweep_interval=None to disable the sweeper entirely.
     contradiction_sweep_interval: float | None = 3600.0  # seconds between sweeps (default 1 hour)
     contradiction_sweep_batch_size: int = 100            # initial page size per sweep
+    # Graph health scoring: background computation of an aggregate
+    # 0.0-1.0 health score per registered graph (combining version
+    # freshness, TTL freshness, contradictions, verification coverage,
+    # and dead-lettered conflict tasks -- see GraphHealthSweeper's
+    # module docstring), escalated as `health_check` outbox tasks for
+    # graphs scoring below the threshold.
+    # Set graph_health_interval=None to disable the sweeper entirely.
+    graph_health_interval: float | None = 3600.0         # seconds between sweeps (default 1 hour)
+    graph_health_min_score: float = 0.7                  # escalation threshold

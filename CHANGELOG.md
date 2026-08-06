@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.44.0] - 2026-08-06
+
+### Added
+- **`GraphHealthSweeper`** – background sweeper that computes an aggregate 0.0–1.0 health score for every registered graph, combining version freshness, TTL freshness, contradictions, verification coverage, and dead‑lettered conflict tasks. Escalates a `health_check` outbox task for any graph scoring below `graph_health_min_score` (default 0.7). Mirrors `GraphFreshnessSweeper`'s lifecycle, dedup strategy, and no‑op‑on‑unsupported‑storage behaviour.
+- **`RuntimeConfig.graph_health_interval` / `graph_health_min_score`** – new configuration fields controlling the sweeper. Set `graph_health_interval=None` to disable.
+- New unit tests in `tests/unit/reasoning/test_graph_health_sweeper.py` covering healthy graphs left untouched, stale+contradictory graphs escalated, custom thresholds, deduplication, re‑escalation after recovery, dead‑letter impact on score, and no‑op on `InMemoryStorage`.
+
+---
+
 ## [1.43.0] - 2026-08-05
 
 ### Added

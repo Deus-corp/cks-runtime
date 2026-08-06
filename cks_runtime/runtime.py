@@ -38,6 +38,7 @@ from cks_runtime.projection.outbox_worker import OutboxEmbeddingWorker
 from cks_runtime.reasoning.contradiction_sweeper import ContradictionSweeper
 from cks_runtime.reasoning.graph_auto_update_sweeper import GraphAutoUpdateSweeper
 from cks_runtime.reasoning.graph_freshness_sweeper import GraphFreshnessSweeper
+from cks_runtime.reasoning.graph_health_sweeper import GraphHealthSweeper
 from cks_runtime.reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
 from cks_runtime.reasoning.provenance_staleness_sweeper import (
     ProvenanceStalenessSweeper,
@@ -163,6 +164,7 @@ class Runtime:
         "_gc",
         "_graph_auto_update_sweeper",
         "_graph_freshness_sweeper",
+        "_graph_health_sweeper",
         "_inference_sweeper",
         "_metrics",
         "_outbox_worker",
@@ -343,6 +345,21 @@ class Runtime:
                 apply_updates=self.config.graph_auto_update_apply,
             )
 
+        # Graph health sweeper: background computation of an aggregate
+        # health score per registered graph, escalated as
+        # `health_check` outbox tasks for graphs scoring below
+        # config.graph_health_min_score. Disabled when
+        # config.graph_health_interval is None. Also started lazily in
+        # create() — requires a running event loop.
+        self._graph_health_sweeper: GraphHealthSweeper | None = None
+        if self.config.graph_health_interval is not None:
+            self._graph_health_sweeper = GraphHealthSweeper(
+                self._storage,
+                min_score=self.config.graph_health_min_score,
+                ttl_seconds=self.config.graph_freshness_ttl_seconds,
+                interval_seconds=int(self.config.graph_health_interval),
+            )
+
         # Contradiction detection sweeper: background re-check of
         # recently-modified sessions for MutualExclusionRule/
         # FunctionalRelationRule violations, escalated as
@@ -442,6 +459,9 @@ class Runtime:
 
         if runtime._graph_auto_update_sweeper is not None:
             await runtime._graph_auto_update_sweeper.start()
+
+        if runtime._graph_health_sweeper is not None:
+            await runtime._graph_health_sweeper.start()
 
         if runtime._contradiction_sweeper is not None:
             await runtime._contradiction_sweeper.start()
@@ -911,6 +931,9 @@ class Runtime:
 
         if self._graph_auto_update_sweeper is not None:
             await self._graph_auto_update_sweeper.stop()
+
+        if self._graph_health_sweeper is not None:
+            await self._graph_health_sweeper.stop()
 
         if self._contradiction_sweeper is not None:
             await self._contradiction_sweeper.stop()

@@ -13,6 +13,7 @@ from .config import RuntimeConfig
 from .gc.garbage_collector import GarbageCollector
 from .reasoning.contradiction_sweeper import ContradictionSweeper
 from .reasoning.graph_auto_update_sweeper import GraphAutoUpdateSweeper
+from .reasoning.graph_health_sweeper import GraphHealthSweeper
 from .reasoning.inference_staleness_sweeper import InferenceStalenessSweeper
 from .reasoning.temporal_staleness_sweeper import TemporalStalenessSweeper
 from .runtime import Runtime
@@ -23,6 +24,7 @@ __all__ = (
     "ContradictionSweeper",
     "GarbageCollector",
     "GraphAutoUpdateSweeper",
+    "GraphHealthSweeper",
     "InferenceStalenessSweeper",
     "Runtime",
     "RuntimeConfig",
