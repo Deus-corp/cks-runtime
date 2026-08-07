@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.6] - 2026-08-07
+
+### Fixed
+- **Deep-freeze serialization bug in `record_operations`** – `record_operations` (SQLite and Postgres) now recursively thaws frozen `MappingProxyType`/`tuple` values in `field_value` before JSON encoding, using the same `_thaw` helper already applied to `patch_codec`. Prevents `Object of type mappingproxy is not JSON serializable` errors when recording operations with nested structures (e.g. pipeline `transition_log` patches).
+- New regression test `test_record_operations_thaws_frozen_nested_field_value` added.
+
+---
+
 ## [1.48.5] - 2026-08-07
 
 ### Added

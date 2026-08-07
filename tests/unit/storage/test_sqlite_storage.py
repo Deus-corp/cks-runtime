@@ -519,6 +519,39 @@ def test_record_operations_then_list_operations_round_trips(storage):
     assert storage.list_operations("s1") == expected
 
 
+def test_record_operations_thaws_frozen_nested_field_value():
+    """
+    field_value can itself be (or contain) cks-core's deep-frozen
+    MappingProxyType/tuple representation -- e.g. a set_field op whose
+    value is a nested structure like a pipeline's transition_log.
+    json.dumps cannot serialize MappingProxyType directly, so
+    record_operations must thaw it first (mirrors the fix already
+    applied to save_version's patch encoding in patch_codec._thaw).
+    """
+    from types import MappingProxyType
+
+    storage = SQLiteStorage(":memory:")
+    frozen_value = MappingProxyType(
+        {"transition_log": (MappingProxyType({"from": "a", "to": "b"}),)}
+    )
+    op = RuntimeFieldOperation(
+        object_id="obj-1",
+        op_type="set_field",
+        field_key="transition_log",
+        field_value=frozen_value,
+    )
+    storage.record_operations("s1", "v1", [op])
+
+    expected = RuntimeFieldOperation(
+        object_id="obj-1",
+        op_type="set_field",
+        field_key="transition_log",
+        field_value={"transition_log": [{"from": "a", "to": "b"}]},
+        version_id="v1",
+    )
+    assert storage.list_operations("s1") == [expected]
+
+
 def test_record_operations_preserves_none_field_value_as_a_deletion():
     """
     field_value=None on a set_field op means "this key was removed",

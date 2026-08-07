@@ -23,7 +23,11 @@ import numpy as np
 
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime.storage.patch_codec import deserialize_operators, serialize_operators
+from cks_runtime.storage.patch_codec import (
+    _thaw,
+    deserialize_operators,
+    serialize_operators,
+)
 from cks_runtime.storage.storage import (
     ConcurrentModificationError,
     OutboxTask,
@@ -1041,7 +1045,7 @@ class SQLiteStorage(RuntimeStorage):
                 op.object_id,
                 op.op_type,
                 op.field_key,
-                json.dumps(op.field_value) if op.op_type == "set_field" else None,
+                json.dumps(_thaw(op.field_value)) if op.op_type == "set_field" else None,
             )
             for op in operations
         ]
