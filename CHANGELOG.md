@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.5] - 2026-08-07
+
+### Added
+- **`AgentStepStarted` and `AgentStepCompleted` runtime events** – new event types in `cks_runtime.events.runtime_event`, published by the upcoming `CKSAgentOrchestrator` (ADR-007). Subscribers can observe pipeline progress without coupling to the agent implementation.
+
+### Fixed
+- **Deep-freeze serialization bug in `patch_codec.py`** – `serialize_operators` now recursively thaws frozen `MappingProxyType`/`tuple` values in nested structures before JSON serialization. Previously, an object with a nested dict/list (e.g. a `transition_log`) would crash on the *second* commit with `Object of type mappingproxy is not JSON serializable`, because delta patches did not deep-convert structures like full snapshots do.
+
+---
+
 ## [1.48.4] - 2026-08-07
 
 ### Fixed

@@ -17,8 +17,35 @@ types to silently drift apart.
 
 from __future__ import annotations
 
+from collections.abc import Mapping as _Mapping
+
 from cks.core import CanonicalRelation, KnowledgeObject, ObjectIdentity
 from cks.evolution import AddObject, AddRelation, RemoveObject, RemoveRelation
+
+
+def _thaw(value):
+    """Recursively convert cks-core's frozen ``MappingProxyType``/tuple
+    structure representation into plain ``dict``/``list``.
+
+    ``KnowledgeObject.structure``/``CanonicalRelation.structure`` are
+    deep-frozen by ``cks.core._freeze`` (``MappingProxyType`` for every
+    nested mapping, ``tuple`` for every nested list). A bare
+    ``dict(obj.structure)`` is only a *shallow* copy -- any nested
+    mapping or list inside the structure (e.g. a list-of-dicts field
+    such as a pipeline's ``transition_log``) is left frozen, and
+    ``json.dumps`` cannot serialize a ``MappingProxyType`` -- this is
+    what previously surfaced as "Object of type mappingproxy is not
+    JSON serializable" out of ``SQLiteStorage.save_version``/
+    ``PostgresStorage.save_version`` for any object whose structure
+    contains a nested dict, whenever that object's change happened to
+    be persisted as a delta patch (below) rather than a full snapshot
+    (``cks.serialize``, which already thaws correctly).
+    """
+    if isinstance(value, _Mapping):
+        return {k: _thaw(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thaw(v) for v in value]
+    return value
 
 
 def serialize_operators(operators: list) -> list[dict]:
@@ -34,7 +61,7 @@ def serialize_operators(operators: list) -> list[dict]:
                     "type": obj.identity.type,
                     "name": obj.identity.name,
                 },
-                "structure": dict(obj.structure),
+                "structure": _thaw(obj.structure),
             })
         elif isinstance(op, AddRelation):
             rel = op.relation
@@ -47,7 +74,7 @@ def serialize_operators(operators: list) -> list[dict]:
                 },
                 "participants": list(rel.participants),
                 "relation_type": rel.relation_type,
-                "structure": dict(rel.structure),
+                "structure": _thaw(rel.structure),
             })
         elif isinstance(op, RemoveObject):
             result.append({

@@ -225,6 +225,56 @@ class InferenceConflictDetected(RuntimeEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class AgentStepStarted(RuntimeEvent):
+    """
+    Published by ``CKSAgentOrchestrator`` (ADR-007, cks-mcp) when an
+    ``AgentStep`` (Researcher, Reviewer, Synthesizer, Arbiter, ...)
+    begins running against one claimed object. Free observability hook
+    for ``cks-dashboard`` -- no new transport, reuses this same
+    ``runtime.events`` bus ``SessionCreated``/``GossipConflictDetected``
+    already publish on (ADR-007 Decision 5).
+
+    ``step_name`` is the ``AgentStep.name`` that claimed the object;
+    ``session_id``/``object_id`` identify what it claimed;
+    ``claims_status`` is the ``current_status`` value the step read the
+    object out of (see ``cks_mcp.pipeline.schema.PipelineStatus``).
+    """
+
+    step_name: str = ""
+
+    session_id: str = ""
+
+    object_id: str = ""
+
+    claims_status: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentStepCompleted(RuntimeEvent):
+    """
+    Published by ``CKSAgentOrchestrator`` (ADR-007, cks-mcp) when an
+    ``AgentStep`` finishes running against one claimed object,
+    successfully or not. ``transitioned_to`` is the resulting
+    ``current_status`` on success (empty on failure); ``error`` carries
+    the failure detail otherwise -- mirrors the
+    ``complete_conflict_task``/``fail_conflict_task`` outcome the
+    orchestrator reported for this object's outbox task.
+    """
+
+    step_name: str = ""
+
+    session_id: str = ""
+
+    object_id: str = ""
+
+    succeeded: bool = False
+
+    transitioned_to: str = ""
+
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class CRDTForkDetected(RuntimeEvent):
     """
     Published by ``GossipAdapter._handle_fork`` (ADR-013, Stage 2) when
