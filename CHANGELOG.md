@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.1] - 2026-08-07
+
+- Re-release of v1.48.0 after the GitHub Actions trigger issue.
+- No functional code changes.
+- Release-only bump to verify CI and PyPI publishing.
+
+---
+
 ## [1.48.0] - 2026-08-06
 
 ### Changed
