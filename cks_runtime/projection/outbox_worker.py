@@ -176,7 +176,12 @@ class OutboxEmbeddingWorker:
             from cks.evolution import AddObject, RemoveObject
             for op in patch:
                 if isinstance(op, AddObject):
-                    obj = new_structure.get(op.object_id)
+                    # AddObject exposes the KnowledgeObject itself via the
+                    # public `obj` property (cks-core >= v1.14.0); the
+                    # object's id lives at `obj.identity.id`. There is no
+                    # `object_id` attribute on AddObject — that only
+                    # exists on RemoveObject.
+                    obj = new_structure.get(op.obj.identity.id)
                     if obj is not None:
                         objects_to_embed.append(obj)
                 elif isinstance(op, RemoveObject):

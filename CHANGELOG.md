@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.4] - 2026-08-07
+
+### Fixed
+- **`OutboxEmbeddingWorker` no longer crashes with `'AddObject' object has no attribute 'object_id'`** – replaced private attribute access with the public `obj` property (available since cks-core v1.14.0). The worker now correctly retrieves the object's identity via `op.obj.identity.id` instead of the non-existent `op.object_id`.
+
+---
+
 ## [1.48.3] - 2026-08-07
 
 ### Added
