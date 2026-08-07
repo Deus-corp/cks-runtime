@@ -48,6 +48,16 @@ class OutboxEmbeddingWorker:
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
+    def set_embedding_client(self, client: EmbeddingClient) -> None:
+        """
+        Swap the embedding client used for subsequent poll iterations.
+        Safe to call while the worker is running: the client is only
+        read at the start of each poll iteration (see ``_poll_once``),
+        never cached across iterations, so a client installed mid-run
+        takes effect on the very next batch.
+        """
+        self._embedding_client = client
+
     async def start(self) -> None:
         if self._running:
             return

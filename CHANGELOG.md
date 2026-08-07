@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.2] - 2026-08-07
+
+### Added
+- **`Runtime.embedding_client` setter** – `FastEmbedPlugin` (and any other plugin) can now properly set the embedding client via `runtime.embedding_client = client`. The setter also pushes the new client into the already running `OutboxEmbeddingWorker` (via new method `set_embedding_client`), so replacing the client at runtime no longer leaves the worker using a stale instance.
+
+### Fixed
+- **`AttributeError: property 'embedding_client' of 'Runtime' object has no setter`** – resolved by adding a setter for `embedding_client`.
+- **SQLite concurrency** – All methods of `SQLiteStorage` that touch `self._conn` are now protected by a single `threading.RLock` (decorator `@_synchronized`). This eliminates `sqlite3.InterfaceError: bad parameter or other API misuse` when gossip, the fork agent, and the background `OutboxEmbeddingWorker` concurrently access the same database. Verified with stress‑tests (8 threads × 300 iterations, plus a scenario emulating two independent `Runtime` instances with parallel workers) – zero failures.
+- Full unit test suite passes (654 tests, 26 skipped).
+
+### Changed
+- `OutboxEmbeddingWorker` now supports dynamic embedding client replacement via `set_embedding_client`.
+
+---
+
 ## [1.48.1] - 2026-08-07
 
 - Re-release of v1.48.0 after the GitHub Actions trigger issue.

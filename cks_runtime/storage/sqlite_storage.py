@@ -66,7 +66,7 @@ def _retry_on_locked[T](fn: Callable[[], T]) -> T:
 # SQLiteStorage
 # ---------------------------------------------------------------------------
 
-def _synchronized[**P, T](fn: Callable[Concatenate["SQLiteStorage", P], T]) -> Callable[Concatenate["SQLiteStorage", P], T]:
+def _synchronized[**P, T](fn: Callable[Concatenate[SQLiteStorage, P], T]) -> Callable[Concatenate[SQLiteStorage, P], T]:
     """
     Serialize every call to a decorated ``SQLiteStorage`` method through
     ``self._lock`` (a ``threading.RLock``).
@@ -105,7 +105,7 @@ def _synchronized[**P, T](fn: Callable[Concatenate["SQLiteStorage", P], T]) -> C
     """
 
     @functools.wraps(fn)
-    def wrapper(self: "SQLiteStorage", *args: P.args, **kwargs: P.kwargs) -> T:
+    def wrapper(self: SQLiteStorage, *args: P.args, **kwargs: P.kwargs) -> T:
         with self._lock:
             return fn(self, *args, **kwargs)
 

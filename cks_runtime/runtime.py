@@ -606,6 +606,17 @@ class Runtime:
         """
         return self._embedding_client
 
+    @embedding_client.setter
+    def embedding_client(self, client: EmbeddingClient) -> None:
+        """
+        Replace the embedding client used to index objects and to embed
+        queries (see the getter's docstring for why these must stay in
+        sync). Used by plugins such as cks-mcp's fastembed_plugin that
+        install a real embedding client after Runtime.create().
+        """
+        self._embedding_client = client
+        self._outbox_worker.set_embedding_client(client)
+
 
     #
     # ------------------------------------------------------------------
