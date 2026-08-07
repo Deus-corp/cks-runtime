@@ -8,11 +8,14 @@ associated MappingProxyType issues.
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
+from typing import Concatenate
 from uuid import uuid4
 
 import cks
@@ -63,15 +66,69 @@ def _retry_on_locked[T](fn: Callable[[], T]) -> T:
 # SQLiteStorage
 # ---------------------------------------------------------------------------
 
+def _synchronized[**P, T](fn: Callable[Concatenate["SQLiteStorage", P], T]) -> Callable[Concatenate["SQLiteStorage", P], T]:
+    """
+    Serialize every call to a decorated ``SQLiteStorage`` method through
+    ``self._lock`` (a ``threading.RLock``).
+
+    ``self._conn`` (one ``sqlite3.Connection``, opened with
+    ``check_same_thread=False``) is reached by every synchronous
+    storage call, but those calls do not all run on the same OS
+    thread: ``SyncStorageAdapter``/``async_storage.py`` dispatches
+    each one via ``asyncio.to_thread``, so e.g. the background
+    ``OutboxEmbeddingWorker``'s own poll loop (``dequeue_next_outbox_task``
+    every ``poll_interval`` seconds) and a concurrent ``claim_conflict_task``
+    MCP tool call (also ``dequeue_next_outbox_task``, different
+    ``task_type``) can genuinely execute on two different threads at
+    the same wall-clock instant. ``check_same_thread=False`` only
+    disables Python's same-thread *ownership* check; it does not make
+    concurrent use of one ``Connection``/its implicit cursor safe --
+    Python's ``sqlite3`` module keeps non-thread-safe per-connection
+    state (e.g. the last-executed-statement bookkeeping ``commit()``
+    relies on), so two threads calling ``execute()``/``commit()`` on
+    the same ``Connection`` object at once can corrupt that state.
+    Confirmed by direct repro: a ``ThreadPoolExecutor`` hammering one
+    ``SQLiteStorage`` instance's ``dequeue_next_outbox_task``/
+    ``complete_outbox_task`` concurrently reliably produces
+    ``sqlite3.OperationalError: cannot commit transaction - SQL
+    statements in progress`` and ``sqlite3.InterfaceError: bad
+    parameter or other API misuse`` -- the exact error a real
+    ``cks-fork-agent`` run hit inside ``dequeue_next_outbox_task``
+    while its own ``OutboxEmbeddingWorker`` was polling concurrently
+    on the same connection.
+
+    ``RLock`` (not a plain ``Lock``) because some decorated methods
+    call another decorated method on ``self`` internally (e.g.
+    ``list_sessions`` -> ``load_session``, ``enqueue_outbox_task`` ->
+    ``enqueue_task``) -- a plain ``Lock`` would deadlock the owning
+    thread on the second acquisition.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self: "SQLiteStorage", *args: P.args, **kwargs: P.kwargs) -> T:
+        with self._lock:
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class SQLiteStorage(RuntimeStorage):
     """Persists Runtime state in a SQLite database using JSON."""
 
     def __init__(self, db_path: str = "cks_runtime.db") -> None:
+        # RLock, not Lock: several decorated methods below call another
+        # decorated method on self internally (list_sessions ->
+        # load_session, enqueue_outbox_task -> enqueue_task) -- see
+        # _synchronized's docstring above for why this lock exists at
+        # all. Must be set before _create_tables() runs, since that
+        # method is itself decorated.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
         self._create_tables()
 
+    @_synchronized
     def _create_tables(self) -> None:
         self._conn.execute(
             """
@@ -241,6 +298,7 @@ class SQLiteStorage(RuntimeStorage):
             )
         self._conn.commit()
 
+    @_synchronized
     def _migrate_embeddings_pk_if_needed(self) -> None:
         """
         Detect and fix the legacy single-column PRIMARY KEY on
@@ -316,6 +374,7 @@ class SQLiteStorage(RuntimeStorage):
     # Sessions
     # ------------------------------------------------------------------
 
+    @_synchronized
     def save_session(
         self,
         session: RuntimeSession,
@@ -381,6 +440,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def load_session(self, session_id: str) -> RuntimeSession | None:
         row = self._conn.execute(
             "SELECT data FROM sessions WHERE session_id = ?", (session_id,)
@@ -433,12 +493,14 @@ class SQLiteStorage(RuntimeStorage):
 
         return session
 
+    @_synchronized
     def has_session(self, session_id: str) -> bool:
         row = self._conn.execute(
             "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
         ).fetchone()
         return row is not None
 
+    @_synchronized
     def list_sessions(self) -> tuple[RuntimeSession, ...]:
         rows = self._conn.execute("SELECT session_id FROM sessions").fetchall()
         sessions = []
@@ -449,6 +511,7 @@ class SQLiteStorage(RuntimeStorage):
         return tuple(sessions)
 
 
+    @_synchronized
     def list_sessions_modified_before(
         self,
         cutoff: datetime,
@@ -474,6 +537,7 @@ class SQLiteStorage(RuntimeStorage):
                 sessions.append(session)
         return sessions
 
+    @_synchronized
     def list_sessions_modified_since(
         self,
         watermark: datetime,
@@ -502,6 +566,7 @@ class SQLiteStorage(RuntimeStorage):
                 sessions.append(session)
         return sessions
 
+    @_synchronized
     def archive_session(self, session: RuntimeSession) -> None:
         """
         Copy *session* to ``archive_sessions`` and remove it from the
@@ -540,6 +605,7 @@ class SQLiteStorage(RuntimeStorage):
     # Versions
     # ------------------------------------------------------------------
 
+    @_synchronized
     def save_version(self, version: RuntimeVersion) -> None:
         if version.knowledge_structure is not None:
             ks_json = cks.serialize(version.knowledge_structure)
@@ -573,6 +639,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def load_version(self, version_id: str) -> RuntimeVersion | None:
         row = self._conn.execute(
             "SELECT data FROM versions WHERE version_id = ?", (version_id,)
@@ -596,12 +663,14 @@ class SQLiteStorage(RuntimeStorage):
         )
         return version
 
+    @_synchronized
     def has_version(self, version_id: str) -> bool:
         row = self._conn.execute(
             "SELECT 1 FROM versions WHERE version_id = ?", (version_id,)
         ).fetchone()
         return row is not None
 
+    @_synchronized
     def list_versions(self) -> tuple[RuntimeVersion, ...]:
         rows = self._conn.execute("SELECT data FROM versions").fetchall()
         versions = []
@@ -628,6 +697,7 @@ class SQLiteStorage(RuntimeStorage):
     # Maintenance
     # ------------------------------------------------------------------
 
+    @_synchronized
     def clear(self) -> None:
         def _write() -> None:
             self._conn.execute("DELETE FROM sessions")
@@ -654,6 +724,7 @@ class SQLiteStorage(RuntimeStorage):
             }),
         )
 
+    @_synchronized
     def enqueue_task(
         self,
         task_type: str,
@@ -681,6 +752,7 @@ class SQLiteStorage(RuntimeStorage):
     # another worker to claim.
     _OUTBOX_LEASE_TIMEOUT_MODIFIER = "-5 minutes"
 
+    @_synchronized
     def dequeue_next_outbox_task(self, task_type: str | None = None) -> OutboxTask | None:
         """
         Atomically claim and return the next eligible task: a PENDING
@@ -744,6 +816,7 @@ class SQLiteStorage(RuntimeStorage):
             retry_count=row[4],
         )
 
+    @_synchronized
     def complete_outbox_task(self, task_id: int) -> None:
         def _write() -> None:
             self._conn.execute("DELETE FROM cks_outbox_tasks WHERE task_id = ?", (task_id,))
@@ -751,6 +824,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def fail_outbox_task(self, task_id: int, retry_count: int, error: str, next_retry_at: str) -> None:
         def _write() -> None:
             self._conn.execute(
@@ -769,6 +843,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def dead_letter_outbox_task(self, task_id: int, error: str) -> None:
         """
         Permanently mark a task ``DEAD`` -- removed from the eligible
@@ -791,6 +866,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def touch_outbox_task(self, task_id: int) -> bool:
         """
         Renew the lease on an ``IN_PROGRESS`` task by bumping
@@ -815,6 +891,7 @@ class SQLiteStorage(RuntimeStorage):
 
         return _retry_on_locked(_write)
 
+    @_synchronized
     def list_tasks_by_type(
         self,
         task_type: str,
@@ -871,6 +948,7 @@ class SQLiteStorage(RuntimeStorage):
             for row in rows
         ]
 
+    @_synchronized
     def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
         """Return every DEAD-lettered task, oldest first. Never drains."""
         def _write() -> list[tuple]:
@@ -908,6 +986,7 @@ class SQLiteStorage(RuntimeStorage):
             for row in rows
         ]
 
+    @_synchronized
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
         def _write() -> None:
             # PRIMARY KEY is now (object_id, session_id), so this
@@ -926,6 +1005,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def delete_object_embeddings(self, object_id: str, session_id: str) -> None:
         def _write() -> None:
             self._conn.execute(
@@ -944,6 +1024,7 @@ class SQLiteStorage(RuntimeStorage):
     # Operation log (ADR-007)
     # ------------------------------------------------------------------
 
+    @_synchronized
     def record_operations(
         self,
         session_id: str,
@@ -978,6 +1059,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def list_operations(
         self,
         session_id: str,
@@ -1037,6 +1119,7 @@ class SQLiteStorage(RuntimeStorage):
     # Backup / Disaster Recovery (ADR-012)
     # ------------------------------------------------------------------
 
+    @_synchronized
     def export_storage(self) -> dict:
         """
         Return a JSON-serialisable snapshot of every SQLite table.
@@ -1107,6 +1190,7 @@ class SQLiteStorage(RuntimeStorage):
             "outbox_tasks": outbox_tasks,
         }
 
+    @_synchronized
     def import_storage(self, data: dict, mode: str = "merge") -> None:
         """
         Restore a snapshot produced by ``export_storage``.
@@ -1199,6 +1283,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def search_embeddings(
         self,
         query_embedding: bytes,
@@ -1269,6 +1354,7 @@ class SQLiteStorage(RuntimeStorage):
     # Distributed replication (ADR-008)
     # ------------------------------------------------------------------
 
+    @_synchronized
     def get_or_create_replica_id(self) -> str | None:
         """
         Return this database's durable replica identity, generating
@@ -1324,6 +1410,7 @@ class SQLiteStorage(RuntimeStorage):
             "public": bool(row[6]),
         }
 
+    @_synchronized
     def register_graph(
         self,
         name: str,
@@ -1350,6 +1437,7 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def get_graph(self, name: str) -> dict | None:
         row = self._conn.execute(
             """
@@ -1362,6 +1450,7 @@ class SQLiteStorage(RuntimeStorage):
             return None
         return self._graph_row_to_dict(row)
 
+    @_synchronized
     def list_graphs(
         self, tag: str | None = None, public_only: bool = False
     ) -> list[dict]:
