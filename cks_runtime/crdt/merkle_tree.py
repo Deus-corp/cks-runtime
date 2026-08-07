@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -99,40 +100,65 @@ class SQLiteMerkleTree:
     Shares its connection with the ``SQLiteCRDTStore`` that owns it
     (same pattern as ``SQLiteStorage``: one persistent connection,
     WAL mode, caller-provided retry wrapper for "database is locked").
+
+    Also shares that owner's ``threading.RLock`` (``lock``, required):
+    ``_build_crdt_store``/``_crdt_store_for`` wrap this tree's
+    connection around the *same* ``sqlite3.Connection`` object
+    ``SQLiteStorage`` uses -- see ``SQLiteStorage``'s own
+    ``_synchronized`` docstring for why concurrent access to one
+    ``Connection`` from different threads corrupts it. Without this
+    lock being the literal same object as ``SQLiteStorage._lock`` (not
+    just an equivalent one), a thread inside a ``SQLiteStorage``
+    method and a thread inside this tree could still interleave calls
+    on the shared connection.
     """
 
-    def __init__(self, conn: sqlite3.Connection, retry: Callable[..., Any]) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        retry: Callable[..., Any],
+        lock: threading.RLock | None = None,
+    ) -> None:
         self._conn = conn
         # `retry` is the `_retry_on_locked`-shaped callable from
         # sqlite_storage.py, injected by CRDTStore rather than
         # duplicated here.
         self._retry = retry
+        # `lock` should be the same lock object as the connection's
+        # other owner(s) -- normally `SQLiteCRDTStore` passes its own
+        # `_lock` through here (see that class's docstring). Falls
+        # back to a fresh RLock for standalone/test construction
+        # against a private connection, where there is no other owner
+        # to share with.
+        self._lock = lock if lock is not None else threading.RLock()
         self._create_tables()
 
     def _create_tables(self) -> None:
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cks_merkle_tree (
-                prefix_path TEXT PRIMARY KEY,
-                level       INTEGER NOT NULL,
-                hash        TEXT NOT NULL,
-                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        with self._lock:
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cks_merkle_tree (
+                    prefix_path TEXT PRIMARY KEY,
+                    level       INTEGER NOT NULL,
+                    hash        TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
             )
-            """
-        )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cks_merkle_tree_level "
-            "ON cks_merkle_tree(level)"
-        )
-        self._conn.commit()
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cks_merkle_tree_level "
+                "ON cks_merkle_tree(level)"
+            )
+            self._conn.commit()
 
     # -- reads -----------------------------------------------------------
 
     def _get_hash(self, prefix: str) -> str:
-        cur = self._conn.execute(
-            "SELECT hash FROM cks_merkle_tree WHERE prefix_path = ?", (prefix,)
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT hash FROM cks_merkle_tree WHERE prefix_path = ?", (prefix,)
+            )
+            row = cur.fetchone()
         return row[0] if row is not None else EMPTY_SUBTREE_HASH
 
     def get_root_hash(self) -> str:
@@ -155,12 +181,13 @@ class SQLiteMerkleTree:
         which already batched this the same way.
         """
         child_level = len(prefix_path) + 1
-        cur = self._conn.execute(
-            "SELECT prefix_path, hash FROM cks_merkle_tree "
-            "WHERE level = ? AND prefix_path LIKE ? ESCAPE '\\'",
-            (child_level, _like_children_pattern(prefix_path)),
-        )
-        found = {row[0]: row[1] for row in cur.fetchall()}
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT prefix_path, hash FROM cks_merkle_tree "
+                "WHERE level = ? AND prefix_path LIKE ? ESCAPE '\\'",
+                (child_level, _like_children_pattern(prefix_path)),
+            )
+            found = {row[0]: row[1] for row in cur.fetchall()}
         return [
             found.get(prefix_path + nibble, EMPTY_SUBTREE_HASH) for nibble in _NIBBLES
         ]
@@ -176,18 +203,19 @@ class SQLiteMerkleTree:
         object_id = object_id.lower()
 
         def _write() -> None:
-            # Level 64: the leaf. Its hash is the object id itself --
-            # already a content hash, so there is nothing further to
-            # combine at the leaf level.
-            self._upsert(object_id, _ID_HEX_LENGTH, object_id)
-            # Levels 63 .. 0: each node's hash is derived from its 16
-            # children (one level down), which were just written (or
-            # already existed) above.
-            for level in range(_ID_HEX_LENGTH - 1, -1, -1):
-                prefix = object_id[:level]
-                children = self.get_children_hashes(prefix)
-                self._upsert(prefix, level, _node_hash(prefix, children))
-            self._conn.commit()
+            with self._lock:
+                # Level 64: the leaf. Its hash is the object id itself
+                # -- already a content hash, so there is nothing
+                # further to combine at the leaf level.
+                self._upsert(object_id, _ID_HEX_LENGTH, object_id)
+                # Levels 63 .. 0: each node's hash is derived from its
+                # 16 children (one level down), which were just
+                # written (or already existed) above.
+                for level in range(_ID_HEX_LENGTH - 1, -1, -1):
+                    prefix = object_id[:level]
+                    children = self.get_children_hashes(prefix)
+                    self._upsert(prefix, level, _node_hash(prefix, children))
+                self._conn.commit()
 
         self._retry(_write)
 

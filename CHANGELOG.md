@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.3] - 2026-08-07
+
+### Added
+- **Thread-safe CRDT storage** – `SQLiteCRDTStore` and its `SQLiteMerkleTree` now share the same `threading.RLock` used by `SQLiteStorage` when wrapping the runtime's own connection. This prevents `sqlite3.InterfaceError` corruption when gossip, the fork agent, and the background embedding worker access the shared SQLite connection concurrently. The lock is injected via `SQLiteCRDTStore.__init__(lock=...)` and forwarded to `SQLiteMerkleTree`; standalone/test usage falls back to a fresh `RLock`.
+- **`OutboxEmbeddingWorker.set_embedding_client`** – allows swapping the embedding client at runtime; the new client takes effect on the next poll iteration.
+
+### Changed
+- **`Runtime.embedding_client` setter** now pushes the new client into the running `OutboxEmbeddingWorker` (via `set_embedding_client`) in addition to storing it, so a plugin installing a client after `Runtime.create()` correctly updates the worker.
+
+### Fixed
+- Concurrent gossip / fork-agent / background worker activity on a shared SQLite database no longer raises `sqlite3.InterfaceError: bad parameter or other API misuse` (verified with stress tests emulating multi‑process access).
+
+---
+
 ## [1.48.2] - 2026-08-07
 
 ### Added

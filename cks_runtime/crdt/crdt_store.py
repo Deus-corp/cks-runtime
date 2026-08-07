@@ -30,15 +30,17 @@ plugged in, aside from sync vs. async.
 
 from __future__ import annotations
 
+import functools
 import hmac
 import json
 import logging
 import sqlite3
+import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Concatenate
 
 from cks_runtime.crdt.causality import CONCURRENT, DOMINATED, causality_check
 from cks_runtime.crdt.merkle_tree import (
@@ -221,14 +223,65 @@ def _object_type(record: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _synchronized[**P, T](fn: Callable[Concatenate[SQLiteCRDTStore, P], T]) -> Callable[Concatenate[SQLiteCRDTStore, P], T]:
+    """
+    Serialize every call to a decorated ``SQLiteCRDTStore`` method
+    through ``self._lock``.
+
+    ``self._conn`` is the *same* ``sqlite3.Connection`` object
+    ``SQLiteStorage`` uses (``_build_crdt_store``/``_crdt_store_for``
+    wrap the runtime's own storage connection rather than opening a
+    second one -- see this module's docstring on object identity for
+    why sharing one file matters). ``SQLiteStorage`` already guards
+    every access to that connection with its own ``RLock``
+    (``sqlite_storage.py``'s ``_synchronized``) precisely because
+    concurrent threads calling into one ``sqlite3.Connection`` corrupt
+    its internal statement-binding state -- see that decorator's
+    docstring for the full explanation and a confirmed repro. Without
+    also guarding this class's own connection access, and doing so
+    with ``SQLiteStorage``'s *literal same* lock object rather than an
+    independent one, a gossip-adapter thread inside
+    ``SQLiteCRDTStore.add_object`` and a worker thread inside e.g.
+    ``SQLiteStorage.dequeue_next_outbox_task`` can still interleave on
+    the shared connection and hit the exact same
+    ``sqlite3.InterfaceError``/``OperationalError`` corruption --
+    confirmed by direct repro (a thread hammering
+    ``SQLiteStorage.enqueue_task``/``dequeue_next_outbox_task``
+    alongside a thread hammering ``SQLiteCRDTStore.add_object`` on the
+    shared connection reliably raises ``cannot commit transaction -
+    SQL statements in progress``).
+
+    ``RLock`` (matching ``SQLiteStorage``'s) because ``add_object``
+    calls ``self.merkle.update_merkle_path`` -- a nested acquisition
+    of this same lock -- while already holding it.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self: SQLiteCRDTStore, *args: P.args, **kwargs: P.kwargs) -> T:
+        with self._lock:
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class SQLiteCRDTStore:
     """G-Set of KnowledgeObjects persisted in SQLite, with an incrementally-maintained Merkle tree."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock | None = None) -> None:
         self._conn = conn
+        # `lock` should be the owning `SQLiteStorage`'s own `_lock`
+        # when this store wraps that storage's connection (the normal
+        # production case via `_build_crdt_store`/`_crdt_store_for`) --
+        # see `_synchronized`'s docstring above for why the *same*
+        # lock object matters, not just an equivalent one. Falls back
+        # to a fresh RLock so standalone use (e.g. tests constructing
+        # a `SQLiteCRDTStore` directly against its own connection)
+        # still gets self-consistent locking.
+        self._lock = lock if lock is not None else threading.RLock()
         self._create_tables()
-        self.merkle = SQLiteMerkleTree(conn, _retry_on_locked)
+        self.merkle = SQLiteMerkleTree(conn, _retry_on_locked, self._lock)
 
+    @_synchronized
     def _create_tables(self) -> None:
         self._conn.execute(
             """
@@ -285,6 +338,7 @@ class SQLiteCRDTStore:
 
     # -- G-Set -------------------------------------------------------------
 
+    @_synchronized
     def add_object(self, knowledge_object: Any) -> bool:
         """
         Add ``knowledge_object`` if its id is not already present.
@@ -314,6 +368,7 @@ class SQLiteCRDTStore:
             self.merkle.update_merkle_path(object_id)
         return was_new
 
+    @_synchronized
     def get_object(self, object_id: str) -> dict[str, Any] | None:
         cur = self._conn.execute(
             "SELECT data FROM cks_knowledge_objects WHERE id = ?", (object_id,)
@@ -321,6 +376,7 @@ class SQLiteCRDTStore:
         row = cur.fetchone()
         return json.loads(row[0]) if row is not None else None
 
+    @_synchronized
     def list_objects(self) -> list[dict[str, Any]]:
         cur = self._conn.execute(
             "SELECT data FROM cks_knowledge_objects ORDER BY created_at"
@@ -354,14 +410,17 @@ class SQLiteCRDTStore:
 
     # -- Merkle delegation ---------------------------------------------------
 
+    @_synchronized
     def get_root_hash(self) -> str:
         return self.merkle.get_root_hash()
 
+    @_synchronized
     def get_children_hashes(self, prefix: str) -> list[str]:
         return self.merkle.get_children_hashes(prefix)
 
     # -- Version vector ------------------------------------------------------
 
+    @_synchronized
     def update_version_vector(self, node_id: str, vv: VersionVector) -> None:
         def _write() -> None:
             self._conn.execute(
@@ -378,6 +437,7 @@ class SQLiteCRDTStore:
 
         _retry_on_locked(_write)
 
+    @_synchronized
     def get_version_vector(self, node_id: str) -> VersionVector:
         cur = self._conn.execute(
             "SELECT version_vector FROM cks_crdt_state WHERE node_id = ?", (node_id,)
@@ -389,6 +449,7 @@ class SQLiteCRDTStore:
 
     # -- MV-Register (ADR-013 Stage 2) ---------------------------------------
 
+    @_synchronized
     def update_pointer(
         self, pointer_key: str, object_id: str, vv: VersionVector, origin_node: str
     ) -> bool:
@@ -452,6 +513,7 @@ class SQLiteCRDTStore:
 
         return _retry_on_locked(_write)
 
+    @_synchronized
     def get_pointers(self, pointer_key: str) -> list[dict[str, Any]]:
         cur = self._conn.execute(
             "SELECT object_id, vector_clock, origin_node, created_at "
@@ -469,6 +531,7 @@ class SQLiteCRDTStore:
             for row in cur.fetchall()
         ]
 
+    @_synchronized
     def resolve_pointer(self, pointer_key: str, winner_object_id: str) -> bool:
         """
         Collapse ``pointer_key`` down to exactly ``winner_object_id``,
@@ -497,6 +560,7 @@ class SQLiteCRDTStore:
 
     # -- Conflict events (ADR-013 Stage 2) -----------------------------------
 
+    @_synchronized
     def escalate_fork(
         self,
         pointer_key: str,
@@ -531,6 +595,7 @@ class SQLiteCRDTStore:
         _retry_on_locked(_write)
         return event_id
 
+    @_synchronized
     def list_pending_forks(self) -> list[dict[str, Any]]:
         cur = self._conn.execute(
             "SELECT event_id, pointer_key, conflicting_object_ids, vector_clocks, created_at "
@@ -547,6 +612,7 @@ class SQLiteCRDTStore:
             for row in cur.fetchall()
         ]
 
+    @_synchronized
     def mark_fork_resolved(self, event_id: str) -> None:
         def _write() -> None:
             self._conn.execute(
