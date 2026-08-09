@@ -85,6 +85,7 @@ import cks
 from cks.constraints.builtin import OPTIONAL_CONSTRAINTS_BY_NAME
 
 from cks_runtime.events.runtime_event import InferenceConflictDetected
+from cks_runtime.reasoning.sweeper_status import SweeperStatusMixin
 
 if TYPE_CHECKING:
     from cks_runtime.events.event_bus import EventBus
@@ -118,7 +119,7 @@ def _storage_supports_sweep(storage: object) -> bool:
     return all(callable(getattr(storage, m, None)) for m in _SWEEP_METHODS)
 
 
-class InferenceStalenessSweeper:
+class InferenceStalenessSweeper(SweeperStatusMixin):
     """
     Background worker that proactively re-checks recently-modified
     sessions for reasoning-staleness diagnostics and publishes
@@ -167,6 +168,8 @@ class InferenceStalenessSweeper:
         # first sweep after startup considers every existing session
         # at least once.
         self._watermark: datetime = datetime.fromtimestamp(0, tz=UTC)
+
+        self._init_sweeper_status()
 
         # session_id -> the set of (code, location) pairs already
         # published for that session, across all sweeps so far. A
@@ -222,18 +225,22 @@ class InferenceStalenessSweeper:
 
     async def _run(self) -> None:
         while self._running:
+            started_at = datetime.now(UTC)
             try:
-                await self._sweep()
+                result = await self._sweep()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self._record_sweep_error(started_at, exc)
                 logger.exception(
                     "InferenceStalenessSweeper sweep failed; "
                     "will retry next interval."
                 )
+            else:
+                self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._sweep_interval)
 
-    async def _sweep(self) -> None:
+    async def _sweep(self) -> list[Any]:
         sweep_started_at = datetime.now(UTC)
         watermark = self._watermark
         list_fn = self._storage.list_sessions_modified_since
@@ -274,6 +281,14 @@ class InferenceStalenessSweeper:
 
         for session in candidates:
             await self._sweep_session(session)
+
+        # `candidates` here is "sessions considered this sweep", not
+        # "conflicts escalated" (unlike the other sweepers' sweep_once) --
+        # _sweep_session doesn't report a per-session escalation count.
+        # Still a meaningful liveness signal for agent_status: 0 means
+        # the sweep ran and found nothing due, a number means it's
+        # actively processing a backlog.
+        return candidates
 
     async def _sweep_session(self, session: RuntimeSession) -> None:
         structure = session.knowledge_structure
@@ -320,6 +335,32 @@ class InferenceStalenessSweeper:
     # Convenience: run a single sweep synchronously (useful in tests)
     # ------------------------------------------------------------------
 
-    async def run_once(self) -> None:
-        """Trigger one sweep immediately, without starting the background loop."""
-        await self._sweep()
+    async def run_once(self) -> list[Any]:
+        """Trigger one sweep immediately, without starting the background loop.
+
+        Unlike the ``_run()`` loop, a raised exception propagates to the
+        caller rather than being swallowed -- ``run_once`` is used by
+        tests and manual triggers that want to see the failure, not a
+        long-running background worker that should keep going. Status
+        (``last_run_at``/``last_error``/etc, see ``status()``) is
+        recorded either way.
+        """
+        started_at = datetime.now(UTC)
+        try:
+            result = await self._sweep()
+        except Exception as exc:
+            self._record_sweep_error(started_at, exc)
+            raise
+        self._record_sweep_success(started_at, result)
+        return result
+
+    # ------------------------------------------------------------------
+    # Status (agent_status / list_agents, see cks-mcp)
+    # ------------------------------------------------------------------
+
+    def status(self) -> dict[str, Any]:
+        return self.sweeper_status(
+            agent_id="inference_staleness",
+            running=self._running,
+            interval_seconds=self._sweep_interval,
+        )

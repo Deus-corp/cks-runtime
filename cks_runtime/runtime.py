@@ -174,6 +174,7 @@ class Runtime:
         "_replica_id",
         "_sessions",
         "_storage",
+        "_sweepers",
         "_temporal_sweeper",
         "_transactions",
         "_versions",
@@ -373,6 +374,39 @@ class Runtime:
                 interval_seconds=int(self.config.contradiction_sweep_interval),
                 batch_size=self.config.contradiction_sweep_batch_size,
             )
+
+        # Agent registry (list_agents / agent_status, see cks-mcp): every
+        # sweeper actually constructed above (config-enabled), keyed by
+        # the same stable agent_id each sweeper's own status() reports --
+        # so `self._sweepers[agent_id].status()` and
+        # `self._sweepers[agent_id] is self._xxx_sweeper` always agree.
+        # A sweeper disabled via config (its attribute is None) simply
+        # doesn't appear here, rather than appearing with a placeholder
+        # status -- "not configured" and "configured but not currently
+        # running" are different things and callers of list_agents/
+        # agent_status should be able to tell them apart (the latter
+        # shows up with running=False and a real last_run_at/last_error).
+        #
+        # NOTE: this only covers in-process sweepers. It does NOT cover
+        # the standalone agent processes (critic_agent, enrichment_agent,
+        # fork_resolution_agent, pipeline_agent) -- those run as separate
+        # OS processes with their own Runtime instance and are invisible
+        # here; see cks_mcp.critic_agent's module docstring and
+        # get_metrics's docstring for the same process-locality caveat
+        # on critic_agent_metrics.
+        self._sweepers: dict[str, Any] = {
+            sweeper.status()["agent_id"]: sweeper
+            for sweeper in (
+                self._inference_sweeper,
+                self._provenance_sweeper,
+                self._temporal_sweeper,
+                self._graph_freshness_sweeper,
+                self._graph_auto_update_sweeper,
+                self._graph_health_sweeper,
+                self._contradiction_sweeper,
+            )
+            if sweeper is not None
+        }
 
         # Сначала создаём executor, потому что dispatcher зависит от него
         self._executor = OperationExecutor(
@@ -593,6 +627,40 @@ class Runtime:
     def metrics(self) -> MetricsCollector:
         """Runtime metrics collector."""
         return self._metrics
+
+    # ------------------------------------------------------------------
+    # Agent registry (list_agents / agent_status, see cks-mcp)
+    # ------------------------------------------------------------------
+    #
+    # Deliberately NOT exposed as a raw `sweepers` property returning
+    # `self._sweepers` directly -- these two methods return dicts
+    # (`status()`'s output, or a `list_agents`-shaped id/kind/running
+    # summary), not sweeper instances, so a caller in another package
+    # (cks-mcp) can't reach through to call e.g. `sweeper.stop()`
+    # without going through whatever lifecycle API Runtime later adds
+    # for that (tracked separately -- see plan doc: Agent Control Panel
+    # needs its own backend design before any start/stop surface exists).
+
+    def list_agent_statuses(self) -> list[dict[str, Any]]:
+        """Status of every in-process sweeper, config-enabled ones only.
+
+        Does not cover the standalone agent processes (critic_agent,
+        enrichment_agent, fork_resolution_agent, pipeline_agent) -- see
+        the ``self._sweepers`` comment in ``__init__``.
+        """
+        return [sweeper.status() for sweeper in self._sweepers.values()]
+
+    def get_agent_status(self, agent_id: str) -> dict[str, Any] | None:
+        """Status of one in-process sweeper by agent_id, or None if
+        ``agent_id`` doesn't match any currently-enabled sweeper (either
+        an unknown id, or a real sweeper name that's disabled via
+        config -- callers that need to distinguish those two cases
+        should cross-check against a fixed list of known sweeper names
+        rather than relying on this method alone, since a disabled
+        sweeper is never constructed and so has no id to report at all).
+        """
+        sweeper = self._sweepers.get(agent_id)
+        return sweeper.status() if sweeper is not None else None
 
 
     @property

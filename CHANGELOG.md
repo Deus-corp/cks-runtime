@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.7] - 2026-08-09
+
+### Added
+- **Sweeper status monitoring** – all in‑process sweepers (contradiction, inference staleness, provenance staleness, temporal staleness, graph freshness, graph auto‑update, graph health) now report their last run timestamp, duration, result count, and last error via a shared `SweeperStatusMixin`. The `Runtime` exposes `list_agent_statuses()` and `get_agent_status(agent_id)` for external observability (e.g. `cks-mcp`'s upcoming `agent_status` / `list_agents` tools).
+- **`sweeper_status.py`** – new shared module containing `SweeperStatusMixin`, used by all seven sweepers.
+
+---
+
 ## [1.48.6] - 2026-08-07
 
 ### Fixed

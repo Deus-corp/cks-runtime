@@ -43,6 +43,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from cks_runtime.reasoning.sweeper_status import SweeperStatusMixin
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -83,7 +85,7 @@ def _parse_checked_at(value: object) -> datetime | None:
         return None
 
 
-class ProvenanceStalenessSweeper:
+class ProvenanceStalenessSweeper(SweeperStatusMixin):
     """
     Periodically scans VerificationRecord objects across sessions for ones
     whose `checked_at` has exceeded `ttl_seconds`, and enqueues a
@@ -149,6 +151,8 @@ class ProvenanceStalenessSweeper:
         # escalated again rather than suppressed forever.
         self._known_stale: dict[str, set[str]] = {}
 
+        self._init_sweeper_status()
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -196,15 +200,19 @@ class ProvenanceStalenessSweeper:
 
     async def _run(self) -> None:
         while self._running:
+            started_at = datetime.now(UTC)
             try:
-                await self.sweep_once()
+                result = await self.sweep_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self._record_sweep_error(started_at, exc)
                 logger.exception(
                     "ProvenanceStalenessSweeper sweep failed; "
                     "will retry next interval."
                 )
+            else:
+                self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._interval_seconds)
 
     async def sweep_once(self) -> list[dict[str, Any]]:
@@ -327,3 +335,14 @@ class ProvenanceStalenessSweeper:
             self._known_stale.pop(session.session_id, None)
 
         return new_payloads
+
+    # ------------------------------------------------------------------
+    # Status (agent_status / list_agents, see cks-mcp)
+    # ------------------------------------------------------------------
+
+    def status(self) -> dict[str, Any]:
+        return self.sweeper_status(
+            agent_id="provenance_staleness",
+            running=self._running,
+            interval_seconds=self._interval_seconds,
+        )

@@ -26,6 +26,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from cks_runtime.reasoning.sweeper_status import SweeperStatusMixin
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -48,7 +50,7 @@ def _parse_timestamp(value: object) -> datetime | None:
         return None
 
 
-class GraphFreshnessSweeper:
+class GraphFreshnessSweeper(SweeperStatusMixin):
     """
     Periodically scans every entry in `graph_registry` for ones whose
     `updated_at` has exceeded `ttl_seconds`, and enqueues a
@@ -105,6 +107,8 @@ class GraphFreshnessSweeper:
         # is escalated again rather than suppressed forever.
         self._known_stale: set[str] = set()
 
+        self._init_sweeper_status()
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -143,14 +147,18 @@ class GraphFreshnessSweeper:
 
     async def _run(self) -> None:
         while self._running:
+            started_at = datetime.now(UTC)
             try:
-                await self.sweep_once()
+                result = await self.sweep_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self._record_sweep_error(started_at, exc)
                 logger.exception(
                     "GraphFreshnessSweeper sweep failed; will retry next interval."
                 )
+            else:
+                self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._interval_seconds)
 
     async def sweep_once(self) -> list[dict[str, Any]]:
@@ -223,5 +231,31 @@ class GraphFreshnessSweeper:
     # ------------------------------------------------------------------
 
     async def run_once(self) -> list[dict[str, Any]]:
-        """Trigger one sweep immediately, without starting the background loop."""
-        return await self.sweep_once()
+        """Trigger one sweep immediately, without starting the background loop.
+
+        Unlike the ``_run()`` loop, a raised exception propagates to the
+        caller rather than being swallowed -- ``run_once`` is used by
+        tests and manual triggers that want to see the failure, not a
+        long-running background worker that should keep going. Status
+        (``last_run_at``/``last_error``/etc, see ``status()``) is
+        recorded either way.
+        """
+        started_at = datetime.now(UTC)
+        try:
+            result = await self.sweep_once()
+        except Exception as exc:
+            self._record_sweep_error(started_at, exc)
+            raise
+        self._record_sweep_success(started_at, result)
+        return result
+
+    # ------------------------------------------------------------------
+    # Status (agent_status / list_agents, see cks-mcp)
+    # ------------------------------------------------------------------
+
+    def status(self) -> dict[str, Any]:
+        return self.sweeper_status(
+            agent_id="graph_freshness",
+            running=self._running,
+            interval_seconds=self._interval_seconds,
+        )
