@@ -178,6 +178,7 @@ class GossipAdapter:
         # `return True` sites -- so a *new* conflict on the same
         # session_id after that always registers fresh.
         self._pending_conflict_vectors: dict[str, VersionVector] = {}
+        self._pending_duplicate_ids: dict[str, set[int | None]] = {}
 
         # Same dedup shape as `_pending_conflict_vectors` above, for
         # DuplicateReplicaIdDetected: a genuine duplicate-identity
@@ -188,7 +189,6 @@ class GossipAdapter:
         # not just session_id -- so a *new* escalation is still raised
         # if the colliding remote's clock under our own key advances
         # further after the first one was already reported.
-        self._pending_duplicate_ids: dict[str, int] = {}
 
     @property
     def replica_id(self) -> str:
@@ -483,9 +483,10 @@ class GossipAdapter:
             )
         )
         if duplicate_id_detected:
-            already_pending = self._pending_duplicate_ids.get(remote_session.session_id)
-            if already_pending != remote_own_clock:
-                self._pending_duplicate_ids[remote_session.session_id] = remote_own_clock
+            already_pending = self._pending_duplicate_ids.get(remote_session.session_id, set())
+            if remote_own_clock not in already_pending:
+                already_pending.add(remote_own_clock)
+                self._pending_duplicate_ids[remote_session.session_id] = already_pending
                 if self._event_bus is not None:
                     await self._event_bus.publish(
                         DuplicateReplicaIdDetected(
@@ -606,10 +607,10 @@ class GossipAdapter:
             # already been told about, not new information. Skip
             # re-registering a branch and re-publishing the event; the
             # method still reports the conflict as unresolved.
-            already_pending = self._pending_conflict_vectors.get(
+            pending_conflict_vector = self._pending_conflict_vectors.get(
                 remote_session.session_id
             )
-            if already_pending == remote_vector:
+            if pending_conflict_vector == remote_vector:
                 return False
 
             source_session_id = await self._register_conflict_branch(
