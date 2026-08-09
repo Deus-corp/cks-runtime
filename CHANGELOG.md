@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.48.8] - 2026-08-09
+
+### Added
+- **Agent liveness tracking** – new `cks_agent_liveness` table in SQLite and Postgres, with `upsert_agent_liveness` and `list_agent_liveness` methods on both storage backends. Allows standalone agent processes (Critic, Enrichment, Fork Resolution, Pipeline) to periodically report their instance ID, process kind, last heartbeat, and current outbox task.
+- **`AgentLivenessRecord` dataclass** added to `storage.py`.
+- **`SyncStorageAdapter`** now proxies `upsert_agent_liveness` / `list_agent_liveness` / `supports_agent_liveness`.
+
+---
+
 ## [1.48.7] - 2026-08-09
 
 ### Added

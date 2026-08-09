@@ -29,6 +29,7 @@ from cks_runtime.storage.patch_codec import (
     serialize_operators,
 )
 from cks_runtime.storage.storage import (
+    AgentLivenessRecord,
     ConcurrentModificationError,
     OutboxTask,
     RuntimeStorage,
@@ -300,6 +301,33 @@ class SQLiteStorage(RuntimeStorage):
             self._conn.execute(
                 "ALTER TABLE graph_registry ADD COLUMN public INTEGER NOT NULL DEFAULT 0"
             )
+        # Standalone agent liveness (ADR-014). One row per process
+        # instance (not per process_kind) -- a restarted process gets a
+        # fresh instance_id rather than overwriting its predecessor's
+        # row, so liveness history survives restarts. Liveness
+        # (alive/stopped) is computed at read time from
+        # last_heartbeat_at/liveness_interval_s, not stored as a column.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_agent_liveness (
+                instance_id         TEXT PRIMARY KEY,
+                process_kind        TEXT NOT NULL,
+                hostname            TEXT NOT NULL,
+                pid                 INTEGER NOT NULL,
+                liveness_interval_s REAL NOT NULL,
+                started_at          TEXT NOT NULL,
+                last_heartbeat_at   TEXT NOT NULL,
+                current_task_id     INTEGER,
+                current_task_type   TEXT
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_liveness_kind
+            ON cks_agent_liveness(process_kind, last_heartbeat_at)
+            """
+        )
         self._conn.commit()
 
     @_synchronized
@@ -749,6 +777,67 @@ class SQLiteStorage(RuntimeStorage):
 
         _retry_on_locked(_write)
 
+
+    @property
+    def supports_agent_liveness(self) -> bool:
+        return True
+
+    @_synchronized
+    def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
+        def _write() -> None:
+            self._conn.execute(
+                """
+                INSERT INTO cks_agent_liveness
+                    (instance_id, process_kind, hostname, pid,
+                     liveness_interval_s, started_at, last_heartbeat_at,
+                     current_task_id, current_task_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(instance_id) DO UPDATE SET
+                    last_heartbeat_at = excluded.last_heartbeat_at,
+                    current_task_id = excluded.current_task_id,
+                    current_task_type = excluded.current_task_type
+                """,
+                (
+                    record.instance_id,
+                    record.process_kind,
+                    record.hostname,
+                    record.pid,
+                    record.liveness_interval_s,
+                    record.started_at,
+                    record.last_heartbeat_at,
+                    record.current_task_id,
+                    record.current_task_type,
+                ),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
+    @_synchronized
+    def list_agent_liveness(self) -> list[AgentLivenessRecord]:
+        rows = self._conn.execute(
+            """
+            SELECT instance_id, process_kind, hostname, pid,
+                   liveness_interval_s, started_at, last_heartbeat_at,
+                   current_task_id, current_task_type
+            FROM cks_agent_liveness
+            ORDER BY started_at DESC
+            """
+        ).fetchall()
+        return [
+            AgentLivenessRecord(
+                instance_id=row[0],
+                process_kind=row[1],
+                hostname=row[2],
+                pid=row[3],
+                liveness_interval_s=row[4],
+                started_at=row[5],
+                last_heartbeat_at=row[6],
+                current_task_id=row[7],
+                current_task_type=row[8],
+            )
+            for row in rows
+        ]
 
     # A claimed (IN_PROGRESS) task whose worker never called
     # complete_outbox_task/fail_outbox_task (crashed or hung) is

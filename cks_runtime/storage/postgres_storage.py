@@ -76,7 +76,11 @@ from cks_runtime.storage.patch_codec import (
     deserialize_operators,
     serialize_operators,
 )
-from cks_runtime.storage.storage import ConcurrentModificationError, OutboxTask
+from cks_runtime.storage.storage import (
+    AgentLivenessRecord,
+    ConcurrentModificationError,
+    OutboxTask,
+)
 from cks_runtime.versioning.version import RuntimeVersion
 
 # ---------------------------------------------------------------------------
@@ -263,6 +267,31 @@ _MIGRATE_GRAPH_REGISTRY_PUBLIC = """
     ALTER TABLE graph_registry ADD COLUMN public BOOLEAN NOT NULL DEFAULT false
 """
 
+# ---------------------------------------------------------------------------
+# DDL — standalone agent liveness (ADR-014). One row per process
+# instance (not per process_kind) -- see SQLiteStorage's schema comment
+# for the full rationale, identical here.
+# ---------------------------------------------------------------------------
+
+_DDL_AGENT_LIVENESS = """
+    CREATE TABLE IF NOT EXISTS cks_agent_liveness (
+        instance_id         TEXT PRIMARY KEY,
+        process_kind        TEXT NOT NULL,
+        hostname            TEXT NOT NULL,
+        pid                 INTEGER NOT NULL,
+        liveness_interval_s DOUBLE PRECISION NOT NULL,
+        started_at          TIMESTAMPTZ NOT NULL,
+        last_heartbeat_at   TIMESTAMPTZ NOT NULL,
+        current_task_id     INTEGER,
+        current_task_type   TEXT
+    )
+"""
+
+_DDL_AGENT_LIVENESS_INDEX = """
+    CREATE INDEX IF NOT EXISTS idx_agent_liveness_kind
+    ON cks_agent_liveness(process_kind, last_heartbeat_at)
+"""
+
 
 class PostgresStorage(AsyncRuntimeStorage):
     """
@@ -350,6 +379,10 @@ class PostgresStorage(AsyncRuntimeStorage):
                 await conn.commit()
             except psycopg.errors.DuplicateColumn:
                 await conn.rollback()
+            # Standalone agent liveness (ADR-014)
+            await conn.execute(_DDL_AGENT_LIVENESS)
+            await conn.execute(_DDL_AGENT_LIVENESS_INDEX)
+            await conn.commit()
         # Restore cached dimension from DB (survives restarts)
         await self._load_embed_dim()
 
@@ -1507,6 +1540,70 @@ class PostgresStorage(AsyncRuntimeStorage):
                 )
 
             await conn.commit()
+
+    # ------------------------------------------------------------------
+    # Standalone agent liveness (ADR-014)
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_agent_liveness(self) -> bool:
+        return True
+
+    async def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO cks_agent_liveness
+                    (instance_id, process_kind, hostname, pid,
+                     liveness_interval_s, started_at, last_heartbeat_at,
+                     current_task_id, current_task_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (instance_id) DO UPDATE SET
+                    last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+                    current_task_id = EXCLUDED.current_task_id,
+                    current_task_type = EXCLUDED.current_task_type
+                """,
+                (
+                    record.instance_id,
+                    record.process_kind,
+                    record.hostname,
+                    record.pid,
+                    record.liveness_interval_s,
+                    record.started_at,
+                    record.last_heartbeat_at,
+                    record.current_task_id,
+                    record.current_task_type,
+                ),
+            )
+            await conn.commit()
+
+    async def list_agent_liveness(self) -> list[AgentLivenessRecord]:
+        async with self._pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    """
+                    SELECT instance_id, process_kind, hostname, pid,
+                           liveness_interval_s, started_at, last_heartbeat_at,
+                           current_task_id, current_task_type
+                    FROM cks_agent_liveness
+                    ORDER BY started_at DESC
+                    """
+                )
+            ).fetchall()
+        return [
+            AgentLivenessRecord(
+                instance_id=row[0],
+                process_kind=row[1],
+                hostname=row[2],
+                pid=row[3],
+                liveness_interval_s=row[4],
+                started_at=row[5].isoformat() if hasattr(row[5], "isoformat") else row[5],
+                last_heartbeat_at=row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
+                current_task_id=row[7],
+                current_task_type=row[8],
+            )
+            for row in rows
+        ]
 
 
 # ---------------------------------------------------------------------------

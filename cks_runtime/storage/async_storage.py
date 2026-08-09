@@ -33,6 +33,7 @@ from typing import Any
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.storage import (
+    AgentLivenessRecord,
     ConcurrentModificationError,  # noqa: F401
     OutboxTask,
 )
@@ -234,6 +235,27 @@ class AsyncRuntimeStorage(ABC):
         Empty by default.
         """
         return []
+
+    async def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
+        """
+        Write/refresh one standalone-agent process instance's liveness
+        heartbeat row (ADR-014). No-op by default -- backends that
+        support agent liveness override this.
+        """
+
+    async def list_agent_liveness(self) -> list[AgentLivenessRecord]:
+        """
+        Return every known standalone-agent process instance, most
+        recently started first. See ``RuntimeStorage.list_agent_liveness``
+        for the rationale (TTL computed by the caller, not stored).
+        Empty by default.
+        """
+        return []
+
+    @property
+    def supports_agent_liveness(self) -> bool:
+        """Whether this storage backend supports agent liveness tracking."""
+        return False
 
     async def save_object_embeddings(
         self, object_id: str, session_id: str, embedding: bytes

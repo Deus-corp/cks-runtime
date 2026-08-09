@@ -285,6 +285,36 @@ class RuntimeStorage(ABC):
         """
         return []
 
+    def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
+        """
+        Write/refresh one standalone-agent process instance's liveness
+        heartbeat row (see cks-runtime ADR-014). Called once at process
+        startup and then periodically (every ``liveness_interval``
+        seconds) by each of the four standalone agent processes
+        (Critic, Enrichment, Fork Resolution, Pipeline) -- not related
+        to the outbox task-lease heartbeat (``touch_outbox_task``),
+        which is a different mechanism for a different failure mode
+        (see ADR-014's Context section). No-op by default -- backends
+        that support agent liveness override this.
+        """
+
+    def list_agent_liveness(self) -> list[AgentLivenessRecord]:
+        """
+        Return every known standalone-agent process instance, most
+        recently started first. Liveness (``alive``/``stopped``) is
+        computed by the caller from ``last_heartbeat_at`` and
+        ``liveness_interval_s`` (TTL = 3x interval, see ADR-014 §3),
+        not stored as a column, so a slow reader doesn't see a stale
+        cached verdict. Empty by default -- backends that support
+        agent liveness override this.
+        """
+        return []
+
+    @property
+    def supports_agent_liveness(self) -> bool:
+        """Whether this storage backend supports agent liveness tracking."""
+        return False
+
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
         """Save an embedding for an object. No-op by default."""
 
@@ -496,6 +526,25 @@ class RuntimeStorage(ABC):
         support the graph registry override this.
         """
         return []
+
+
+@dataclass(frozen=True, slots=True)
+class AgentLivenessRecord:
+    """
+    One standalone-agent process instance's liveness row (see
+    cks-runtime ADR-014). ``instance_id`` is a fresh uuid4 generated
+    once per process start -- a restarted process gets a new row, the
+    old one is kept as history, not overwritten.
+    """
+    instance_id: str
+    process_kind: str  # 'critic' | 'enrichment' | 'fork_resolution' | 'pipeline'
+    hostname: str
+    pid: int
+    liveness_interval_s: float
+    started_at: str
+    last_heartbeat_at: str
+    current_task_id: int | None = None
+    current_task_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

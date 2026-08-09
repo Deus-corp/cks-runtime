@@ -28,7 +28,7 @@ import asyncio
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.async_storage import AsyncRuntimeStorage
-from cks_runtime.storage.storage import OutboxTask, RuntimeStorage
+from cks_runtime.storage.storage import AgentLivenessRecord, OutboxTask, RuntimeStorage
 from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime.versioning.version_vector import VersionVector
 
@@ -144,6 +144,20 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
     @property
     def supports_outbox(self) -> bool:
         return self._sync.supports_outbox
+
+    # ------------------------------------------------------------------
+    # Standalone agent liveness (ADR-014)
+    # ------------------------------------------------------------------
+
+    async def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
+        await asyncio.to_thread(self._sync.upsert_agent_liveness, record)
+
+    async def list_agent_liveness(self) -> list[AgentLivenessRecord]:
+        return await asyncio.to_thread(self._sync.list_agent_liveness)
+
+    @property
+    def supports_agent_liveness(self) -> bool:
+        return self._sync.supports_agent_liveness
 
     # ------------------------------------------------------------------
     # Embeddings
