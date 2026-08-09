@@ -31,6 +31,9 @@ from cks_runtime.config import RuntimeConfig
 from cks_runtime.operations.operation_types import ValidateOperation
 from cks_runtime.runtime import Runtime
 
+if not os.environ.get("CKS_TEST_POSTGRES_DSN"):
+    pytest.skip("Postgres not configured; skipping embedding tests.", allow_module_level=True)
+
 try:
     from cks_runtime.storage.postgres_storage import PostgresStorage
     _PSYCOPG_AVAILABLE = True
