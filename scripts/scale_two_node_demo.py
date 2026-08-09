@@ -35,23 +35,24 @@ async def make_node(name, port, data_dir, peers):
     runtime = await Runtime.create(core=CksCoreAdapter(), storage=storage)
     adapter = GossipAdapter(runtime, runtime.replica_id)
     server = GossipServer(adapter, secret=SECRET, host="127.0.0.1", port=port)
+    transport = HTTPGossipTransport()
     service = GossipService(
-        adapter, transport=HTTPGossipTransport(), scheduler=PeerScheduler(peers),
+        adapter, transport=transport, scheduler=PeerScheduler(peers),
         secret=SECRET, interval_s=0.2, seq_no_counter=server.seq_no_counter,
     )
-    return name, runtime, adapter, server, service
+    return name, runtime, adapter, server, service, transport
 
 
 async def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         data_dir = Path(tmp)
         addrs = [f"http://127.0.0.1:{BASE_PORT + i}" for i in range(2)]
-        a_name, a_rt, _a_ad, a_srv, a_svc = await make_node("A", BASE_PORT, data_dir, [addrs[1]])
-        b_name, b_rt, _b_ad, b_srv, b_svc = await make_node("B", BASE_PORT + 1, data_dir, [addrs[0]])
-        nodes = [(a_name, a_rt, a_srv, a_svc), (b_name, b_rt, b_srv, b_svc)]
+        a_name, a_rt, _a_ad, a_srv, a_svc, a_tp = await make_node("A", BASE_PORT, data_dir, [addrs[1]])
+        b_name, b_rt, _b_ad, b_srv, b_svc, b_tp = await make_node("B", BASE_PORT + 1, data_dir, [addrs[0]])
+        nodes = [(a_name, a_rt, a_srv, a_svc, a_tp), (b_name, b_rt, b_srv, b_svc, b_tp)]
 
         conflicts = []
-        for name, rt, srv, svc in nodes:
+        for name, rt, srv, svc, _tp in nodes:
             rt.events.subscribe(GossipConflictDetected, lambda e, n=name: conflicts.append(n))
             await srv.start()
 
@@ -62,13 +63,13 @@ async def main() -> None:
         session_id = a_session.session_id
         GossipAdapter.anchor_genesis(a_session)
 
-        for _, _, _, svc in nodes:
+        for _, _, _, svc, _tp in nodes:
             svc.track_session(session_id)
 
-        for _, _, _, svc in nodes:
+        for _, _, _, svc, _tp in nodes:
             await svc.start()
         await asyncio.sleep(1.5)
-        for _, _, _, svc in nodes:
+        for _, _, _, svc, _tp in nodes:
             await svc.stop()
 
         b_session = b_rt.get_session(session_id)
@@ -93,21 +94,22 @@ async def main() -> None:
         await bulk_write(b_rt, b_session, "obj-b", N_OBJECTS // 2)
         print(f"A committed {N_OBJECTS//2} objects, B committed {N_OBJECTS//2} objects (disjoint ids).")
 
-        for _, _, _, svc in nodes:
+        for _, _, _, svc, _tp in nodes:
             await svc.start()
         await asyncio.sleep(3.0)
-        for _, _, srv, svc in nodes:
+        for _, _, srv, svc, tp in nodes:
             await svc.stop()
             await srv.stop()
+            await tp.close()
 
         print(f"\nGossipConflictDetected fired: {len(conflicts)} time(s) {conflicts}")
-        for name, rt, _, _ in nodes:
+        for name, rt, _, _, _tp in nodes:
             sess = rt.get_session(session_id)
             ids = sorted(o.identity.id for o in sess.knowledge_structure.objects)
             print(f"[{name}] object count={len(ids)} sample={ids[:3]}...{ids[-3:]}")
 
         # Try to reconstruct every version IN-MEMORY first (patch still live).
-        for name, rt, _, _ in nodes:
+        for name, rt, _, _, _tp in nodes:
             sess = rt.get_session(session_id)
             bad = []
             for v in sess.version_history:
@@ -120,7 +122,7 @@ async def main() -> None:
         # Now reload each node's Runtime from its own SQLite file (fresh
         # process restart simulation) and try again -- this round-trips
         # `patch` through storage.patch_json = ... if version.patch else None.
-        for name, _, _, _ in nodes:
+        for name, _, _, _, _tp in nodes:
             storage = SQLiteStorage(str(data_dir / f"{name}.db"))
             fresh_rt = await Runtime.create(core=CksCoreAdapter(), storage=storage)
             sess = fresh_rt.get_session(session_id)

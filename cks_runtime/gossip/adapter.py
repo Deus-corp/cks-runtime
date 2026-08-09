@@ -491,23 +491,11 @@ class GossipAdapter:
             self._pending_conflict_vectors.pop(remote_session.session_id, None)
             return True
 
-        # Neither vector dominates -- but if the two sides' actual
-        # content is already identical (e.g. neither has committed
-        # anything since they started tracking this session_id, so
-        # both vectors are still empty), there is nothing to
-        # reconcile at all: skip straight to "converged" rather than
-        # attempting a merge probe that would fail with "could not
-        # determine a merge base" purely because no fork point was
-        # ever recorded, even though nothing actually diverged.
-        # ``structurally_equivalent`` is an O(1) root-hash comparison
-        # (cks.KnowledgeStructure), so this is cheap to check first.
-        if local.knowledge_structure.structurally_equivalent(
-            remote_session.knowledge_structure
-        ):
-            self._pending_conflict_vectors.pop(remote_session.session_id, None)
-            return True
-
-        # Neither dominates and content genuinely differs → three‑way
+        # Neither dominates and content genuinely differs (the
+        # structurally-equivalent case, including the "both vectors
+        # still empty" case, is already handled unconditionally by
+        # the content-equivalence check near the top of this method,
+        # so it can't reach here) → three‑way
         # merge probe. If both sides' parent_version_id happen to
         # agree on a resolvable common ancestor -- most commonly
         # EMPTY_STATE_VERSION_ID, when both were anchored via

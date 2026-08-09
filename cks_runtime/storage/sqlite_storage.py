@@ -118,7 +118,23 @@ def _synchronized[**P, T](fn: Callable[Concatenate[SQLiteStorage, P], T]) -> Cal
 
 
 class SQLiteStorage(RuntimeStorage):
-    """Persists Runtime state in a SQLite database using JSON."""
+    """
+    Persists Runtime state in a SQLite database using JSON.
+
+    Opens the database in WAL (Write-Ahead Log) mode (see ``__init__``
+    below) for concurrent-reader/single-writer performance. Operational
+    consequence for anyone snapshotting or cloning a replica's data
+    directory (Docker image bake, backup job, "copy this node's DB to
+    bootstrap a new one"): copying only the ``.db`` file, without its
+    ``-wal`` and ``-shm`` sidecar files (or without first running
+    ``PRAGMA wal_checkpoint(TRUNCATE)`` to fold the WAL back into the
+    main file), silently drops any data that had been committed to the
+    WAL but not yet checkpointed into the main file. This was observed
+    directly during the gossip audit: a naive single-file copy of a
+    live node's ``.db`` came back with the tracked session missing
+    entirely (``get_session()`` returned ``None``) even though the
+    session had been committed and was visible on the live node.
+    """
 
     def __init__(self, db_path: str = "cks_runtime.db") -> None:
         # RLock, not Lock: several decorated methods below call another

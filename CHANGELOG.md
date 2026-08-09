@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.49.1] - 2026-08-09
+
+### Fixed
+- **Removed unreachable `structurally_equivalent` check** in `GossipAdapter._apply_remote_session_locked` – the unconditional check at the top of the method already handles this case, so the second one was dead code.
+- **Closed leaked aiohttp transports** in `local_cluster_demo.py` and `scale_two_node_demo.py` – `HTTPGossipTransport` is caller-owned and was never closed on shutdown, causing "Unclosed client session" warnings.
+
+### Documented
+- **WAL checkpoint risk** in `SQLiteStorage` docstring – naive single-file copy of a live database (Docker snapshots, backups) silently loses committed data unless the WAL sidecar files are also copied or a checkpoint is performed first.
+
+---
+
 ## [1.49.0] - 2026-08-09
 
 ### Added

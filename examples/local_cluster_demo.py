@@ -41,12 +41,20 @@ NODE_NAMES = ["supervisor", "critic", "worker"]
 
 class Node:
     def __init__(self, name: str, runtime: Runtime, adapter: GossipAdapter,
-                 server: GossipServer, service: GossipService) -> None:
+                 server: GossipServer, service: GossipService,
+                 transport: HTTPGossipTransport) -> None:
         self.name = name
         self.runtime = runtime
         self.adapter = adapter
         self.server = server
         self.service = service
+        # Kept explicitly (rather than reaching into GossipService's
+        # private ``_transport``) so callers can close the pooled
+        # aiohttp.ClientSession this demo opened -- GossipService
+        # treats the transport as caller-owned/possibly-shared and
+        # never closes it itself, so without this the demo leaked an
+        # "Unclosed client session" per node on every run.
+        self.transport = transport
 
     def session(self, session_id: str):
         return self.runtime.get_session(session_id)
@@ -58,15 +66,16 @@ async def make_node(name: str, port: int, data_dir: Path, peers: list[str]) -> N
     adapter = GossipAdapter(runtime, runtime.replica_id)  # durable identity (ADR-008 §1)
 
     server = GossipServer(adapter, secret=SECRET, host="127.0.0.1", port=port)
+    transport = HTTPGossipTransport()
     service = GossipService(
         adapter,
-        transport=HTTPGossipTransport(),
+        transport=transport,
         scheduler=PeerScheduler(peers),
         secret=SECRET,
         interval_s=0.3,
         seq_no_counter=server.seq_no_counter,
     )
-    return Node(name, runtime, adapter, server, service)
+    return Node(name, runtime, adapter, server, service, transport)
 
 
 async def run_rounds(nodes: list[Node], seconds: float) -> None:
@@ -152,6 +161,7 @@ async def main() -> None:
 
         for node in nodes:
             await node.server.stop()
+            await node.transport.close()
 
         print(f"GossipConflictDetected сработал: {len(conflicts)} раз(а) {conflicts}\n")
         print("После gossip:")
