@@ -27,7 +27,10 @@ import cks
 import pytest
 
 from cks_runtime.events.event_bus import EventBus
-from cks_runtime.events.runtime_event import GossipConflictDetected
+from cks_runtime.events.runtime_event import (
+    DuplicateReplicaIdDetected,
+    GossipConflictDetected,
+)
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.exchange import gossip_exchange
 from cks_runtime.operations.operation_types import (
@@ -895,3 +898,193 @@ class TestThreeReplicaConvergenceViaGenesis:
             session = rt.get_session(sup_session.session_id)
             ids = {o.identity.id for o in session.knowledge_structure.objects}
             assert ids == expected, f"{rt} has {ids}"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate replica_id (audit finding #2): two physically distinct
+# replicas sharing one replica_id -- most commonly two clones of a
+# deployment template/image, each carrying the same baked-in identity
+# instead of generating its own via storage.get_or_create_replica_id().
+#
+# Unlike every other reconciliation test above, this deliberately
+# constructs both replicas with SQLiteStorage rather than the default
+# in-memory backend: VersionVector only ever gets a `replica_id` entry
+# via ExecutionPipeline._persist's `replica_id=self._runtime.replica_id`
+# -- and `Runtime.replica_id` for the default in-memory backend is
+# always None (InMemoryStorage has no durable identity to report), so
+# the guard under test (keyed on that exact clock entry) would never
+# see anything to compare against without a backend that actually
+# reports one.
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateReplicaIdGuard:
+    @staticmethod
+    async def _shared_id_replica(
+        tmp_path,
+        db_name: str,
+        replica_id: str,
+    ) -> tuple[Runtime, GossipAdapter]:
+        from cks_runtime.storage.sqlite_storage import SQLiteStorage
+
+        storage = SQLiteStorage(str(tmp_path / db_name))
+        # Force both replicas' durable identity row to the same value
+        # -- simulates a cloned template rather than each installation
+        # generating its own via get_or_create_replica_id().
+        storage._conn.execute("DELETE FROM cks_runtime_identity")
+        storage._conn.execute(
+            "INSERT INTO cks_runtime_identity (id, replica_id) VALUES (1, ?)",
+            (replica_id,),
+        )
+        storage._conn.commit()
+
+        runtime = await Runtime.create(core=CksCoreAdapter(), storage=storage)
+        assert runtime.replica_id == replica_id
+        adapter = GossipAdapter(runtime, runtime.replica_id)
+        return runtime, adapter
+
+    async def test_higher_remote_clock_under_own_key_is_detected(self, tmp_path):
+        """
+        The straightforward case: remote's vector shows a higher clock
+        under our own replica_id than we ourselves have ever reached
+        -- only possible if some other process committed under our
+        identity, since our own clock only ever advances via our own
+        commits.
+        """
+        shared_id = "dup-replica-higher"
+        runtime_a, _adapter_a = await self._shared_id_replica(tmp_path, "a.db", shared_id)
+        runtime_b, adapter_b = await self._shared_id_replica(tmp_path, "b.db", shared_id)
+
+        structure = make_structure(["root"])
+        session_a = await runtime_a.create_session(structure)
+        session_id = session_a.session_id
+        GossipAdapter.anchor_genesis(session_a)
+
+        session_b = RuntimeSession(knowledge_structure=structure, session_id=session_id)
+        session_b.metadata["node_id"] = str(uuid4())
+        runtime_b._sessions.restore(session_b)
+        await runtime_b.storage.save_session(session_b)
+        GossipAdapter.anchor_genesis(session_b)
+
+        # A commits twice (higher own-key clock), B commits zero times
+        # beyond genesis -- A's snapshot, applied to B, should trip
+        # the guard rather than fast-forward B onto it.
+        await _evolve(runtime_a, session_a, [_add("from-a-1")])
+        await _evolve(runtime_a, session_a, [_add("from-a-2")])
+
+        received: list[DuplicateReplicaIdDetected] = []
+        runtime_b.events.subscribe(DuplicateReplicaIdDetected, received.append)
+
+        result = await adapter_b.apply_remote_session(session_a)
+
+        assert result is False
+        assert len(received) == 1
+        assert received[0].session_id == session_id
+        assert received[0].own_replica_id == shared_id
+        assert received[0].remote_clock > received[0].local_clock
+
+        # Refused entirely -- B's own content is untouched.
+        assert {o.identity.id for o in session_b.knowledge_structure.objects} == {"root"}
+
+    async def test_equal_clock_different_content_is_detected(self, tmp_path):
+        """
+        The subtler case this guard specifically had to be widened
+        for: two colliding replicas that each make exactly the same
+        number of commits since a shared genesis land on an *equal*
+        clock under the shared key, with genuinely different content.
+        A strict `remote > local` check alone misses this -- see
+        adapter.py's own comment on why equal-and-different is just as
+        conclusive as higher-and-newer.
+        """
+        shared_id = "dup-replica-equal"
+        runtime_a, adapter_a = await self._shared_id_replica(tmp_path, "a.db", shared_id)
+        runtime_b, adapter_b = await self._shared_id_replica(tmp_path, "b.db", shared_id)
+
+        structure = make_structure(["root"])
+        session_a = await runtime_a.create_session(structure)
+        session_id = session_a.session_id
+        GossipAdapter.anchor_genesis(session_a)
+
+        session_b = RuntimeSession(knowledge_structure=structure, session_id=session_id)
+        session_b.metadata["node_id"] = str(uuid4())
+        runtime_b._sessions.restore(session_b)
+        await runtime_b.storage.save_session(session_b)
+        GossipAdapter.anchor_genesis(session_b)
+
+        # Exactly one commit each -- same resulting clock under the
+        # shared key, different content.
+        await _evolve(runtime_a, session_a, [_add("from-a")])
+        await _evolve(runtime_b, session_b, [_add("from-b")])
+
+        received_a: list[DuplicateReplicaIdDetected] = []
+        received_b: list[DuplicateReplicaIdDetected] = []
+        runtime_a.events.subscribe(DuplicateReplicaIdDetected, received_a.append)
+        runtime_b.events.subscribe(DuplicateReplicaIdDetected, received_b.append)
+
+        result_b = await adapter_b.apply_remote_session(session_a)
+        result_a = await adapter_a.apply_remote_session(session_b)
+
+        assert result_a is False
+        assert result_b is False
+        assert len(received_a) == 1
+        assert len(received_b) == 1
+        assert received_a[0].local_clock == received_a[0].remote_clock
+        assert received_b[0].local_clock == received_b[0].remote_clock
+
+        # Neither side's content changed -- no silent, asymmetric
+        # divergence (the exact failure mode from the original audit
+        # repro).
+        assert {o.identity.id for o in session_a.knowledge_structure.objects} == {
+            "root",
+            "from-a",
+        }
+        assert {o.identity.id for o in session_b.knowledge_structure.objects} == {
+            "root",
+            "from-b",
+        }
+
+    async def test_repeated_rounds_do_not_re_publish_the_same_collision(self, tmp_path):
+        """
+        Mirrors TestGossipConflictMaterialization's dedup test for
+        GossipConflictDetected: a duplicate-id collision does not
+        resolve itself, so a background gossip loop retrying the same
+        exchange every interval must not re-publish the event every
+        single round forever.
+        """
+        shared_id = "dup-replica-dedup"
+        runtime_a, _adapter_a = await self._shared_id_replica(tmp_path, "a.db", shared_id)
+        runtime_b, adapter_b = await self._shared_id_replica(tmp_path, "b.db", shared_id)
+
+        structure = make_structure(["root"])
+        session_a = await runtime_a.create_session(structure)
+        session_id = session_a.session_id
+        GossipAdapter.anchor_genesis(session_a)
+
+        session_b = RuntimeSession(knowledge_structure=structure, session_id=session_id)
+        session_b.metadata["node_id"] = str(uuid4())
+        runtime_b._sessions.restore(session_b)
+        await runtime_b.storage.save_session(session_b)
+        GossipAdapter.anchor_genesis(session_b)
+
+        await _evolve(runtime_a, session_a, [_add("from-a-1")])
+        await _evolve(runtime_a, session_a, [_add("from-a-2")])
+
+        received: list[DuplicateReplicaIdDetected] = []
+        runtime_b.events.subscribe(DuplicateReplicaIdDetected, received.append)
+
+        for _ in range(5):
+            result = await adapter_b.apply_remote_session(session_a)
+            assert result is False
+
+        assert len(received) == 1
+
+        # A further commit on A advances remote_clock past what was
+        # already reported -- that's a materially new escalation
+        # (still unresolved, but the operator's earlier report is now
+        # stale), so it must be reported again, not swallowed by the
+        # same dedup entry.
+        await _evolve(runtime_a, session_a, [_add("from-a-3")])
+        result = await adapter_b.apply_remote_session(session_a)
+        assert result is False
+        assert len(received) == 2
+        assert received[1].remote_clock > received[0].remote_clock

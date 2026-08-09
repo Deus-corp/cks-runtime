@@ -55,7 +55,11 @@ from cks_runtime.core_api.field_operation import RuntimeFieldOperation
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.crdt.quarantine import CRDTQuarantine, _SupportsAddObject
 from cks_runtime.events.event_bus import EventBus
-from cks_runtime.events.runtime_event import CRDTForkDetected, GossipConflictDetected
+from cks_runtime.events.runtime_event import (
+    CRDTForkDetected,
+    DuplicateReplicaIdDetected,
+    GossipConflictDetected,
+)
 from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import (
     EMPTY_STATE_VERSION_ID,
@@ -174,6 +178,17 @@ class GossipAdapter:
         # `return True` sites -- so a *new* conflict on the same
         # session_id after that always registers fresh.
         self._pending_conflict_vectors: dict[str, VersionVector] = {}
+
+        # Same dedup shape as `_pending_conflict_vectors` above, for
+        # DuplicateReplicaIdDetected: a genuine duplicate-identity
+        # collision does not resolve itself (there is no merge that
+        # fixes it -- see that event's docstring), so without this the
+        # background gossip loop would re-publish it every single
+        # round forever. Keyed by (session_id, remote_own_clock) --
+        # not just session_id -- so a *new* escalation is still raised
+        # if the colliding remote's clock under our own key advances
+        # further after the first one was already reported.
+        self._pending_duplicate_ids: dict[str, int] = {}
 
     @property
     def replica_id(self) -> str:
@@ -422,6 +437,73 @@ class GossipAdapter:
 
         local_vector = VersionVector.from_metadata(local.metadata)
         remote_vector = VersionVector.from_metadata(remote_session.metadata)
+
+        # Duplicate-replica_id guard (SPEC-009 Section 4 durable
+        # identity; see DuplicateReplicaIdDetected's docstring for the
+        # full failure mode). `VersionVector.bump()` for our own
+        # `self._replica_id` key is only ever called by *this*
+        # replica's own commit path -- our own clock only ever moves
+        # forward under commits we ourselves made, so a legitimate
+        # remote can only ever have *observed* (via absorb(), directly
+        # or transitively) some past-or-current value of it, never a
+        # higher one: `remote_own_clock > local_own_clock` alone is
+        # already conclusive proof some other process is committing
+        # under this same identity.
+        #
+        # That strict inequality is NOT the only way two colliding
+        # writers show up, though: two clones of one deployment
+        # template/image that each make exactly the same number of
+        # commits since the shared genesis land on the exact same
+        # clock value under the shared key while holding genuinely
+        # different content (each clone's own commits are invisible to
+        # the other, so nothing makes their counts diverge just
+        # because they diverged) -- equal count, different content is
+        # just as conclusive: only one physical writer can legitimately
+        # own a given (key, clock) pair, so two different states
+        # claiming the same one is still proof of a collision, not a
+        # coincidence to wave through. `structurally_equivalent` is an
+        # O(1) root-hash comparison, so checking it is cheap even
+        # though this branch is the less common of the two.
+        #
+        # Either way: refuse the merge entirely (don't fast-forward,
+        # don't fold vectors, don't run the three-way probe) rather
+        # than silently accepting content a VersionVector can no
+        # longer make sense of -- see the audit repro
+        # (``examples/duplicate_replica_id_demo.py``) for what happens
+        # downstream (asymmetric, non-converging divergence) when this
+        # is allowed through instead.
+        own_key = self._replica_id
+        local_own_clock = local_vector.clocks.get(own_key, 0)
+        remote_own_clock = remote_vector.clocks.get(own_key, 0)
+        duplicate_id_detected = remote_own_clock > local_own_clock or (
+            remote_own_clock > 0
+            and remote_own_clock == local_own_clock
+            and not local.knowledge_structure.structurally_equivalent(
+                remote_session.knowledge_structure
+            )
+        )
+        if duplicate_id_detected:
+            already_pending = self._pending_duplicate_ids.get(remote_session.session_id)
+            if already_pending != remote_own_clock:
+                self._pending_duplicate_ids[remote_session.session_id] = remote_own_clock
+                if self._event_bus is not None:
+                    await self._event_bus.publish(
+                        DuplicateReplicaIdDetected(
+                            session_id=remote_session.session_id,
+                            own_replica_id=own_key,
+                            local_clock=local_own_clock,
+                            remote_clock=remote_own_clock,
+                        )
+                    )
+            return False
+
+        # Guard above did not trip this round -- if it had tripped on
+        # a previous round for this session_id, that's now stale
+        # (e.g. an operator resolved it by reassigning one side's
+        # replica_id out of band); drop the dedup entry so a genuinely
+        # new collision later is reported fresh rather than silently
+        # swallowed by a stale cache hit.
+        self._pending_duplicate_ids.pop(remote_session.session_id, None)
 
         # Content-equivalence check moved ahead of both dominance
         # branches (it used to run only in the "neither dominates"

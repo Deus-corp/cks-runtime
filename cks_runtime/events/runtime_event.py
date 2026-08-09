@@ -305,3 +305,60 @@ class CRDTForkDetected(RuntimeEvent):
     conflicting_object_ids: list[str] = field(default_factory=list)
 
     conflict_event_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateReplicaIdDetected(RuntimeEvent):
+    """
+    Published by ``GossipAdapter`` when an incoming remote session's
+    ``VersionVector`` proves, under *this replica's own* ``replica_id``
+    key, that some other process is also committing under this
+    replica's identity -- either because the remote's clock for our
+    own key is higher than we ourselves have ever recorded (a
+    legitimate remote can only ever have *observed* a past-or-current
+    value of our own counter via ``absorb()``, never a future one), or
+    because it lands on the exact same clock value we hold but with
+    genuinely different content (two colliding writers that happened
+    to commit the same number of times since a shared genesis land on
+    identical counts with different states -- see
+    ``_apply_remote_session_locked`` for why an equal count is just as
+    conclusive as a higher one here).
+
+    ``VersionVector.bump()`` is only ever called by this replica's own
+    commit path, under its own ``replica_id`` -- no legitimate peer
+    ever advances another replica's clock. Most commonly this is two
+    clones of the same deployment template/image, sharing a
+    ``replica_id`` that was baked in rather than generated per-
+    installation via ``storage.get_or_create_replica_id()``.
+
+    This is a data-integrity condition, not an ordinary merge
+    conflict: ``VersionVector.dominates()``/``absorb()`` treat
+    ``{replica_id: int}`` as a one-writer-per-key clock, so two writers
+    sharing a key are silently indistinguishable to it -- unlike
+    ``GossipConflictDetected``, there is no automatic resolution path
+    (``merge_branch`` included) that fixes this, because the vector
+    itself no longer means what it's supposed to. ``GossipAdapter``
+    refuses to apply (fast-forward, merge, or content-equivalence
+    fold) a remote session that trips this check -- see
+    ``_apply_remote_session_locked`` -- so this event is the only
+    signal an operator gets; resolving it requires giving one of the
+    colliding replicas a fresh ``replica_id`` (SPEC-009 Section 4) out
+    of band, not anything this Runtime can do for itself.
+
+    ``own_replica_id`` is the colliding identity (this replica's own).
+    ``local_clock``/``remote_clock`` are the two disagreeing values --
+    either ``remote_clock > local_clock``, or they're equal and the
+    two sides' content differs (see this event's own docstring for
+    why both cases are equally conclusive). ``session_id`` identifies
+    which tracked session's gossip exchange surfaced the collision
+    (the same duplicate identity will typically show up again on every
+    other session gossiped between these replicas, not just this one).
+    """
+
+    session_id: str = ""
+
+    own_replica_id: str = ""
+
+    local_clock: int = 0
+
+    remote_clock: int = 0

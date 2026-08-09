@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.49.2] - 2026-08-09
+
+### Added
+- **Duplicate replica ID detection** – `GossipAdapter._apply_remote_session_locked` now publishes a `DuplicateReplicaIdDetected` event when it detects two independent replicas using the same `replica_id` (either by a higher clock value under its own key, or by equal clocks with different content). The merge is blocked to prevent silent divergence.
+- **`examples/duplicate_replica_id_demo.py`** – reproduces the duplicate ID scenario end-to-end.
+- **Unit tests** for duplicate ID detection and deduplication logic.
+
+### Fixed
+- **Event flood on duplicate replica ID** – added `_pending_duplicate_ids` dedup cache (same pattern as `_pending_conflict_vectors`) so the event fires once per (session_id, clock_value) instead of on every gossip round.
+
+---
+
 ## [1.49.1] - 2026-08-09
 
 ### Fixed
