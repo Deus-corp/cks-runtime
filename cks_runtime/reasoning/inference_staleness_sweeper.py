@@ -190,34 +190,36 @@ class InferenceStalenessSweeper(SweeperStatusMixin):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        if self._running:
-            return
-        if not _storage_supports_sweep(self._storage):
+        async with self._control_lock:
+            if self._running:
+                return
+            if not _storage_supports_sweep(self._storage):
+                logger.info(
+                    "%s does not support sweep methods; "
+                    "InferenceStalenessSweeper will not start.",
+                    type(self._storage).__name__,
+                )
+                return
+            self._running = True
+            self._task = asyncio.create_task(self._run(), name="cks-inference-sweep")
             logger.info(
-                "%s does not support sweep methods; "
-                "InferenceStalenessSweeper will not start.",
-                type(self._storage).__name__,
+                "InferenceStalenessSweeper started "
+                "(sweep_interval=%.0fs, batch=%d).",
+                self._sweep_interval,
+                self._batch_size,
             )
-            return
-        self._running = True
-        self._task = asyncio.create_task(self._run(), name="cks-inference-sweep")
-        logger.info(
-            "InferenceStalenessSweeper started "
-            "(sweep_interval=%.0fs, batch=%d).",
-            self._sweep_interval,
-            self._batch_size,
-        )
 
     async def stop(self) -> None:
-        self._running = False
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("InferenceStalenessSweeper stopped.")
+        async with self._control_lock:
+            self._running = False
+            if self._task is not None:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                self._task = None
+            logger.info("InferenceStalenessSweeper stopped.")
 
     # ------------------------------------------------------------------
     # Sweep loop
@@ -239,6 +241,14 @@ class InferenceStalenessSweeper(SweeperStatusMixin):
             else:
                 self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._sweep_interval)
+            desired = self._storage.get_sweeper_desired_running("inference_staleness")
+            # get_sweeper_desired_running may be sync (SQLiteStorage) or
+            # async (PostgresStorage/StorageAdapter).
+            if asyncio.iscoroutine(desired):
+                desired = await desired
+            if desired is False:
+                self._running = False
+                break
 
     async def _sweep(self) -> list[Any]:
         sweep_started_at = datetime.now(UTC)

@@ -33,10 +33,18 @@ vs ``_sweep_interval``, ``sweep_once`` vs ``_sweep``, ``list[dict]`` vs
 ``_record_sweep_success``/``_record_sweep_error`` and read the result
 back via ``status()``. It does not touch ``start``/``stop``/``_running``
 at all; those stay exactly as each sweeper already defines them.
+
+ADR-015 adds one more piece of shared state here: ``_control_lock``, an
+``asyncio.Lock`` each sweeper's own ``start()``/``stop()`` wraps its
+check-then-act body in, so two concurrent external callers (e.g. two
+MCP clients both calling a ``start_agent``/``stop_agent`` tool for the
+same ``agent_id``) serialize instead of racing across ``await`` points.
+See ADR-015 §4 for the full rationale.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -54,6 +62,11 @@ class SweeperStatusMixin:
         self._last_run_duration_ms: float | None = None
         self._last_result_count: int | None = None
         self._last_error: str | None = None
+        # ADR-015 §4: guards start()/stop()'s check-then-act body against
+        # concurrent external callers. In-process state only (self._running,
+        # self._task) -- the desired_running storage row is a separate,
+        # idempotent upsert that doesn't need this lock (see ADR-015 §4).
+        self._control_lock = asyncio.Lock()
 
     def _record_sweep_success(
         self, started_at: datetime, result: list[Any] | None

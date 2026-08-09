@@ -180,39 +180,41 @@ class ContradictionSweeper(SweeperStatusMixin):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        if self._running:
-            return
-        if not getattr(self._storage, "supports_outbox", False):
+        async with self._control_lock:
+            if self._running:
+                return
+            if not getattr(self._storage, "supports_outbox", False):
+                logger.info(
+                    "Storage backend does not support outbox; "
+                    "ContradictionSweeper will not start."
+                )
+                return
+            if not _storage_supports_sweep(self._storage):
+                logger.info(
+                    "%s does not support sweep methods; "
+                    "ContradictionSweeper will not start.",
+                    type(self._storage).__name__,
+                )
+                return
+            self._running = True
+            self._task = asyncio.create_task(self._run(), name="cks-contradiction-sweep")
             logger.info(
-                "Storage backend does not support outbox; "
-                "ContradictionSweeper will not start."
+                "ContradictionSweeper started (interval=%ds, batch=%d).",
+                self._interval_seconds,
+                self._batch_size,
             )
-            return
-        if not _storage_supports_sweep(self._storage):
-            logger.info(
-                "%s does not support sweep methods; "
-                "ContradictionSweeper will not start.",
-                type(self._storage).__name__,
-            )
-            return
-        self._running = True
-        self._task = asyncio.create_task(self._run(), name="cks-contradiction-sweep")
-        logger.info(
-            "ContradictionSweeper started (interval=%ds, batch=%d).",
-            self._interval_seconds,
-            self._batch_size,
-        )
 
     async def stop(self) -> None:
-        self._running = False
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("ContradictionSweeper stopped.")
+        async with self._control_lock:
+            self._running = False
+            if self._task is not None:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                self._task = None
+            logger.info("ContradictionSweeper stopped.")
 
     # ------------------------------------------------------------------
     # Sweep loop
@@ -233,6 +235,15 @@ class ContradictionSweeper(SweeperStatusMixin):
             else:
                 self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._interval_seconds)
+            desired = self._storage.get_sweeper_desired_running("contradiction")
+            # get_sweeper_desired_running may be sync (SQLiteStorage) or
+            # async (PostgresStorage/StorageAdapter) -- see the same
+            # sync/async duck-typing pattern above for list_fn/enqueue_task.
+            if asyncio.iscoroutine(desired):
+                desired = await desired
+            if desired is False:
+                self._running = False
+                break
 
     async def sweep_once(self) -> list[dict[str, Any]]:
         """

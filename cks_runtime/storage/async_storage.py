@@ -252,10 +252,42 @@ class AsyncRuntimeStorage(ABC):
         """
         return []
 
+    async def get_agent_liveness(self, instance_id: str) -> AgentLivenessRecord | None:
+        """
+        Return the single liveness row for ``instance_id``, or ``None``
+        if no such row exists. See ``RuntimeStorage.get_agent_liveness``
+        for the rationale (ADR-016 §2). ``None`` by default.
+        """
+        return None
+
+    async def request_agent_stop(self, instance_id: str) -> bool:
+        """
+        Set ``desired_state='stop_requested'`` for this ``instance_id``.
+        See ``RuntimeStorage.request_agent_stop`` for the rationale
+        (ADR-016 §1). ``False`` by default.
+        """
+        return False
+
     @property
     def supports_agent_liveness(self) -> bool:
         """Whether this storage backend supports agent liveness tracking."""
         return False
+
+    async def set_sweeper_desired_running(self, agent_id: str, desired_running: bool) -> None:
+        """
+        Persist a manual override of whether ``agent_id`` should be
+        running. See ``RuntimeStorage.set_sweeper_desired_running``
+        for the rationale (ADR-015 §1). No-op by default.
+        """
+
+    async def get_sweeper_desired_running(self, agent_id: str) -> bool | None:
+        """
+        Return the stored override for ``agent_id``, or ``None`` if no
+        override row exists. See
+        ``RuntimeStorage.get_sweeper_desired_running`` for the
+        rationale. ``None`` by default.
+        """
+        return None
 
     async def save_object_embeddings(
         self, object_id: str, session_id: str, embedding: bytes

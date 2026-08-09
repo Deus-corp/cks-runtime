@@ -155,9 +155,27 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
     async def list_agent_liveness(self) -> list[AgentLivenessRecord]:
         return await asyncio.to_thread(self._sync.list_agent_liveness)
 
+    async def get_agent_liveness(self, instance_id: str) -> AgentLivenessRecord | None:
+        return await asyncio.to_thread(self._sync.get_agent_liveness, instance_id)
+
+    async def request_agent_stop(self, instance_id: str) -> bool:
+        return await asyncio.to_thread(self._sync.request_agent_stop, instance_id)
+
     @property
     def supports_agent_liveness(self) -> bool:
         return self._sync.supports_agent_liveness
+
+    # ------------------------------------------------------------------
+    # Sweeper control (ADR-015)
+    # ------------------------------------------------------------------
+
+    async def set_sweeper_desired_running(self, agent_id: str, desired_running: bool) -> None:
+        await asyncio.to_thread(
+            self._sync.set_sweeper_desired_running, agent_id, desired_running
+        )
+
+    async def get_sweeper_desired_running(self, agent_id: str) -> bool | None:
+        return await asyncio.to_thread(self._sync.get_sweeper_desired_running, agent_id)
 
     # ------------------------------------------------------------------
     # Embeddings

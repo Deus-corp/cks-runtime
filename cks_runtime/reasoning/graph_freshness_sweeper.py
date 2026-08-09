@@ -114,32 +114,34 @@ class GraphFreshnessSweeper(SweeperStatusMixin):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        if self._running:
-            return
-        if not getattr(self._storage, "supports_outbox", False):
+        async with self._control_lock:
+            if self._running:
+                return
+            if not getattr(self._storage, "supports_outbox", False):
+                logger.info(
+                    "Storage backend does not support outbox; "
+                    "GraphFreshnessSweeper will not start."
+                )
+                return
+            self._running = True
+            self._task = asyncio.create_task(self._run(), name="cks-graph-freshness-sweep")
             logger.info(
-                "Storage backend does not support outbox; "
-                "GraphFreshnessSweeper will not start."
+                "GraphFreshnessSweeper started (ttl=%ds, interval=%ds).",
+                self._ttl_seconds,
+                self._interval_seconds,
             )
-            return
-        self._running = True
-        self._task = asyncio.create_task(self._run(), name="cks-graph-freshness-sweep")
-        logger.info(
-            "GraphFreshnessSweeper started (ttl=%ds, interval=%ds).",
-            self._ttl_seconds,
-            self._interval_seconds,
-        )
 
     async def stop(self) -> None:
-        self._running = False
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("GraphFreshnessSweeper stopped.")
+        async with self._control_lock:
+            self._running = False
+            if self._task is not None:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                self._task = None
+            logger.info("GraphFreshnessSweeper stopped.")
 
     # ------------------------------------------------------------------
     # Sweep loop
@@ -160,6 +162,14 @@ class GraphFreshnessSweeper(SweeperStatusMixin):
             else:
                 self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._interval_seconds)
+            desired = self._storage.get_sweeper_desired_running("graph_freshness")
+            # get_sweeper_desired_running may be sync (SQLiteStorage) or
+            # async (PostgresStorage/StorageAdapter).
+            if asyncio.iscoroutine(desired):
+                desired = await desired
+            if desired is False:
+                self._running = False
+                break
 
     async def sweep_once(self) -> list[dict[str, Any]]:
         """

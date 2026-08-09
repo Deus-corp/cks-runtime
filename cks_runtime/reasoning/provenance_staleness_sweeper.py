@@ -158,41 +158,43 @@ class ProvenanceStalenessSweeper(SweeperStatusMixin):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        if self._running:
-            return
-        if not getattr(self._storage, 'supports_outbox', False):
+        async with self._control_lock:
+            if self._running:
+                return
+            if not getattr(self._storage, 'supports_outbox', False):
+                logger.info(
+                    "Storage backend does not support outbox; "
+                    "ProvenanceStalenessSweeper will not start."
+                )
+                return
+            if not _storage_supports_sweep(self._storage):
+                logger.info(
+                    "%s does not support sweep methods; "
+                    "ProvenanceStalenessSweeper will not start.",
+                    type(self._storage).__name__,
+                )
+                return
+            self._running = True
+            self._task = asyncio.create_task(self._run(), name="cks-provenance-sweep")
             logger.info(
-                "Storage backend does not support outbox; "
-                "ProvenanceStalenessSweeper will not start."
+                "ProvenanceStalenessSweeper started "
+                "(ttl=%ds, interval=%ds, batch=%d).",
+                self._ttl_seconds,
+                self._interval_seconds,
+                self._batch_size,
             )
-            return
-        if not _storage_supports_sweep(self._storage):
-            logger.info(
-                "%s does not support sweep methods; "
-                "ProvenanceStalenessSweeper will not start.",
-                type(self._storage).__name__,
-            )
-            return
-        self._running = True
-        self._task = asyncio.create_task(self._run(), name="cks-provenance-sweep")
-        logger.info(
-            "ProvenanceStalenessSweeper started "
-            "(ttl=%ds, interval=%ds, batch=%d).",
-            self._ttl_seconds,
-            self._interval_seconds,
-            self._batch_size,
-        )
 
     async def stop(self) -> None:
-        self._running = False
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("ProvenanceStalenessSweeper stopped.")
+        async with self._control_lock:
+            self._running = False
+            if self._task is not None:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                self._task = None
+            logger.info("ProvenanceStalenessSweeper stopped.")
 
     # ------------------------------------------------------------------
     # Sweep loop
@@ -214,6 +216,14 @@ class ProvenanceStalenessSweeper(SweeperStatusMixin):
             else:
                 self._record_sweep_success(started_at, result)
             await asyncio.sleep(self._interval_seconds)
+            desired = self._storage.get_sweeper_desired_running("provenance_staleness")
+            # get_sweeper_desired_running may be sync (SQLiteStorage) or
+            # async (PostgresStorage/StorageAdapter).
+            if asyncio.iscoroutine(desired):
+                desired = await desired
+            if desired is False:
+                self._running = False
+                break
 
     async def sweep_once(self) -> list[dict[str, Any]]:
         """

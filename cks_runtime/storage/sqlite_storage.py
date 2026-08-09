@@ -328,6 +328,28 @@ class SQLiteStorage(RuntimeStorage):
             ON cks_agent_liveness(process_kind, last_heartbeat_at)
             """
         )
+        # Add desired_state to pre-existing databases created before it
+        # existed (ADR-016 §1). NULL rather than a 'running' default so
+        # existing rows read back as "no stop requested" without a
+        # backfill.
+        cur = self._conn.execute("PRAGMA table_info(cks_agent_liveness)")
+        liveness_cols = [row[1] for row in cur.fetchall()]
+        if "desired_state" not in liveness_cols:
+            self._conn.execute(
+                "ALTER TABLE cks_agent_liveness ADD COLUMN desired_state TEXT"
+            )
+        # Sweeper control (ADR-015 §1). One row only for sweepers that
+        # have ever had their default overridden -- absence of a row
+        # means "config default applies".
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cks_sweeper_control (
+                agent_id        TEXT PRIMARY KEY,
+                desired_running BOOLEAN NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+            """
+        )
         self._conn.commit()
 
     @_synchronized
@@ -819,7 +841,7 @@ class SQLiteStorage(RuntimeStorage):
             """
             SELECT instance_id, process_kind, hostname, pid,
                    liveness_interval_s, started_at, last_heartbeat_at,
-                   current_task_id, current_task_type
+                   current_task_id, current_task_type, desired_state
             FROM cks_agent_liveness
             ORDER BY started_at DESC
             """
@@ -835,9 +857,78 @@ class SQLiteStorage(RuntimeStorage):
                 last_heartbeat_at=row[6],
                 current_task_id=row[7],
                 current_task_type=row[8],
+                desired_state=row[9],
             )
             for row in rows
         ]
+
+    @_synchronized
+    def get_agent_liveness(self, instance_id: str) -> AgentLivenessRecord | None:
+        row = self._conn.execute(
+            """
+            SELECT instance_id, process_kind, hostname, pid,
+                   liveness_interval_s, started_at, last_heartbeat_at,
+                   current_task_id, current_task_type, desired_state
+            FROM cks_agent_liveness
+            WHERE instance_id = ?
+            """,
+            (instance_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return AgentLivenessRecord(
+            instance_id=row[0],
+            process_kind=row[1],
+            hostname=row[2],
+            pid=row[3],
+            liveness_interval_s=row[4],
+            started_at=row[5],
+            last_heartbeat_at=row[6],
+            current_task_id=row[7],
+            current_task_type=row[8],
+            desired_state=row[9],
+        )
+
+    @_synchronized
+    def request_agent_stop(self, instance_id: str) -> bool:
+        def _write() -> bool:
+            cur = self._conn.execute(
+                """
+                UPDATE cks_agent_liveness
+                SET desired_state = 'stop_requested'
+                WHERE instance_id = ?
+                """,
+                (instance_id,),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+        return _retry_on_locked(_write)
+
+    @_synchronized
+    def set_sweeper_desired_running(self, agent_id: str, desired_running: bool) -> None:
+        def _write() -> None:
+            self._conn.execute(
+                """
+                INSERT INTO cks_sweeper_control (agent_id, desired_running, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    desired_running = excluded.desired_running,
+                    updated_at = excluded.updated_at
+                """,
+                (agent_id, desired_running),
+            )
+            self._conn.commit()
+
+        _retry_on_locked(_write)
+
+    @_synchronized
+    def get_sweeper_desired_running(self, agent_id: str) -> bool | None:
+        row = self._conn.execute(
+            "SELECT desired_running FROM cks_sweeper_control WHERE agent_id = ?",
+            (agent_id,),
+        ).fetchone()
+        return bool(row[0]) if row is not None else None
 
     # A claimed (IN_PROGRESS) task whose worker never called
     # complete_outbox_task/fail_outbox_task (crashed or hung) is

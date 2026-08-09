@@ -292,6 +292,27 @@ _DDL_AGENT_LIVENESS_INDEX = """
     ON cks_agent_liveness(process_kind, last_heartbeat_at)
 """
 
+# ADR-016 §1: NULL/'running' = no stop requested (default);
+# 'stop_requested' = pending. Same ALTER-TABLE-if-missing convention
+# as _MIGRATE_GRAPH_REGISTRY_PUBLIC below.
+_MIGRATE_AGENT_LIVENESS_DESIRED_STATE = """
+    ALTER TABLE cks_agent_liveness ADD COLUMN desired_state TEXT
+"""
+
+# ---------------------------------------------------------------------------
+# DDL — sweeper control (ADR-015 §1). One row only for sweepers that
+# have ever had their default overridden -- see SQLiteStorage's schema
+# comment for the full rationale, identical here.
+# ---------------------------------------------------------------------------
+
+_DDL_SWEEPER_CONTROL = """
+    CREATE TABLE IF NOT EXISTS cks_sweeper_control (
+        agent_id        TEXT PRIMARY KEY,
+        desired_running BOOLEAN NOT NULL,
+        updated_at      TIMESTAMPTZ NOT NULL
+    )
+"""
+
 
 class PostgresStorage(AsyncRuntimeStorage):
     """
@@ -382,6 +403,14 @@ class PostgresStorage(AsyncRuntimeStorage):
             # Standalone agent liveness (ADR-014)
             await conn.execute(_DDL_AGENT_LIVENESS)
             await conn.execute(_DDL_AGENT_LIVENESS_INDEX)
+            await conn.commit()
+            try:
+                await conn.execute(_MIGRATE_AGENT_LIVENESS_DESIRED_STATE)
+                await conn.commit()
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
+            # Sweeper control (ADR-015)
+            await conn.execute(_DDL_SWEEPER_CONTROL)
             await conn.commit()
         # Restore cached dimension from DB (survives restarts)
         await self._load_embed_dim()
@@ -1584,7 +1613,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                     """
                     SELECT instance_id, process_kind, hostname, pid,
                            liveness_interval_s, started_at, last_heartbeat_at,
-                           current_task_id, current_task_type
+                           current_task_id, current_task_type, desired_state
                     FROM cks_agent_liveness
                     ORDER BY started_at DESC
                     """
@@ -1601,9 +1630,80 @@ class PostgresStorage(AsyncRuntimeStorage):
                 last_heartbeat_at=row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
                 current_task_id=row[7],
                 current_task_type=row[8],
+                desired_state=row[9],
             )
             for row in rows
         ]
+
+    async def get_agent_liveness(self, instance_id: str) -> AgentLivenessRecord | None:
+        async with self._pool.connection() as conn:
+            row = await (
+                await conn.execute(
+                    """
+                    SELECT instance_id, process_kind, hostname, pid,
+                           liveness_interval_s, started_at, last_heartbeat_at,
+                           current_task_id, current_task_type, desired_state
+                    FROM cks_agent_liveness
+                    WHERE instance_id = %s
+                    """,
+                    (instance_id,),
+                )
+            ).fetchone()
+        if row is None:
+            return None
+        return AgentLivenessRecord(
+            instance_id=row[0],
+            process_kind=row[1],
+            hostname=row[2],
+            pid=row[3],
+            liveness_interval_s=row[4],
+            started_at=row[5].isoformat() if hasattr(row[5], "isoformat") else row[5],
+            last_heartbeat_at=row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
+            current_task_id=row[7],
+            current_task_type=row[8],
+            desired_state=row[9],
+        )
+
+    async def request_agent_stop(self, instance_id: str) -> bool:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE cks_agent_liveness
+                SET desired_state = 'stop_requested'
+                WHERE instance_id = %s
+                """,
+                (instance_id,),
+            )
+            await conn.commit()
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Sweeper control (ADR-015)
+    # ------------------------------------------------------------------
+
+    async def set_sweeper_desired_running(self, agent_id: str, desired_running: bool) -> None:
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO cks_sweeper_control (agent_id, desired_running, updated_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (agent_id) DO UPDATE SET
+                    desired_running = EXCLUDED.desired_running,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (agent_id, desired_running),
+            )
+            await conn.commit()
+
+    async def get_sweeper_desired_running(self, agent_id: str) -> bool | None:
+        async with self._pool.connection() as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT desired_running FROM cks_sweeper_control WHERE agent_id = %s",
+                    (agent_id,),
+                )
+            ).fetchone()
+        return bool(row[0]) if row is not None else None
 
 
 # ---------------------------------------------------------------------------

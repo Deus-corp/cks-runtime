@@ -310,10 +310,54 @@ class RuntimeStorage(ABC):
         """
         return []
 
+    def get_agent_liveness(self, instance_id: str) -> AgentLivenessRecord | None:
+        """
+        Return the single liveness row for ``instance_id``, or ``None``
+        if no such row exists (ADR-016 §2). A targeted single-row read,
+        used by ``LivenessReporter``'s own tick to check its own
+        ``desired_state`` without scanning the whole table on every
+        ``liveness_interval``. ``None`` by default -- backends that
+        support agent liveness override this.
+        """
+        return None
+
+    def request_agent_stop(self, instance_id: str) -> bool:
+        """
+        Set ``desired_state='stop_requested'`` for the liveness row
+        with this ``instance_id`` (ADR-016 §1). A single-column
+        ``UPDATE``, not an upsert -- it must never create a row (only
+        ``upsert_agent_liveness``, owned by the process itself, does
+        that), and it does not touch ``last_heartbeat_at``. Returns
+        ``False`` if no row with this ``instance_id`` exists (already
+        gone, or never existed) -- same not-an-error convention as
+        ``touch_outbox_task``'s lease-renewal return value. ``False``
+        by default -- backends that support agent liveness override
+        this.
+        """
+        return False
+
     @property
     def supports_agent_liveness(self) -> bool:
         """Whether this storage backend supports agent liveness tracking."""
         return False
+
+    def set_sweeper_desired_running(self, agent_id: str, desired_running: bool) -> None:
+        """
+        Persist a manual override of whether ``agent_id`` (an
+        in-process reasoning sweeper) should be running (ADR-015 §1).
+        One row per sweeper that has ever had its default overridden --
+        absence of a row means "config default applies". No-op by
+        default -- backends that support sweeper control override this.
+        """
+
+    def get_sweeper_desired_running(self, agent_id: str) -> bool | None:
+        """
+        Return the stored override for ``agent_id``, or ``None`` if no
+        override row exists (config default applies -- see
+        ``set_sweeper_desired_running``). ``None`` by default --
+        backends that support sweeper control override this.
+        """
+        return None
 
     def save_object_embeddings(self, object_id: str, session_id: str, embedding: bytes) -> None:
         """Save an embedding for an object. No-op by default."""
@@ -545,6 +589,11 @@ class AgentLivenessRecord:
     last_heartbeat_at: str
     current_task_id: int | None = None
     current_task_type: str | None = None
+    # ADR-016: NULL/'running' = no stop requested (default);
+    # 'stop_requested' = pending. Written only by request_agent_stop,
+    # never by upsert_agent_liveness (different actor/process -- see
+    # ADR-016 §1).
+    desired_state: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

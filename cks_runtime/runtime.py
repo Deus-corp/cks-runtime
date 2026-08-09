@@ -479,26 +479,62 @@ class Runtime:
         if runtime._gc is not None:
             await runtime._gc.start()
 
+        # ADR-015 §2: each sweeper's start() below is additionally gated
+        # on a stored manual override, checked once at startup. This
+        # table never *enables* a config-disabled sweeper (the `is not
+        # None` gate above stays exactly as-is) -- it only lets an
+        # already-enabled one stay stopped. `override is not False`
+        # (rather than `override is True`) so the common case -- no
+        # override row, `None` -- starts the sweeper, same as today's
+        # behavior with ADR-015 entirely absent.
         if runtime._inference_sweeper is not None:
-            await runtime._inference_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "inference_staleness"
+            )
+            if override is not False:
+                await runtime._inference_sweeper.start()
 
         if runtime._provenance_sweeper is not None:
-            await runtime._provenance_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "provenance_staleness"
+            )
+            if override is not False:
+                await runtime._provenance_sweeper.start()
 
         if runtime._temporal_sweeper is not None:
-            await runtime._temporal_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "temporal_staleness"
+            )
+            if override is not False:
+                await runtime._temporal_sweeper.start()
 
         if runtime._graph_freshness_sweeper is not None:
-            await runtime._graph_freshness_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "graph_freshness"
+            )
+            if override is not False:
+                await runtime._graph_freshness_sweeper.start()
 
         if runtime._graph_auto_update_sweeper is not None:
-            await runtime._graph_auto_update_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "graph_auto_update"
+            )
+            if override is not False:
+                await runtime._graph_auto_update_sweeper.start()
 
         if runtime._graph_health_sweeper is not None:
-            await runtime._graph_health_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "graph_health"
+            )
+            if override is not False:
+                await runtime._graph_health_sweeper.start()
 
         if runtime._contradiction_sweeper is not None:
-            await runtime._contradiction_sweeper.start()
+            override = await runtime._storage.get_sweeper_desired_running(
+                "contradiction"
+            )
+            if override is not False:
+                await runtime._contradiction_sweeper.start()
 
         return runtime
 

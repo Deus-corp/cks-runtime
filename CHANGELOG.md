@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.49.0] - 2026-08-09
+
+### Added
+- **Sweeper control (ADR-015)** – `Runtime` now checks persisted overrides before starting each sweeper, and every sweeper monitors `storage.get_sweeper_desired_running()` during its loop to stop itself when an override is set to `False`. This enables the upcoming Agent Control Panel in `cks-studio` to start/stop sweepers at runtime without restarting the server.
+- **`cks_sweeper_control` table** – stores manual overrides for sweeper agent_id (one row per sweeper that has been explicitly toggled). Implemented for SQLite and Postgres.
+- **`AsyncRuntimeStorage` / `RuntimeStorage`** now declare `set_sweeper_desired_running` and `get_sweeper_desired_running` (no-ops by default, overridden by SQLite/Postgres backends).
+- **Standalone-agent stop signalling (ADR-016)** – new `desired_state` column on `cks_agent_liveness`, with `request_agent_stop` (sets it to `'stop_requested'`) and `get_agent_liveness` (single-row read for the process to check its own desired_state). Backward-compatible: existing rows get `NULL` (treated as "no stop requested").
+- **`SweeperStatusMixin`** now provides `_control_lock` for thread-safe start/stop, used by all seven sweepers.
+
+---
+
 ## [1.48.8] - 2026-08-09
 
 ### Added
