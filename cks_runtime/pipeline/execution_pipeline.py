@@ -26,6 +26,7 @@ from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import (
     EvolveOperation,
     MergeOperation,
+    ReplaceStateOperation,
     RevertVersionOperation,
 )
 from cks_runtime.transaction.transaction import RuntimeTransaction
@@ -370,5 +371,5 @@ class ExecutionPipeline:
         if result.status != OperationStatus.COMPLETED:
             return
 
-        if isinstance(operation, (EvolveOperation, RevertVersionOperation, MergeOperation)):
+        if isinstance(operation, (EvolveOperation, RevertVersionOperation, MergeOperation, ReplaceStateOperation)):
             session.knowledge_structure = result.payload

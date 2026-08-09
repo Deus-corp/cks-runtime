@@ -641,7 +641,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             patch_json = None
         else:
             ks_json = None
-            patch_json = serialize_operators(version.patch) if version.patch else None
+            patch_json = serialize_operators(version.patch) if version.patch is not None else None
 
         data = {
             "version_id": version.version_id,
@@ -1746,7 +1746,7 @@ def _session_from_row(data: dict) -> RuntimeSession:
 def _version_from_row(data: dict) -> RuntimeVersion:
     """Reconstruct a RuntimeVersion from a decoded ``versions.data`` JSONB row."""
     ks = cks.parse(data["knowledge_structure"]) if data.get("knowledge_structure") else None
-    patch = deserialize_operators(data["patch"]) if data.get("patch") else None
+    patch = deserialize_operators(data["patch"]) if data.get("patch") is not None else None
     return RuntimeVersion(
         session_id=data["session_id"],
         transaction_id=data["transaction_id"],

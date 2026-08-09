@@ -289,7 +289,7 @@ class InMemoryStorage(RuntimeStorage):
                 patch_json = None
             else:
                 ks_json = None
-                patch_json = serialize_operators(version.patch) if version.patch else None
+                patch_json = serialize_operators(version.patch) if version.patch is not None else None
             data = {
                 "version_id": version.version_id,
                 "session_id": version.session_id,
@@ -355,7 +355,7 @@ class InMemoryStorage(RuntimeStorage):
             if mode == "merge" and vid in self._versions:
                 continue
             ks = cks.parse(d["knowledge_structure"]) if d.get("knowledge_structure") else None
-            patch = deserialize_operators(d["patch"]) if d.get("patch") else None
+            patch = deserialize_operators(d["patch"]) if d.get("patch") is not None else None
             created_at = _dt.fromisoformat(d["created_at"])
             version = RuntimeVersion(
                 session_id=d["session_id"],

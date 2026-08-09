@@ -688,3 +688,74 @@ class MergeOperation(Operation):
                 continue
 
         return resolutions
+
+
+class ReplaceStateOperation(Operation):
+    """
+    Wholesale-replace the session's Knowledge Structure with a
+    caller-supplied one, going through the normal commit pipeline so
+    ``ExecutionPipeline.commit()`` captures ``initial_state`` (the
+    *actual* prior content) before the replacement happens, not after.
+
+    Exists for exactly one caller today: ``GossipAdapter``'s
+    fast-forward path (``_apply_remote_session_locked``), which used
+    to assign ``local.knowledge_structure = remote_session.knowledge_structure``
+    directly and *then* call ``begin_transaction``/``commit_transaction``.
+    Because ``ExecutionPipeline.commit()`` reads
+    ``transaction.session.knowledge_structure`` as ``initial_state`` at
+    the very start of ``commit()``, that direct assignment had already
+    happened by the time ``initial_state`` was captured -- so
+    ``VersionManager.create()`` computed
+    ``core_bridge.diff(previous_state, session.knowledge_structure)``
+    as a diff of the new state against itself: always empty, no matter
+    how much content actually changed. An empty ``patch`` list is
+    falsy, so ``SQLiteStorage.save_version`` wrote it to disk as
+    ``NULL`` (``patch_json = serialize_operators(version.patch) if
+    version.patch else None``), and since the version was not a
+    snapshot either (not index 0, not a ``snapshot_interval``
+    boundary), the persisted version was left with *neither* a
+    snapshot *nor* a patch -- unreconstructable the moment it was
+    reloaded from storage. ``RuntimeSession.get_version_state`` (used
+    by ``OutboxEmbeddingWorker``, ``explain_diff``,
+    ``compare_versions``, ``revert_version``, ...) then fails with
+    "has neither a stored snapshot nor a recorded patch" for that
+    version and for every version after it in the same session.
+
+    Routing the replacement through this operation instead fixes that:
+    the mutation happens inside ``execute()``, which only runs *after*
+    ``ExecutionPipeline.commit()`` has already captured the real prior
+    ``knowledge_structure`` as ``initial_state`` (see
+    ``ExecutionPipeline.commit``, line ~57). The diff recorded is then
+    the genuine one between what this replica had before and the
+    remote state it adopted, exactly like any other commit.
+    """
+    operation_id: str = "replace_state"
+
+    def __init__(
+        self,
+        operation_id: str = "replace_state",
+        *,
+        knowledge_structure: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(operation_id, metadata=metadata)
+        self.knowledge_structure = knowledge_structure
+
+    async def execute(
+        self,
+        session: RuntimeSession,
+        executor,
+    ) -> ExecutionResult:
+        if self.knowledge_structure is None:
+            return ExecutionResult(
+                operation_id=self.operation_id,
+                status=OperationStatus.FAILED,
+                error=ValueError(
+                    "ReplaceStateOperation requires 'knowledge_structure'."
+                ),
+            )
+        return ExecutionResult(
+            operation_id=self.operation_id,
+            status=OperationStatus.COMPLETED,
+            payload=self.knowledge_structure,
+        )

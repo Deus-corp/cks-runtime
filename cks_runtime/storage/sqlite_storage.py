@@ -526,7 +526,7 @@ class SQLiteStorage(RuntimeStorage):
         for (version_json,) in version_rows:
             vdata = json.loads(version_json)
             ks_v = cks.parse(vdata["knowledge_structure"]) if vdata["knowledge_structure"] else None
-            patch_v = deserialize_operators(vdata["patch"]) if vdata.get("patch") else None
+            patch_v = deserialize_operators(vdata["patch"]) if vdata.get("patch") is not None else None
             created_at = datetime.fromisoformat(vdata["created_at"])
             version = RuntimeVersion(
                 session_id=vdata["session_id"],
@@ -666,7 +666,7 @@ class SQLiteStorage(RuntimeStorage):
             patch_json = None
         else:
             ks_json = None
-            patch_json = serialize_operators(version.patch) if version.patch else None
+            patch_json = serialize_operators(version.patch) if version.patch is not None else None
         data = {
             "version_id": version.version_id,
             "session_id": version.session_id,
@@ -702,7 +702,7 @@ class SQLiteStorage(RuntimeStorage):
             return None
         data = json.loads(row[0])
         ks = cks.parse(data["knowledge_structure"]) if data["knowledge_structure"] else None
-        patch = deserialize_operators(data["patch"]) if data["patch"] else None
+        patch = deserialize_operators(data["patch"]) if data["patch"] is not None else None
         from datetime import datetime
         created_at = datetime.fromisoformat(data["created_at"])
         version = RuntimeVersion(
@@ -731,7 +731,7 @@ class SQLiteStorage(RuntimeStorage):
         for (data_str,) in rows:
             data = json.loads(data_str)
             ks = cks.parse(data["knowledge_structure"]) if data["knowledge_structure"] else None
-            patch = deserialize_operators(data["patch"]) if data.get("patch") else None
+            patch = deserialize_operators(data["patch"]) if data.get("patch") is not None else None
             from datetime import datetime
             created_at = datetime.fromisoformat(data["created_at"])
             version = RuntimeVersion(

@@ -60,6 +60,7 @@ from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import (
     EMPTY_STATE_VERSION_ID,
     MergeOperation,
+    ReplaceStateOperation,
 )
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version_vector import VersionVector
@@ -422,6 +423,40 @@ class GossipAdapter:
         local_vector = VersionVector.from_metadata(local.metadata)
         remote_vector = VersionVector.from_metadata(remote_session.metadata)
 
+        # Content-equivalence check moved ahead of both dominance
+        # branches (it used to run only in the "neither dominates"
+        # branch below). Reason: `VersionVector.dominates()` only
+        # compares clocks, never content, and a session-level commit
+        # that touches metadata but not content -- the canonical
+        # example being `_bootstrap_remote_session`'s own empty
+        # adoption transaction, which bumps the new replica's
+        # `node_id`/`replica_id` clocks while copying content
+        # byte-for-byte from the remote -- inflates one side's vector
+        # relative to the other's without either side's actual
+        # Knowledge Structure having diverged at all. That inflated
+        # vector then satisfies `dominates()` on every following
+        # anti-entropy round, so without this check the "remote
+        # dominates -> fast-forward" branch fired repeatedly with
+        # nothing to forward: `ReplaceStateOperation` correctly diffs
+        # old vs. new state, computes a genuinely empty patch (content
+        # really is unchanged), and an empty *list* patch is exactly
+        # as unreconstructable once written to storage as a *missing*
+        # one was before ADR-008's patch-vs-snapshot serialization fix
+        # -- so every such round left behind one more phantom,
+        # eventually-unreconstructable Version for no reason. Folding
+        # the vectors here still lets both sides converge their clocks
+        # (so this check stops re-triggering once they agree), just
+        # without recording a Version that changes nothing.
+        if local.knowledge_structure.structurally_equivalent(
+            remote_session.knowledge_structure
+        ):
+            if not local_vector.dominates(remote_vector):
+                local_vector.absorb(remote_vector)
+                local_vector.to_metadata(local.metadata)
+                await self._runtime.storage.save_session(local)
+            self._pending_conflict_vectors.pop(remote_session.session_id, None)
+            return True
+
         if local_vector.dominates(remote_vector):
             self._pending_conflict_vectors.pop(remote_session.session_id, None)
             return True
@@ -429,11 +464,29 @@ class GossipAdapter:
         # Fast‑forward: remote dominates → adopt remote state without a
         # full merge, the same way MergeOperation.execute does it.
         if remote_vector.dominates(local_vector):
-            local.knowledge_structure = remote_session.knowledge_structure
             local_vector.absorb(remote_vector)
             local_vector.to_metadata(local.metadata)
-            # Persist the fast‑forward as a new local Version.
+            # The actual replacement of knowledge_structure happens
+            # *inside* the operation below (ReplaceStateOperation),
+            # not here, so ExecutionPipeline.commit() still captures
+            # this replica's real prior state as `initial_state` before
+            # anything changes. Assigning `local.knowledge_structure`
+            # directly at this point (as this branch used to do) makes
+            # `initial_state` and the post-mutation state the exact
+            # same object by the time commit() reads it, which makes
+            # VersionManager.create() record an empty (self-vs-self)
+            # patch no matter how much content actually changed -- see
+            # ReplaceStateOperation's docstring for the full failure
+            # chain this caused (versions unreconstructable after a
+            # storage reload). Persist the fast‑forward as a new local
+            # Version, with a real patch/snapshot recorded for it.
             tx = self._runtime.begin_transaction(local)
+            tx.add_operation(
+                ReplaceStateOperation(
+                    "gossip-fast-forward",
+                    knowledge_structure=remote_session.knowledge_structure,
+                )
+            )
             await self._runtime.commit_transaction(tx)
             self._pending_conflict_vectors.pop(remote_session.session_id, None)
             return True
