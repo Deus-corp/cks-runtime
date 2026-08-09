@@ -671,11 +671,13 @@ class Runtime:
     # Deliberately NOT exposed as a raw `sweepers` property returning
     # `self._sweepers` directly -- these two methods return dicts
     # (`status()`'s output, or a `list_agents`-shaped id/kind/running
-    # summary), not sweeper instances, so a caller in another package
-    # (cks-mcp) can't reach through to call e.g. `sweeper.stop()`
-    # without going through whatever lifecycle API Runtime later adds
-    # for that (tracked separately -- see plan doc: Agent Control Panel
-    # needs its own backend design before any start/stop surface exists).
+    # summary), not sweeper instances. A caller that needs to actually
+    # call `sweeper.start()`/`sweeper.stop()` (cks-mcp's `start_agent`/
+    # `stop_agent` tools, ADR-015 §3) reaches into `self._sweepers`
+    # directly instead -- the same "MCP tool reaches into Runtime
+    # state" pattern already used elsewhere, not a method on this
+    # class, since start/stop also need `runtime.storage` (to write
+    # the persisted override) rather than just the sweeper instance.
 
     def list_agent_statuses(self) -> list[dict[str, Any]]:
         """Status of every in-process sweeper, config-enabled ones only.
