@@ -27,10 +27,11 @@ Canonical Knowledge Structure.
 
 | Project | Description | Repository |
 |---------|-------------|------------|
-| **cks-core** | Semantic engine – the single source of canonical truth. | [Deus-corp/cks-core](https://github.com/Deus-corp/cks-core) |
+| **cks-core** | Canonical semantic engine – the single source of canonical truth. | [Deus-corp/cks-core](https://github.com/Deus-corp/cks-core) |
 | **cks-runtime** | Operational environment – sessions, transactions, persistence. | [Deus-corp/cks-runtime](https://github.com/Deus-corp/cks-runtime) |
-| **cks-mcp** | MCP server – exposes CKS to LLMs via the Model Context Protocol. | [Deus-corp/cks-mcp](https://github.com/Deus-corp/cks-mcp) |
+| **cks-mcp** | MCP server – exposes CKS to LLMs and autonomous agents. | [Deus-corp/cks-mcp](https://github.com/Deus-corp/cks-mcp) |
 | **cks-studio** | Visual workspace – explore, monitor, and manage graphs. | [Deus-corp/cks-studio](https://github.com/Deus-corp/cks-studio) |
+| **cks-website** | Documentation & demo site. | [Deus-corp/cks-website](https://github.com/Deus-corp/cks-website) |
 
 
 ---
