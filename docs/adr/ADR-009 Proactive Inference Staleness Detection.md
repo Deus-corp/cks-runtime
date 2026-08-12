@@ -2,7 +2,7 @@
 
 # Proactive Inference Staleness Detection: A Background Sweeper for Reasoning Conflicts
 
-**Status:** Proposed
+**Status:** Implemented (`cks_runtime/reasoning/inference_staleness_sweeper.py`)
 
 **Date:** 2026-08-03
 

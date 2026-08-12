@@ -1,6 +1,6 @@
 # ADR-010: Proactive Provenance Staleness Detection
 
-**Status:** Proposed
+**Status:** Implemented (`cks_runtime/reasoning/provenance_staleness_sweeper.py`)
 **Related:** ADR-009 (Proactive Inference Staleness Detection), ADR-002 (cks-mcp, Provenance Signing), ADR-008 (Gossip Replication)
 
 ## Context
