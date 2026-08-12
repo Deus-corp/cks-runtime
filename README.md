@@ -2,10 +2,12 @@
 
 > The canonical operational environment for Canonical Knowledge Structures.
 
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-806%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-734%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
+
+> 🚀 **[Live demo →](https://deus-corp.github.io/cks-website/demo/demo.html)** — explore the CKS ecosystem graph directly in your browser, no server required.
 
 CKS Runtime is the canonical execution environment for
 Canonical Knowledge Structures (CKS).
@@ -33,6 +35,8 @@ Canonical Knowledge Structure.
 | **cks-studio** | Visual workspace – explore, monitor, and manage graphs. | [Deus-corp/cks-studio](https://github.com/Deus-corp/cks-studio) |
 | **cks-website** | Documentation & demo site. | [Deus-corp/cks-website](https://github.com/Deus-corp/cks-website) |
 
+📖 **Full documentation, case studies, and an interactive demo**
+are available at the **[CKS Documentation Site](https://deus-corp.github.io/cks-website/)**.
 
 ---
 
@@ -174,7 +178,13 @@ The current Reference Runtime provides:
 - **Shared Patch Codec** — consistent serialization/deserialization of structural operators across SQLite and Postgres backends.
 - **Session Garbage Collector** – background task that automatically archives stale closed sessions, keeping storage compact in long-running deployments. Configurable retention window and sweep interval.
 - **Local embeddings via fastembed** – offline, token-free semantic search with `FastEmbedEmbeddingClient` (`pip install cks-runtime[fastembed]`).
-- **Gossip Replication (ADR-008)** — experimental peer-to-peer session exchange: replica identity, HMAC-signed envelopes, replay protection, peer discovery, and a background anti-entropy service (`GossipService`). HTTP transport via `aiohttp` (`pip install cks-runtime[gossip]`). Integration-tested with two live HTTP servers.
+- **Gossip Replication (ADR-008)** — peer-to-peer session exchange: replica identity, HMAC-signed envelopes, replay protection, peer discovery (`PeerDiscovery`, `HTTPPeerDiscovery`), weighted peer selection with backoff (`PeerScheduler`), and a background anti-entropy service (`GossipService`). HTTP transport via `aiohttp` (`pip install cks-runtime[gossip]`).
+- **CRDT Adapter (ADR-013)** — conflict-free replicated storage layer beneath gossip: a grow-only set with a content-addressed Merkle prefix tree, an MV-Register with causal ordering and automatic fork detection, and quarantine validation (`cks.validate()` + Merkle-identity checks) wired into every incoming merge. Publishes `CRDTForkDetected` events and detects duplicate replica IDs to block silent divergence.
+- **Autonomous Sweepers** — seven background, detection-only sweepers that escalate findings into the persistent outbox rather than acting unilaterally: `ContradictionSweeper`, `InferenceStalenessSweeper` (ADR-009), `ProvenanceStalenessSweeper` (ADR-010), `TemporalStalenessSweeper` (ADR-011), `GraphFreshnessSweeper`, `GraphAutoUpdateSweeper`, and `GraphHealthSweeper`. Shared observability via `SweeperStatusMixin`/`list_agent_statuses()`, and remote start/stop control through persisted overrides (ADR-015).
+- **Agent Infrastructure** — liveness tracking (`cks_agent_liveness`) and stop signalling (ADR-016) for external standalone agent processes (Critic, Enrichment, Fork Resolution, Pipeline); `AgentStepStarted`/`AgentStepCompleted` events for pipeline observability.
+- **Graph Registry** — `register_graph`/`get_graph`/`list_graphs` persist named session references, the storage foundation for `cks-mcp`'s Memory Agent.
+- **Backup & Disaster Recovery (ADR-012)** — `export_storage()`/`import_storage()` across every backend for full data dumps and clear/merge restores.
+- **Persistent Outbox** — task-type filtering, dead-letter queue (`dead_letter_outbox_task`, `list_dead_letter_tasks`), and batch peek/drain by type, so multiple workers can share one outbox table without stealing each other's tasks.
 
 ---
 
@@ -289,6 +299,8 @@ Sync backends (`InMemoryStorage`, `SQLiteStorage`) are automatically adapted to 
 
 # Documentation
 
+📚 **[CKS Documentation](https://deus-corp.github.io/cks-website/)** — architecture guides, case studies, and API reference across all CKS projects.
+
 The Runtime Standard consists of the following normative specifications.
 
 | Specification | Purpose |
@@ -333,13 +345,23 @@ Current implementation status:
 | Structural Diff | ✅ Complete |
 | Query Subgraph | ✅ Complete |
 | Persistent Storage (SQLite) | ✅ Complete |
-| **Gossip Replication (ADR-008)** | 🚧 In Progress |
-| Test Suite | ✅ 806+ tests passing |
+| **Gossip Replication (ADR-008)** | ✅ Complete — peer discovery, anti-entropy, duplicate replica ID detection |
+| **CRDT Adapter (ADR-013)** | ✅ Complete — G-Set + Merkle tree, MV-Register, fork detection, quarantine |
+| **Autonomous Sweepers** (7) | ✅ Complete — contradiction, inference/provenance/temporal staleness, graph freshness/auto-update/health |
+| **Sweeper Control (ADR-015)** | ✅ Complete |
+| **Agent Liveness & Control (ADR-016)** | ✅ Complete |
+| **Graph Registry** | ✅ Complete |
+| **Backup & Disaster Recovery (ADR-012)** | ✅ Complete |
+| **Outbox: task-type filter, DLQ** | ✅ Complete |
+| Test Suite | ✅ 734 tests passing (+69 requiring optional backends: Postgres, gossip) |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).
 
-Future work focuses on completing gossip replication (peer bootstrapping, full HTTP integration tests), advanced caching, and async integration with `cks-mcp`.
+Future work focuses on Runtime Platform 2.0: dependency resolution and
+parallel execution in the Execution Engine, distributed transactions and
+leader election, and a unified observability platform. See `ROADMAP.md`
+for the full breakdown.
 
 ---
 

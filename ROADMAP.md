@@ -1,909 +1,97 @@
 # CKS Runtime Roadmap
 
-**Status:** Living Document
+This roadmap outlines the planned evolution of CKS Runtime — the canonical operational environment for Canonical Knowledge Structures.
 
-**Project:** CKS Runtime
-
-**Current Target:** Version 2.0 buildout (Runtime 1.0 was reached and surpassed; actual latest release is v1.33.0)
-
-**Roadmap Version:** 1.2
+The roadmap is intentionally incremental. For the project's mission, vision, and architectural principles, see `docs/charter/CHARTER.md` and `docs/architecture/ARCH-001_Runtime_Architecture.md`; this document tracks *what ships and when*, not why the project exists.
 
 ---
 
-# Purpose
+# Guiding Direction
 
-This roadmap defines the long-term evolution of CKS Runtime from an
-operational execution library into the canonical operational platform
-for Canonical Knowledge Structures.
-
-The roadmap serves as the primary strategic planning document for
-Runtime development.
+Runtime owns operational execution — sessions, transactions, persistence, versioning, diagnostics, events, and adapters. CKS Core remains the single source of semantic truth; Runtime never becomes a second semantic engine.
 
 ---
 
-# Current Status (August 2026 — v1.33.0)
+# Current Status (August 2026 — v1.49.2)
 
-Phases 1 through 8 below (0.2.x through 1.0.0) are complete — the
-project has shipped well past Runtime 1.0. Verified against
-`CHANGELOG.md`:
+Runtime 1.0 was reached and substantially surpassed. Verified against `CHANGELOG.md`:
 
-- **Distributed Runtime — Replication:** peer discovery
-  (`PeerDiscovery`, `HTTPPeerDiscovery`), weighted peer selection
-  with backoff (`PeerScheduler`), and background anti-entropy cycles
-  (`GossipService`) — **done** (ADR-008).
-- **Reasoning-conflict detection:** `InferenceStalenessSweeper`,
-  running on a configurable interval, escalates
-  `InferenceConflictDetected` findings — **done** (ADR-009). The
-  consumption side (draining this queue into an autonomous agent) is
-  intentionally out of scope for `cks-runtime` and is tracked as the
-  **Critic Agent** milestone in `cks-mcp`'s roadmap — see that
-  repository's `ROADMAP.md`.
-- **Storage:** PostgreSQL backend (async storage ABC, pgvector
-  support) alongside SQLite — **done**.
-- **Execution Engine (partial):** `ValidateOperation`,
-  `EvolveOperation`, `SerializeOperation`, `ExplainOperation`
-  implemented via `CoreBridge` — **in progress**, see Version 2.0
-  below for the remaining scope (dependency resolution, parallel
-  execution, retry/compensation).
+**Distributed Runtime & Replication**
+- Gossip-based replication between runtime nodes (`GossipService`, `PeerDiscovery`, weighted peer selection with backoff) — **done** (ADR-008).
+- CRDT adapter: grow-only set + Merkle prefix tree (Stage 1), MV-Register with causal ordering and fork detection (Stage 2), and quarantine validation wired into the gossip merge path — **done** (ADR-013).
+- Duplicate replica ID detection, blocking silent divergence — **done** (v1.49.2).
 
-The granular sub-items under "Version 1.x — Production Runtime"
-below (1.1–1.9) have **not** all been individually re-verified
-against `CHANGELOG.md` in this pass — Replication (1.4) is
-confirmed done; the rest of that section should get a dedicated
-audit pass rather than being assumed complete just because the
-project is past v1.0.
+**Autonomous Sweepers**
+Seven background sweepers now run in-process, each detection-only (they escalate findings into the outbox rather than acting unilaterally):
+- `InferenceStalenessSweeper` (ADR-009), `ProvenanceStalenessSweeper` (ADR-010), `TemporalStalenessSweeper` (ADR-011), `ContradictionSweeper`, `GraphFreshnessSweeper`, `GraphAutoUpdateSweeper`, `GraphHealthSweeper` — **done**.
+- Shared observability (`SweeperStatusMixin`, `list_agent_statuses()`) and remote start/stop control via persisted overrides (ADR-015) — **done**.
+
+**Agent Infrastructure**
+- Agent liveness tracking (`cks_agent_liveness`) and standalone-agent stop signalling (ADR-016), supporting external Critic/Enrichment/Fork Resolution/Pipeline agent processes — **done**.
+- Persistent outbox: task-type filtering, dead-letter queue, batch peek/drain by type — **done**.
+- `AgentStepStarted`/`AgentStepCompleted` runtime events for pipeline observability — **done**.
+
+**Storage & Persistence**
+- PostgreSQL backend (async storage ABC, pgvector support) alongside SQLite — **done**.
+- Graph registry (`register_graph`/`get_graph`/`list_graphs`), the storage foundation for `cks-mcp`'s Memory Agent — **done**.
+- Backup and disaster recovery: `export_storage()` / `import_storage()` across all backends (ADR-012) — **done**.
+
+**Execution Engine**
+- `ValidateOperation`, `EvolveOperation`, `SerializeOperation`, `ExplainOperation` via `CoreBridge` — **in progress**. Dependency resolution, parallel execution, retry, and compensation are still open — see Version 2.0 below.
+
+The sub-items under "Version 1.x" below (reliability, observability, storage, distributed, plugin platform, performance, security, deployment, LTS) have not all been individually re-verified against `CHANGELOG.md` — Distributed Runtime and parts of Storage are confirmed done above; the rest should get a dedicated audit pass rather than being assumed complete.
 
 ---
 
-# Document Relationships
+# Version 1.x — Production Runtime
 
-```
-CHARTER
-    ↓
-ARCHITECTURE
-    ↓
-ADR
-    ↓
-SPECIFICATIONS
-    ↓
-ROADMAP
-    ↓
-IMPLEMENTATION
-```
+Thematic areas beyond the Current Status verification above:
 
-| Document | Purpose |
-|-----------|----------|
-| CHARTER | Vision & philosophy |
-| ARCH | Runtime architecture |
-| ADR | Architectural decisions |
-| SPEC | Runtime standards |
-| ROADMAP | Evolution strategy |
+- **Reliability** — recovery, snapshots, crash-safe execution, lease management.
+- **Observability** — metrics, tracing, execution timeline, profiling.
+- **Storage** — migration framework, backup API (backup/restore itself is done via ADR-012 above).
+- **Distributed Runtime** — replication is done (ADR-008); distributed transactions and leader election remain open.
+- **Plugin Platform** — plugin SDK, registry, dynamic loading, compatibility management.
+- **Performance** — pipeline optimisation, parallel execution, caching, memory optimisation.
+- **Security** — authentication, authorization, capability model, sandboxing, audit trail.
+- **Deployment** — Kubernetes/Helm/Runtime Service are not currently planned; Docker distribution was considered and intentionally descoped.
+- **Long Term Support** — operational hardening, API stability guarantees.
 
 ---
 
-# Vision
+# Version 2.0 — Runtime Platform (next up)
 
-CKS Runtime provides the canonical operational platform for Canonical
-Knowledge Structures.
+**Goal:** Runtime becomes self-describing.
 
-Runtime owns execution.
-
-CKS Core owns semantics.
-
-Runtime coordinates:
-
-- Sessions
-- Transactions
-- Execution
-- Persistence
-- Versioning
-- Diagnostics
-- Events
-- Explainability
-- Storage
-- Adapters
-- Plugins
-
-Runtime is intentionally **not** a semantic engine.
-
----
-
-# Architecture Evolution
-
-```
-Runtime Library
-
-        ↓
-
-Execution Runtime
-
-        ↓
-
-Operational Runtime
-
-        ↓
-
-Production Runtime
-
-        ↓
-
-Runtime Platform
-
-        ↓
-
-Cloud Runtime
-
-        ↓
-
-Autonomous Runtime
-
-        ↓
-
-Semantic Operating Environment
-```
-
----
-
-# Runtime Maturity
-
-| Version | Runtime maturity |
-|----------|------------------|
-| 0.2 | Foundation |
-| 0.3 | Execution Runtime |
-| 0.4 | Event Runtime |
-| 0.5 | Adapter Runtime |
-| 0.6 | Plugin Runtime |
-| 0.8 | Production Runtime |
-| 1.0 | Stable Platform |
-| 2.0 | Runtime Platform |
-| 3.x | Cloud Runtime |
-| 4.x | Autonomous Runtime |
-| 5.x | Semantic Operating Environment |
-
----
-
-# Architectural Principles
-
-The following principles are architectural invariants.
-
-These principles should remain valid across all future major releases.
-
-## Runtime owns operations
-
-Runtime coordinates execution.
-
-Runtime never defines semantic meaning.
-
----
-
-## Core owns semantics
-
-Validation.
-
-Evolution.
-
-Serialization.
-
-Explanation.
-
-Reasoning.
-
-Semantic correctness.
-
-These responsibilities always belong to CKS Core.
-
----
-
-## Stable semantic boundary
-
-Communication with semantic engines occurs exclusively through
-
-- CoreInterface
-- CoreBridge
-
-Runtime never imports implementation-specific Core objects.
-
----
-
-## Pluggable architecture
-
-Every replaceable subsystem depends only on abstractions.
-
-Examples
-
-- Storage
-- Core
-- Adapter
-- Operation
-- Plugin
-
----
-
-## Deterministic execution
-
-The same Runtime state and the same sequence of operations must always
-produce the same operational result.
-
----
-
-## Immutable public models
-
-Whenever practical Runtime public models remain immutable.
-
-Examples
-
-- RuntimeVersion
-- RuntimeValidationResult
-- RuntimeEvent
-- Diagnostic
-
----
-
-## Transport independence
-
-Runtime never depends on
-
-- MCP
-- HTTP
-- CLI
-- WebSocket
-- gRPC
-
-Adapters depend on Runtime.
-
-Never the opposite.
-
----
-
-## Storage independence
-
-Runtime operates independently of storage implementations.
-
-Reference implementation:
-
-- InMemoryStorage
-
-Production implementations:
-
-- Plugins
-
----
-
-## Observable by design
-
-Every significant Runtime action is observable.
-
-- Sessions
-- Transactions
-- Operations
-- Versions
-- Events
-- Diagnostics
-
----
-
-## Testability
-
-Every subsystem should be independently testable.
-
-Dependency injection is preferred over global state.
-
----
-
-# Non Goals
-
-Runtime intentionally is not
-
-- a semantic engine
-- an ontology framework
-- a reasoning engine
-- a graph database
-- an inference engine
-- a knowledge validator
-- a query language
-
-These responsibilities belong to CKS Core or external plugins.
-
----
-
-# Development Roadmap
-
-```
-Foundation
-
-    ↓
-
-Execution
-
-    ↓
-
-Events
-
-    ↓
-
-Adapters
-
-    ↓
-
-Plugins
-
-    ↓
-
-Production
-
-    ↓
-
-Specification Freeze
-
-    ↓
-
-Runtime 1.0
-```
-
----
-
-# Phase 1 — Runtime Foundation (0.2.x)
-
-## Goal
-
-Complete the operational architecture.
-
-## Deliverables
-
-- Runtime façade
-- CoreBridge
-- CoreInterface
-- RuntimeValidationResult
-- Sessions
-- Transactions
-- Versions
-- Storage abstraction
-- Diagnostics
-- Execution Pipeline
-
-## Exit Criteria
-
-- Runtime contains no semantic logic
-- Runtime depends only on CoreInterface
-- CoreBridge is the exclusive semantic gateway
-- Unit tests passing
-
----
-
-# Phase 2 — Runtime Execution (0.3.x)
-
-## Goal
-
-Introduce canonical Runtime execution.
-
-## Deliverables
-
-- Dispatcher
-- OperationRegistry
-- OperationExecutor
-- ExecutionContext
-- ExecutionResult
-- Built-in Runtime Operations
-
-Operations
-
-- Validate
-- Serialize
-- Explain
-- Evolve
-- Query
-- Transform
-
-## Exit Criteria
-
-Execution always follows
-
-Dispatcher
-
-↓
-
-Registry
-
-↓
-
-Executor
-
-↓
-
-CoreBridge
-
-↓
-
-ExecutionResult
-
----
-
-# Phase 3 — Runtime Events (0.4.x)
-
-## Goal
-
-Complete Runtime lifecycle events.
-
-## Deliverables
-
-- Session lifecycle
-- Transaction lifecycle
-- Version lifecycle
-- Operation lifecycle
-- Diagnostic lifecycle
-- EventBus
-- Subscriber API
-- Event history
-
-## Exit Criteria
-
-Every Runtime lifecycle transition emits RuntimeEvents.
-
----
-
-# Phase 4 — Adapter Layer (0.5.x)
-
-## Goal
-
-Formalize Runtime integrations.
-
-## Deliverables
-
-- Adapter API
-- MCP Adapter
-- HTTP Adapter
-- CLI Adapter
-- Python Adapter
-
-Future
-
-- gRPC
-- WebSocket
-
-## Exit Criteria
-
-Runtime remains completely transport independent.
-
----
-
-# Phase 5 — Plugin Platform (0.6.x)
-
-## Goal
-
-Completely decouple Runtime from implementations.
-
-## Deliverables
-
-- Plugin Manager
-- Plugin Discovery
-- Plugin Metadata
-- Plugin Lifecycle
-
-Plugin Interfaces
-
-- Core
-- Storage
-- Adapter
-- Operation
-- Explainability
-
-Official plugins
-
-- cks-runtime-plugin-cks-core
-
-Future
-
-- RDF
-- OWL
-- Neo4j
-- NetworkX
-- OpenAI
-
-## Exit Criteria
-
-Runtime depends only on abstract interfaces.
-
----
-
-# Phase 6 — Production Runtime (0.8.x)
-
-## Goal
-
-Production-grade operational platform.
-
-### Reliability
-
-- Recovery API
-- Crash recovery
-- Session recovery
-- Transaction recovery
-- Pipeline recovery
-- Snapshots
-
-### Storage
-
-- SQLite
-- PostgreSQL
-- Redis
-- File
-- Object Storage
-
-### Transactions
-
-- Nested
-- Optimistic locking
-- Conflict detection
-- Compensation
-
-### Versioning
-
-- Diff
-- Checkout
-- Restore
-- Branching
-- Merge
-
-### Diagnostics
-
-- Structured codes
-- Categories
-- Correlation IDs
-- Trace IDs
-
-### Observability
-
-- Logging
-- Metrics
-- Tracing
-- Profiling
-- Telemetry
-
-## Exit Criteria
-
-Runtime is suitable for production deployments.
-
----
-
-# Phase 7 — Specification Freeze (0.9.x)
-
-## Goal
-
-Freeze public architecture.
-
-Review
-
-- Public API
-- Plugin API
-- Adapter API
-- Storage API
-- Documentation
-- Conformance
-
-## Exit Criteria
-
-No unresolved architectural questions remain.
-
----
-
-# Phase 8 — Stable Runtime (1.0.0)
-
-## Goal
-
-First stable Runtime platform.
-
-Requirements
-
-- Stable Runtime API
-- Stable Plugin API
-- Stable Adapter API
-- Stable Storage API
-- Complete documentation
-- >95% automated tests
-- Compatibility guarantees
-
-Breaking changes require a major version.
-
----
-
-# Runtime Platform Evolution
-
-## Version 1.x — Production Runtime
-
-### 1.1 Reliability
-
-Recovery
-
-Snapshots
-
-Crash-safe execution
-
-Lease management
-
----
-
-### 1.2 Observability
-
-Metrics
-
-Tracing
-
-Execution timeline
-
-Profiling
-
----
-
-### 1.3 Storage
-
-Production storage
-
-Migration framework
-
-Backup API
-
----
-
-### 1.4 Distributed Runtime
-
-Distributed Sessions
-
-Distributed Transactions
-
-Replication
-
-Leader election
-
----
-
-### 1.5 Plugin Platform
-
-Plugin SDK
-
-Registry
-
-Dynamic loading
-
-Compatibility management
-
----
-
-### 1.6 Performance
-
-Pipeline optimisation
-
-Parallel execution
-
-Caching
-
-Memory optimisation
-
----
-
-### 1.7 Security
-
-Authentication
-
-Authorization
-
-Capability model
-
-Sandbox
-
-Audit trail
-
----
-
-### 1.8 Deployment
-
-> Docker distribution was considered and intentionally descoped —
-> not needed, and it kept causing confusion about what's actually
-> required to run the project. Not planned for `cks-runtime` or the
-> wider ecosystem.
-
-Kubernetes
-
-Helm
-
-Runtime Service
-
----
-
-### 1.9 Long Term Support
-
-LTS
-
-Operational hardening
-
-API stability
-
----
-
-# Version 2.0 — Runtime Platform
-
-## Goal
-
-Runtime becomes self-describing.
-
-**Status of the sub-goals below, verified against `CHANGELOG.md`
-(August 2026):**
+Status of each sub-goal, verified against `CHANGELOG.md`:
 
 | Sub-goal | Status |
 |---|---|
-| Runtime Graph | Not started |
-| Runtime Introspection | Not started |
-| Execution Engine | In progress — `ValidateOperation`/`EvolveOperation`/`SerializeOperation`/`ExplainOperation` shipped via `CoreBridge`; dependency resolution, parallel execution, retry, and compensation still open |
-| Execution Plans | Not started |
-| Runtime Scheduler | Not started as a general-purpose feature (the reasoning-specific `InferenceStalenessSweeper` does periodic background execution, but that's narrower than this goal) |
-| Reactive Runtime | Partial foundation — the Event Bus is extensively used, but "everything event-driven" is not yet the case |
-| Runtime DSL | Not started |
-| Distributed Runtime | In progress — Replication shipped (gossip, ADR-008); Runtime Cluster, Shared Storage, and a general Distributed Event Bus still open |
-| Observability Platform | Not started as a unified platform (basic metrics/event logs exist in `cks-mcp` via `get_metrics`, but no Timeline/Replay/Heatmap/Explorer/Profiler) |
-| Runtime Studio | Not started |
-
-## Runtime Graph
-
-Sessions
-
-Transactions
-
-Versions
-
-Operations
-
-Diagnostics
-
-Events
-
-become one operational graph.
-
-Supports
-
-- Dependency graph
-- Execution graph
-- Version graph
-- Diagnostic graph
-- Event graph
+| Execution Engine | In progress — see Current Status above. |
+| Distributed Runtime | In progress — Replication shipped (ADR-008); Runtime Cluster, Shared Storage, and a general Distributed Event Bus still open. |
+| Reactive Runtime | Partial — the Event Bus is extensively used, but not everything is event-driven yet. |
+| Runtime Scheduler | Not started as a general-purpose feature (the reasoning sweepers do periodic background execution, but that's narrower than this goal). |
+| Runtime Graph | Not started. |
+| Runtime Introspection | Not started. |
+| Execution Plans | Not started. |
+| Runtime DSL | Not started. |
+| Observability Platform | Not started as a unified platform (basic metrics/event logs exist via `cks-mcp`'s `get_metrics`, but no Timeline/Replay/Heatmap/Explorer/Profiler). |
+| Runtime Studio | Not started. |
 
 ---
 
-## Runtime Introspection
+# Platform Evolution (long-term, unscheduled)
 
-Runtime explains itself.
-
-Examples
-
-- Why did this transaction fail?
-- Which operation created this version?
-- Which diagnostics were produced?
-
----
-
-## Execution Engine
-
-- Dependency resolution
-- Parallel execution
-- Retry
-- Compensation
-- Pipeline optimisation
-
----
-
-## Execution Plans
-
-Declarative execution pipelines.
-
----
-
-## Runtime Scheduler
-
-- Scheduled execution
-- Deferred execution
-- Background execution
-- Periodic execution
-
----
-
-## Reactive Runtime
-
-Everything becomes event-driven.
-
----
-
-## Runtime DSL
-
-Declarative Runtime workflows.
-
----
-
-## Distributed Runtime
-
-- Runtime Cluster
-- Shared Storage
-- Distributed Event Bus
-- Replication
-
----
-
-## Observability Platform
-
-- Timeline
-- Replay
-- Heatmap
-- Graph Explorer
-- Profiler
-
----
-
-## Runtime Studio
-
-Visual Runtime environment.
-
-Manage
-
-- Sessions
-- Transactions
-- Versions
-- Operations
-- Events
-- Diagnostics
-- Execution Graphs
-
----
-
-# Platform Evolution
-
-## Version 3.x — Cloud Runtime
-
-- Multi-tenancy
-- Horizontal scaling
-- Federation
-- Cloud-native deployment
-- Managed Runtime
-
----
-
-## Version 4.x — Autonomous Runtime
-
-- Adaptive scheduling
-- Self-healing
-- Intelligent optimisation
-- Policy engine
-- Runtime recommendations
-
----
-
-## Version 5.x — Semantic Operating Environment
-
-Runtime becomes the operational kernel of the complete CKS ecosystem.
+- **Version 3.x — Cloud Runtime:** multi-tenancy, horizontal scaling, federation, managed Runtime.
+- **Version 4.x — Autonomous Runtime:** adaptive scheduling, self-healing, policy engine.
+- **Version 5.x — Semantic Operating Environment:** Runtime as the operational kernel of the complete CKS ecosystem.
 
 ---
 
 # Compatibility Policy
 
-Before Runtime 1.0
-
-Architecture may evolve when necessary.
-
-After Runtime 1.0
-
-- Patch releases fix defects only.
-- Minor releases add backward-compatible functionality.
-- Major releases introduce architectural changes.
-
----
-
-# Roadmap Governance
-
-This roadmap evolves together with
-
-- Runtime Charter
-- Runtime Architecture
-- ADRs
-- Runtime Specifications
-- Conformance Suite
-
-Every completed phase should update the corresponding
-architecture and specification documents.
+- **Before Runtime 1.0:** architecture could evolve when necessary.
+- **After Runtime 1.0:** patch releases fix defects only; minor releases add backward-compatible functionality; major releases introduce architectural changes.
 
 ---
 
@@ -911,7 +99,7 @@ architecture and specification documents.
 
 CKS Runtime favours architectural stability over implementation complexity.
 
-Every capability must preserve
+Every capability must preserve:
 
 - Runtime/Core separation
 - Operational determinism
@@ -921,6 +109,6 @@ Every capability must preserve
 - Plugin independence
 - Semantic authority of CKS Core
 
-CKS Runtime shall never become a second semantic engine.
+CKS Runtime shall never become a second semantic engine. CKS Core remains the single source of semantic truth.
 
-CKS Core remains the single source of semantic truth.
+The roadmap may evolve as the specifications mature and the sweeper/agent ecosystem grows.

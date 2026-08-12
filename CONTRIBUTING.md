@@ -101,7 +101,7 @@ Runtime coordinates operational execution only.
 
 The Python reference implementation follows modern Python practices:
 
-* Python 3.11+
+* Python 3.12+
 * type annotations
 * explicit ownership
 * immutable models where appropriate

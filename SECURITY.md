@@ -2,15 +2,18 @@
 
 ## Supported Versions
 
-The CKS Runtime reference implementation is actively maintained.
-Security fixes are provided for the current stable release and the
-immediately preceding minor version.
+The CKS Runtime reference implementation is actively maintained and
+follows semantic versioning where practical.
+
+Security fixes are provided for the latest released 1.x version. Given
+the project's small surface area and single-maintainer model, older
+1.x releases are not separately patched — users are expected to
+upgrade to the latest release.
 
 | Version          | Supported |
 | ---------------- | --------- |
-| 1.20.x           | ✅        |
-| 1.19.x           | ✅        |
-| < 1.19           | ❌        |
+| 1.x (latest)      | ✅        |
+| Earlier 1.x       | ❌        |
 
 ---
 
@@ -56,7 +59,10 @@ At the current stage of development, the primary Runtime security considerations
 - Storage safety;
 - Runtime state recovery;
 - adapter boundary isolation;
-- deterministic Runtime behaviour.
+- deterministic Runtime behaviour;
+- gossip transport integrity (HMAC-signed envelopes, replay protection, duplicate replica ID detection);
+- outbound-fetch safety (SSRF/DNS-rebinding-safe HTTP via `cks_runtime.net.safe_fetch`, used by network-facing sweepers);
+- concurrency safety under shared storage (thread-safe SQLite access across gossip, sweepers, and background workers).
 
 CKS Runtime does not define knowledge semantics.
 

@@ -324,6 +324,74 @@ Explanation sources may originate from:
 
 ---
 
+## 6.8 Event Bus
+
+Responsible for publishing and dispatching Runtime lifecycle events
+(e.g. session/transaction lifecycle, `InferenceConflictDetected`,
+`CRDTForkDetected`, `AgentStepStarted`/`AgentStepCompleted`).
+
+Subscribers observe Runtime behaviour without coupling to the
+component that produced it. The Event Bus carries no semantic
+authority of its own — it only reports what already happened.
+
+---
+
+## 6.9 Execution Engine
+
+Responsible for dispatching canonical operations (Validate, Serialize,
+Explain, Evolve, Diff, and others) against CKS Core through
+`CoreBridge`, using a registry-based Operation Dispatcher.
+
+The Execution Engine owns *how* an operation is routed and executed
+operationally; it never owns *what* the operation means semantically —
+that remains CKS Core's responsibility.
+
+---
+
+## 6.10 Autonomous Sweeper Subsystem
+
+Responsible for background, detection-only monitoring: contradiction
+detection, inference/provenance/temporal staleness, and graph
+freshness/auto-update/health. Sweepers escalate findings into the
+persistent Outbox for an external agent (e.g. a Critic Agent in
+`cks-mcp`) to act on — they never resolve a conflict themselves.
+
+Includes shared sweeper observability (last run, duration, result
+count, last error) and remote start/stop control through persisted
+overrides, so an operator or external control panel can pause a
+sweeper without restarting the Runtime process.
+
+---
+
+## 6.11 Replication Layer (Gossip & CRDT)
+
+Responsible for peer-to-peer synchronization of Runtime Sessions
+across distributed Runtime nodes: replica identity, signed gossip
+envelopes with replay protection, peer discovery and scheduling, and
+a conflict-free replicated (CRDT) storage layer beneath it — a
+Merkle-tree-backed grow-only set and an MV-Register with causal
+ordering and automatic fork detection.
+
+The Replication Layer is purely operational: it moves and reconciles
+already-valid Runtime state between nodes and never redefines
+canonical semantics. Every object admitted through it is
+re-validated via CKS Core before acceptance (quarantine).
+
+---
+
+## 6.12 Agent Infrastructure
+
+Responsible for coordinating external, standalone agent processes
+(e.g. Critic, Enrichment, Fork Resolution, Pipeline agents) that
+consume the Outbox and Event Bus: liveness heartbeats, stop
+signalling, and pipeline-step events. Runtime tracks agent state; it
+never originates agent decisions or LLM calls itself. Currently
+realised within `storage/` (liveness/control persistence) and
+`events/` (`AgentStepStarted`/`AgentStepCompleted`) rather than a
+standalone package.
+
+---
+
 # 7. Dependency Rules
 
 Runtime dependencies are strictly layered.
@@ -478,25 +546,40 @@ Only the public semantic API forms the supported integration contract between th
 
 # 12. Reference Package Structure
 
-A conformant Reference Runtime may be organised conceptually as:
+The Reference Runtime (`cks_runtime/`) is organised as:
 
 ```text
 cks_runtime/
-    runtime.py
-    api/
-    facade/
-    session/
-    transaction/
-    diagnostics/
-    versioning/
-    storage/
-    explainability/
-    core_api/
-    cks_runtime_core/    # concrete CoreInterface implementation
+    runtime.py          # Runtime facade — public entry point
+    config.py            # RuntimeConfig
+    session/              # Session Manager
+    transaction/          # Transaction Manager
+    diagnostics/          # Diagnostics Manager
+    versioning/           # Version Manager, time-travel operations
+    storage/              # Storage Manager (InMemory, SQLite, Postgres)
+    core_api/             # Core API Boundary (CoreInterface)
+    events/               # Event Bus
+    execution/            # Execution Engine (CoreBridge)
+    dispatcher/           # Registry-based Operation Dispatcher
+    operations/           # Operation types, patch codec
+    reasoning/             # Sweeper Subsystem (contradiction, staleness, graph)
+    gossip/                # Gossip transport, peer discovery, scheduling
+    crdt/                  # CRDT storage layer (G-Set, MV-Register, quarantine)
+    pipeline/              # Execution Pipeline — transaction/version orchestration
+    projection/            # Embedding/vector projection
+    embedding/             # Embedding clients (fastembed, etc.)
+    net/                   # Outbound-fetch safety (SSRF-safe HTTP)
+    gc/                    # Session garbage collection
+    metrics/               # Runtime metrics
+
+cks_runtime_plugins/
+    cks_core/              # Concrete CoreInterface implementation (CksCoreAdapter)
 ```
 
 Equivalent layouts are permitted provided architectural responsibilities
-remain preserved.
+remain preserved. The Explainability Coordinator (6.7) is currently
+realised through `execution/` and `core_api/` rather than a standalone
+package.
 
 ---
 

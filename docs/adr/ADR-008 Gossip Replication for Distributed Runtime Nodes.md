@@ -2,7 +2,7 @@
 
 # Gossip Replication for Distributed Runtime Nodes: Persistent Replica Identity and Operation-Log Exchange
 
-**Status:** Partially Implemented
+**Status:** Implemented
 
 **Date:** 2026-08-01
 
