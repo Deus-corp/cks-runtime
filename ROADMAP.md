@@ -17,27 +17,20 @@ Runtime owns operational execution — sessions, transactions, persistence, vers
 Runtime 1.0 was reached and substantially surpassed. Verified against `CHANGELOG.md`:
 
 **Distributed Runtime & Replication**
-- Gossip-based replication between runtime nodes (`GossipService`, `PeerDiscovery`, weighted peer selection with backoff) — **done** (ADR-008).
-- CRDT adapter: grow-only set + Merkle prefix tree (Stage 1), MV-Register with causal ordering and fork detection (Stage 2), and quarantine validation wired into the gossip merge path — **done** (ADR-013).
-- Duplicate replica ID detection, blocking silent divergence — **done** (v1.49.2).
+- Gossip replication, CRDT adapter, duplicate replica ID detection — **done**.
 
 **Autonomous Sweepers**
-Seven background sweepers now run in-process, each detection-only (they escalate findings into the outbox rather than acting unilaterally):
-- `InferenceStalenessSweeper` (ADR-009), `ProvenanceStalenessSweeper` (ADR-010), `TemporalStalenessSweeper` (ADR-011), `ContradictionSweeper`, `GraphFreshnessSweeper`, `GraphAutoUpdateSweeper`, `GraphHealthSweeper` — **done**.
-- Shared observability (`SweeperStatusMixin`, `list_agent_statuses()`) and remote start/stop control via persisted overrides (ADR-015) — **done**.
+- Seven background sweepers with observability and remote control — **done**.
 
 **Agent Infrastructure**
-- Agent liveness tracking (`cks_agent_liveness`) and standalone-agent stop signalling (ADR-016), supporting external Critic/Enrichment/Fork Resolution/Pipeline agent processes — **done**.
-- Persistent outbox: task-type filtering, dead-letter queue, batch peek/drain by type — **done**.
-- `AgentStepStarted`/`AgentStepCompleted` runtime events for pipeline observability — **done**.
+- Agent liveness, stop signalling, outbox task filtering, dead-letter queue — **done**.
 
 **Storage & Persistence**
-- PostgreSQL backend (async storage ABC, pgvector support) alongside SQLite — **done**.
-- Graph registry (`register_graph`/`get_graph`/`list_graphs`), the storage foundation for `cks-mcp`'s Memory Agent — **done**.
-- Backup and disaster recovery: `export_storage()` / `import_storage()` across all backends (ADR-012) — **done**.
+- PostgreSQL + pgvector, graph registry, backup/restore — **done**.
 
 **Execution Engine**
-- `ValidateOperation`, `EvolveOperation`, `SerializeOperation`, `ExplainOperation` via `CoreBridge` — **in progress**. Dependency resolution, parallel execution, retry, and compensation are still open — see Version 2.0 below.
+- `ValidateOperation`, `EvolveOperation`, `SerializeOperation`, `ExplainOperation` — **done**.
+- Dependency resolution, parallel execution, retry, compensation — **open**.
 
 The sub-items under "Version 1.x" below (reliability, observability, storage, distributed, plugin platform, performance, security, deployment, LTS) have not all been individually re-verified against `CHANGELOG.md` — Distributed Runtime and parts of Storage are confirmed done above; the rest should get a dedicated audit pass rather than being assumed complete.
 
@@ -59,24 +52,24 @@ Thematic areas beyond the Current Status verification above:
 
 ---
 
-# Version 2.0 — Runtime Platform (next up)
+# Next Up — Runtime Platform 2.0
 
-**Goal:** Runtime becomes self-describing.
+## Execution Engine
+- Dependency resolution and parallel execution.
+- Retry and compensation.
 
-Status of each sub-goal, verified against `CHANGELOG.md`:
+## Distributed Runtime
+- Runtime Cluster / Shared Storage / Distributed Event Bus.
+- General-purpose WebSocket/SSE event stream.
 
-| Sub-goal | Status |
-|---|---|
-| Execution Engine | In progress — see Current Status above. |
-| Distributed Runtime | In progress — Replication shipped (ADR-008); Runtime Cluster, Shared Storage, and a general Distributed Event Bus still open. |
-| Reactive Runtime | Partial — the Event Bus is extensively used, but not everything is event-driven yet. |
-| Runtime Scheduler | Not started as a general-purpose feature (the reasoning sweepers do periodic background execution, but that's narrower than this goal). |
-| Runtime Graph | Not started. |
-| Runtime Introspection | Not started. |
-| Execution Plans | Not started. |
-| Runtime DSL | Not started. |
-| Observability Platform | Not started as a unified platform (basic metrics/event logs exist via `cks-mcp`'s `get_metrics`, but no Timeline/Replay/Heatmap/Explorer/Profiler). |
-| Runtime Studio | Not started. |
+## Observability Platform
+- Timeline, replay, heatmap, profiler.
+
+## Runtime Scheduler
+- General-purpose scheduler beyond reasoning sweepers.
+
+## Runtime Introspection
+- Self-describing runtime: list capabilities, endpoints, storage config.
 
 ---
 
