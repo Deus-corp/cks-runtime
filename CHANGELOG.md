@@ -6,6 +6,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.51.0] - 2026-08-15
+
+### Added
+- **Graph visibility and team scoping** – `register_graph()` и все storage backends теперь принимают `visibility` (`private` | `team` | `public`) и опциональный `team` namespace. Поле `public` оставлено для обратной совместимости.
+- **Schema migration** – SQLite и Postgres автоматически добавляют колонки `visibility` и `team` в `graph_registry`. Существующие строки с `public=true` получают `visibility='public'`, остальные `visibility='private'`.
+- **Bulk import/export** – `import_storage`/`export_storage` обновлены для новых колонок.
+- **Team filtering** – `list_graphs` и `search_graphs` поддерживают фильтр `team`.
+
+### Changed
+- `get_graph`/`list_graphs` возвращают `visibility` и `team`.
+- `SyncStorageAdapter` и абстрактные интерфейсы обновлены.
+
+### Tests
+- Полный suite зелёный (720 passed / 69 skipped) с новыми тестами team-регистрации и reject invalid visibility.
+
+---
+
 ## [1.50.0] - 2026-08-15
 
 ### Added

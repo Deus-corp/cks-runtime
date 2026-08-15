@@ -223,6 +223,8 @@ class InMemoryStorage(RuntimeStorage):
         tags: str = "",
         public: bool = False,
         source_graph_name: str | None = None,
+        visibility: str | None = None,
+        team: str | None = None,
     ) -> None:
         now = datetime.now(UTC).isoformat()
         existing = self._graphs.get(name)
@@ -233,13 +235,16 @@ class InMemoryStorage(RuntimeStorage):
         resolved_source_graph_name = source_graph_name
         if resolved_source_graph_name is None and existing is not None:
             resolved_source_graph_name = existing.get("source_graph_name")
+        resolved_visibility = visibility or ("public" if public else "private")
         self._graphs[name] = {
             "name": name,
             "session_id": session_id,
             "description": description,
             "tags": tags,
-            "public": public,
+            "public": resolved_visibility == "public",
             "source_graph_name": resolved_source_graph_name,
+            "visibility": resolved_visibility,
+            "team": team,
             "created_at": created_at,
             "updated_at": now,
         }
@@ -249,13 +254,23 @@ class InMemoryStorage(RuntimeStorage):
         return deepcopy(entry) if entry is not None else None
 
     def list_graphs(
-        self, tag: str | None = None, public_only: bool = False
+        self,
+        tag: str | None = None,
+        public_only: bool = False,
+        team: str | None = None,
     ) -> list[dict]:
         entries = list(self._graphs.values())
         if tag is not None:
             entries = [e for e in entries if tag in (e.get("tags") or "")]
         if public_only:
-            entries = [e for e in entries if e.get("public")]
+            entries = [e for e in entries if e.get("visibility") == "public"]
+        elif team:
+            entries = [
+                e
+                for e in entries
+                if e.get("visibility") == "public"
+                or (e.get("visibility") == "team" and e.get("team") == team)
+            ]
         return [deepcopy(e) for e in sorted(entries, key=lambda e: e["updated_at"], reverse=True)]
 
     # ------------------------------------------------------------------

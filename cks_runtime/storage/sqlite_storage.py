@@ -328,6 +328,25 @@ class SQLiteStorage(RuntimeStorage):
             self._conn.execute(
                 "ALTER TABLE graph_registry ADD COLUMN source_graph_name TEXT"
             )
+        # `visibility` / `team` (Memory Agent v3 -- library/teams): a
+        # three-way scope replacing the public/private binary. Values:
+        # 'private' (default, only discoverable via get_graph by exact
+        # name), 'team' (discoverable by list_graphs/search_graphs when
+        # called with a matching `team`), or 'public' (discoverable by
+        # everyone, same as public=1 previously). Existing rows are
+        # migrated from their current `public` value so nothing already
+        # published silently disappears from the gallery.
+        if "visibility" not in graph_cols:
+            self._conn.execute(
+                "ALTER TABLE graph_registry ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"
+            )
+            self._conn.execute(
+                "UPDATE graph_registry SET visibility = 'public' WHERE public = 1"
+            )
+        if "team" not in graph_cols:
+            self._conn.execute(
+                "ALTER TABLE graph_registry ADD COLUMN team TEXT"
+            )
         # Standalone agent liveness (ADR-014). One row per process
         # instance (not per process_kind) -- a restarted process gets a
         # fresh instance_id rather than overwriting its predecessor's
@@ -1451,8 +1470,8 @@ class SQLiteStorage(RuntimeStorage):
             for g in data.get("graphs", []):
                 self._conn.execute(
                     "INSERT OR IGNORE INTO graph_registry "
-                    "(name, session_id, description, tags, public, source_graph_name, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(name, session_id, description, tags, public, source_graph_name, visibility, team, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         g["name"],
                         g["session_id"],
@@ -1460,6 +1479,8 @@ class SQLiteStorage(RuntimeStorage):
                         g.get("tags", ""),
                         int(g.get("public", False)),
                         g.get("source_graph_name"),
+                        g.get("visibility") or ("public" if g.get("public") else "private"),
+                        g.get("team"),
                         g.get("created_at", ""),
                         g.get("updated_at", ""),
                     ),
@@ -1610,8 +1631,14 @@ class SQLiteStorage(RuntimeStorage):
     # Graph registry (Memory Agent v1)
     # ------------------------------------------------------------------
 
+    _GRAPH_COLUMNS = (
+        "name, session_id, description, tags, created_at, updated_at, "
+        "public, source_graph_name, visibility, team"
+    )
+
     @staticmethod
     def _graph_row_to_dict(row: tuple) -> dict:
+        visibility = row[8] if len(row) > 8 and row[8] else ("public" if row[6] else "private")
         return {
             "name": row[0],
             "session_id": row[1],
@@ -1621,6 +1648,8 @@ class SQLiteStorage(RuntimeStorage):
             "updated_at": row[5],
             "public": bool(row[6]),
             "source_graph_name": row[7] if len(row) > 7 else None,
+            "visibility": visibility,
+            "team": row[9] if len(row) > 9 else None,
         }
 
     @_synchronized
@@ -1632,7 +1661,15 @@ class SQLiteStorage(RuntimeStorage):
         tags: str = "",
         public: bool = False,
         source_graph_name: str | None = None,
+        visibility: str | None = None,
+        team: str | None = None,
     ) -> None:
+        # `visibility` takes precedence when given; a caller still using
+        # the legacy `public` bool alone gets the equivalent scope, so
+        # existing integrations (register_graph(public=True)) keep working.
+        resolved_visibility = visibility or ("public" if public else "private")
+        resolved_public = resolved_visibility == "public"
+
         def _write() -> None:
             # COALESCE(excluded.source_graph_name, graph_registry.source_graph_name):
             # a plain re-register (e.g. update_registered_graph editing the
@@ -1641,17 +1678,28 @@ class SQLiteStorage(RuntimeStorage):
             # call for this same name.
             self._conn.execute(
                 """
-                INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     session_id = excluded.session_id,
                     description = excluded.description,
                     tags = excluded.tags,
                     public = excluded.public,
                     source_graph_name = COALESCE(excluded.source_graph_name, graph_registry.source_graph_name),
+                    visibility = excluded.visibility,
+                    team = excluded.team,
                     updated_at = datetime('now')
                 """,
-                (name, session_id, description, tags, int(public), source_graph_name),
+                (
+                    name,
+                    session_id,
+                    description,
+                    tags,
+                    int(resolved_public),
+                    source_graph_name,
+                    resolved_visibility,
+                    team,
+                ),
             )
             self._conn.commit()
 
@@ -1660,10 +1708,7 @@ class SQLiteStorage(RuntimeStorage):
     @_synchronized
     def get_graph(self, name: str) -> dict | None:
         row = self._conn.execute(
-            """
-            SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name
-            FROM graph_registry WHERE name = ?
-            """,
+            f"SELECT {self._GRAPH_COLUMNS} FROM graph_registry WHERE name = ?",
             (name,),
         ).fetchone()
         if row is None:
@@ -1672,19 +1717,25 @@ class SQLiteStorage(RuntimeStorage):
 
     @_synchronized
     def list_graphs(
-        self, tag: str | None = None, public_only: bool = False
+        self,
+        tag: str | None = None,
+        public_only: bool = False,
+        team: str | None = None,
     ) -> list[dict]:
-        select = (
-            "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
-            "FROM graph_registry"
-        )
+        select = f"SELECT {self._GRAPH_COLUMNS} FROM graph_registry"
         clauses: list[str] = []
         params: list[object] = []
         if tag is not None:
             clauses.append("tags LIKE ?")
             params.append(f"%{tag}%")
         if public_only:
-            clauses.append("public = 1")
+            clauses.append("visibility = 'public'")
+        elif team:
+            # Everything public, plus this caller's team-scoped graphs --
+            # no auth system exists here (see http_auth.py), so `team` is
+            # a caller-supplied namespace, like the registry `name` itself.
+            clauses.append("(visibility = 'public' OR (visibility = 'team' AND team = ?))")
+            params.append(team)
         if clauses:
             select += " WHERE " + " AND ".join(clauses)
         select += " ORDER BY updated_at DESC"

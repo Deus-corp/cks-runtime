@@ -274,6 +274,21 @@ _MIGRATE_GRAPH_REGISTRY_SOURCE_GRAPH_NAME = """
     ALTER TABLE graph_registry ADD COLUMN source_graph_name TEXT
 """
 
+# `visibility` / `team` (Memory Agent v3 -- library/teams) -- same
+# rationale and three-way scope as SQLiteStorage's migration. Existing
+# rows are backfilled from their current `public` value.
+_MIGRATE_GRAPH_REGISTRY_VISIBILITY = """
+    ALTER TABLE graph_registry ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'
+"""
+
+_MIGRATE_GRAPH_REGISTRY_VISIBILITY_BACKFILL = """
+    UPDATE graph_registry SET visibility = 'public' WHERE public = true
+"""
+
+_MIGRATE_GRAPH_REGISTRY_TEAM = """
+    ALTER TABLE graph_registry ADD COLUMN team TEXT
+"""
+
 # ---------------------------------------------------------------------------
 # DDL — standalone agent liveness (ADR-014). One row per process
 # instance (not per process_kind) -- see SQLiteStorage's schema comment
@@ -409,6 +424,17 @@ class PostgresStorage(AsyncRuntimeStorage):
                 await conn.rollback()
             try:
                 await conn.execute(_MIGRATE_GRAPH_REGISTRY_SOURCE_GRAPH_NAME)
+                await conn.commit()
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
+            try:
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_VISIBILITY)
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_VISIBILITY_BACKFILL)
+                await conn.commit()
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
+            try:
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_TEAM)
                 await conn.commit()
             except psycopg.errors.DuplicateColumn:
                 await conn.rollback()
@@ -1307,8 +1333,14 @@ class PostgresStorage(AsyncRuntimeStorage):
     # Graph registry (Memory Agent v1)
     # ------------------------------------------------------------------
 
+    _GRAPH_COLUMNS = (
+        "name, session_id, description, tags, created_at, updated_at, "
+        "public, source_graph_name, visibility, team"
+    )
+
     @staticmethod
     def _graph_row_to_dict(row: tuple) -> dict:
+        visibility = row[8] if len(row) > 8 and row[8] else ("public" if row[6] else "private")
         return {
             "name": row[0],
             "session_id": row[1],
@@ -1318,6 +1350,8 @@ class PostgresStorage(AsyncRuntimeStorage):
             "updated_at": row[5],
             "public": bool(row[6]),
             "source_graph_name": row[7] if len(row) > 7 else None,
+            "visibility": visibility,
+            "team": row[9] if len(row) > 9 else None,
         }
 
     async def register_graph(
@@ -1328,7 +1362,12 @@ class PostgresStorage(AsyncRuntimeStorage):
         tags: str = "",
         public: bool = False,
         source_graph_name: str | None = None,
+        visibility: str | None = None,
+        team: str | None = None,
     ) -> None:
+        resolved_visibility = visibility or ("public" if public else "private")
+        resolved_public = resolved_visibility == "public"
+
         async def _write() -> None:
             # COALESCE: a plain re-register (source_graph_name=None) must
             # not wipe out lineage recorded by an earlier
@@ -1337,17 +1376,28 @@ class PostgresStorage(AsyncRuntimeStorage):
             async with self._pool.connection() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, now())
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
                         tags = EXCLUDED.tags,
                         public = EXCLUDED.public,
                         source_graph_name = COALESCE(EXCLUDED.source_graph_name, graph_registry.source_graph_name),
+                        visibility = EXCLUDED.visibility,
+                        team = EXCLUDED.team,
                         updated_at = now()
                     """,
-                    (name, session_id, description, tags, public, source_graph_name),
+                    (
+                        name,
+                        session_id,
+                        description,
+                        tags,
+                        resolved_public,
+                        source_graph_name,
+                        resolved_visibility,
+                        team,
+                    ),
                 )
                 await conn.commit()
 
@@ -1358,10 +1408,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             async with self._pool.connection() as conn:
                 return await (
                     await conn.execute(
-                        """
-                        SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name
-                        FROM graph_registry WHERE name = %s
-                        """,
+                        f"SELECT {self._GRAPH_COLUMNS} FROM graph_registry WHERE name = %s",
                         (name,),
                     )
                 ).fetchone()
@@ -1372,20 +1419,25 @@ class PostgresStorage(AsyncRuntimeStorage):
         return self._graph_row_to_dict(row)
 
     async def list_graphs(
-        self, tag: str | None = None, public_only: bool = False
+        self,
+        tag: str | None = None,
+        public_only: bool = False,
+        team: str | None = None,
     ) -> list[dict]:
         async def _read() -> list[tuple]:
-            select = (
-                "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
-                "FROM graph_registry"
-            )
+            select = f"SELECT {self._GRAPH_COLUMNS} FROM graph_registry"
             clauses: list[str] = []
             params: list[object] = []
             if tag is not None:
                 clauses.append("tags LIKE %s")
                 params.append(f"%{tag}%")
             if public_only:
-                clauses.append("public = true")
+                clauses.append("visibility = 'public'")
+            elif team:
+                clauses.append(
+                    "(visibility = 'public' OR (visibility = 'team' AND team = %s))"
+                )
+                params.append(team)
             if clauses:
                 select += " WHERE " + " AND ".join(clauses)
             select += " ORDER BY updated_at DESC"
@@ -1437,8 +1489,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             # Graph registry
             graph_rows = await (
                 await conn.execute(
-                    "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
-                    "FROM graph_registry"
+                    f"SELECT {self._GRAPH_COLUMNS} FROM graph_registry"
                 )
             ).fetchall()
             graphs = [self._graph_row_to_dict(row) for row in graph_rows]
@@ -1536,14 +1587,16 @@ class PostgresStorage(AsyncRuntimeStorage):
             for g in data.get("graphs") or []:
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
                         tags = EXCLUDED.tags,
                         public = EXCLUDED.public,
                         source_graph_name = EXCLUDED.source_graph_name,
+                        visibility = EXCLUDED.visibility,
+                        team = EXCLUDED.team,
                         updated_at = EXCLUDED.updated_at
                     """,
                     (
@@ -1553,6 +1606,8 @@ class PostgresStorage(AsyncRuntimeStorage):
                         g.get("tags", ""),
                         g.get("public", False),
                         g.get("source_graph_name"),
+                        g.get("visibility") or ("public" if g.get("public") else "private"),
+                        g.get("team"),
                         g.get("updated_at", datetime.now(UTC).isoformat()),
                     ),
                 )

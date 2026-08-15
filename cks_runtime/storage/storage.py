@@ -533,6 +533,8 @@ class RuntimeStorage(ABC):
         tags: str = "",
         public: bool = False,
         source_graph_name: str | None = None,
+        visibility: str | None = None,
+        team: str | None = None,
     ) -> None:
         """
         Register (or update) a ``name -> session_id`` mapping so a
@@ -548,6 +550,13 @@ class RuntimeStorage(ABC):
         registered it. Defaults to ``False`` for backward
         compatibility with existing graphs and callers.
 
+        ``visibility`` (Memory Agent v3) is a three-way scope --
+        ``'private'`` (default), ``'team'``, or ``'public'`` -- that
+        supersedes ``public`` when given. ``team`` is the namespace a
+        ``'team'``-visibility graph is scoped to; there is no
+        authentication behind it, it's a caller-supplied namespace like
+        the registry ``name`` itself.
+
         ``source_graph_name`` (clone lineage) records the registry name
         this graph was cloned from, typically set by
         ``clone_graph(copy_name=...)``. ``None`` leaves any existing
@@ -560,10 +569,10 @@ class RuntimeStorage(ABC):
         """
         Look up a registered graph by name. Returns a dict with keys
         ``name``, ``session_id``, ``description``, ``tags``,
-        ``public``, ``source_graph_name``, ``created_at``,
-        ``updated_at``, or ``None`` if no graph is registered under
-        that name. ``None`` by default -- backends that support the
-        graph registry override this.
+        ``public``, ``visibility``, ``team``, ``source_graph_name``,
+        ``created_at``, ``updated_at``, or ``None`` if no graph is
+        registered under that name. ``None`` by default -- backends
+        that support the graph registry override this.
         """
         return None
 
@@ -571,12 +580,15 @@ class RuntimeStorage(ABC):
         self,
         tag: str | None = None,
         public_only: bool = False,
+        team: str | None = None,
     ) -> list[dict]:
         """
         List every registered graph, optionally filtered to those
-        whose ``tags`` field contains ``tag`` and/or (Memory Agent v2)
-        to only ``public`` graphs. Empty by default -- backends that
-        support the graph registry override this.
+        whose ``tags`` field contains ``tag``, and/or (Memory Agent v2)
+        to only ``public`` graphs, and/or (Memory Agent v3) to graphs
+        visible to ``team`` (public graphs plus this team's
+        ``visibility='team'`` graphs). Empty by default -- backends
+        that support the graph registry override this.
         """
         return []
 

@@ -262,6 +262,8 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
         tags: str = "",
         public: bool = False,
         source_graph_name: str | None = None,
+        visibility: str | None = None,
+        team: str | None = None,
     ) -> None:
         await asyncio.to_thread(
             self._sync.register_graph,
@@ -271,15 +273,20 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
             tags,
             public,
             source_graph_name,
+            visibility,
+            team,
         )
 
     async def get_graph(self, name: str) -> dict | None:
         return await asyncio.to_thread(self._sync.get_graph, name)
 
     async def list_graphs(
-        self, tag: str | None = None, public_only: bool = False
+        self,
+        tag: str | None = None,
+        public_only: bool = False,
+        team: str | None = None,
     ) -> list[dict]:
-        return await asyncio.to_thread(self._sync.list_graphs, tag, public_only)
+        return await asyncio.to_thread(self._sync.list_graphs, tag, public_only, team)
 
     # ------------------------------------------------------------------
     # Backup / Disaster Recovery (ADR-012)

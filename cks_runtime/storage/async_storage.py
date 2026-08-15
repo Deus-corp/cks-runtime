@@ -455,6 +455,8 @@ class AsyncRuntimeStorage(ABC):
         tags: str = "",
         public: bool = False,
         source_graph_name: str | None = None,
+        visibility: str | None = None,
+        team: str | None = None,
     ) -> None:
         """
         Register (or update) a ``name -> session_id`` mapping. No-op by
@@ -473,10 +475,12 @@ class AsyncRuntimeStorage(ABC):
         self,
         tag: str | None = None,
         public_only: bool = False,
+        team: str | None = None,
     ) -> list[dict]:
         """
         List registered graphs, optionally filtered by tag and/or to
-        only public graphs. Empty by default -- see
-        ``RuntimeStorage.list_graphs`` (``storage.py``).
+        only public graphs, and/or (Memory Agent v3) to graphs scoped to
+        ``team``. Empty by default -- see ``RuntimeStorage.list_graphs``
+        (``storage.py``).
         """
         return []
