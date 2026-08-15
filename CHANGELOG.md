@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.51.1] - 2026-08-15
+
+### Added
+- **Integration test coverage for `claim_integrity`** – verifies that `cks-core`'s new optional `claim_integrity` constraint reaches `CksCoreAdapter.validate()` through the existing `extra_constraints` passthrough. No production code changes required; Runtime remains a transparent adapter for Core extensions.
+- **Compatibility note** – these tests require `cks-core >= 1.22.0` (the release that introduced `claim_integrity`).
+
+---
+
 ## [1.51.0] - 2026-08-15
 
 ### Added
