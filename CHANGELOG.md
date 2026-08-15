@@ -9,17 +9,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 ## [1.51.0] - 2026-08-15
 
 ### Added
-- **Graph visibility and team scoping** – `register_graph()` и все storage backends теперь принимают `visibility` (`private` | `team` | `public`) и опциональный `team` namespace. Поле `public` оставлено для обратной совместимости.
-- **Schema migration** – SQLite и Postgres автоматически добавляют колонки `visibility` и `team` в `graph_registry`. Существующие строки с `public=true` получают `visibility='public'`, остальные `visibility='private'`.
-- **Bulk import/export** – `import_storage`/`export_storage` обновлены для новых колонок.
-- **Team filtering** – `list_graphs` и `search_graphs` поддерживают фильтр `team`.
+- **Graph visibility and team scoping** – `register_graph()` and all storage backends now accept `visibility` (`private` | `team` | `public`) plus an optional `team` namespace. The existing `public` flag remains supported for backward compatibility.
+- **Schema migration** – SQLite and Postgres automatically add `visibility` and `team` columns to `graph_registry`. Existing rows with `public=true` are backfilled as `visibility='public'`; all others become `visibility='private'`.
+- **Bulk import/export** – `import_storage` / `export_storage` round-trips the new columns.
+- **Team filtering** – `list_graphs` and `search_graphs` can filter by `team`.
 
 ### Changed
-- `get_graph`/`list_graphs` возвращают `visibility` и `team`.
-- `SyncStorageAdapter` и абстрактные интерфейсы обновлены.
-
-### Tests
-- Полный suite зелёный (720 passed / 69 skipped) с новыми тестами team-регистрации и reject invalid visibility.
+- `get_graph` and `list_graphs` now return `visibility` and `team`.
+- `SyncStorageAdapter` and the abstract sync/async storage interfaces were updated accordingly.
 
 ---
 
