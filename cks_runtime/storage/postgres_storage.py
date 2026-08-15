@@ -267,6 +267,13 @@ _MIGRATE_GRAPH_REGISTRY_PUBLIC = """
     ALTER TABLE graph_registry ADD COLUMN public BOOLEAN NOT NULL DEFAULT false
 """
 
+# `source_graph_name` (clone lineage) -- same rationale as SQLiteStorage's
+# migration: NULL by default so pre-existing rows are treated as having
+# no known lineage, preserving backward compatibility.
+_MIGRATE_GRAPH_REGISTRY_SOURCE_GRAPH_NAME = """
+    ALTER TABLE graph_registry ADD COLUMN source_graph_name TEXT
+"""
+
 # ---------------------------------------------------------------------------
 # DDL — standalone agent liveness (ADR-014). One row per process
 # instance (not per process_kind) -- see SQLiteStorage's schema comment
@@ -397,6 +404,11 @@ class PostgresStorage(AsyncRuntimeStorage):
             await conn.commit()
             try:
                 await conn.execute(_MIGRATE_GRAPH_REGISTRY_PUBLIC)
+                await conn.commit()
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
+            try:
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_SOURCE_GRAPH_NAME)
                 await conn.commit()
             except psycopg.errors.DuplicateColumn:
                 await conn.rollback()
@@ -1305,6 +1317,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             "created_at": row[4],
             "updated_at": row[5],
             "public": bool(row[6]),
+            "source_graph_name": row[7] if len(row) > 7 else None,
         }
 
     async def register_graph(
@@ -1314,21 +1327,27 @@ class PostgresStorage(AsyncRuntimeStorage):
         description: str = "",
         tags: str = "",
         public: bool = False,
+        source_graph_name: str | None = None,
     ) -> None:
         async def _write() -> None:
+            # COALESCE: a plain re-register (source_graph_name=None) must
+            # not wipe out lineage recorded by an earlier
+            # clone_graph(copy_name=...) call for this same name -- same
+            # rationale as SQLiteStorage.
             async with self._pool.connection() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, public, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, now())
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, now())
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
                         tags = EXCLUDED.tags,
                         public = EXCLUDED.public,
+                        source_graph_name = COALESCE(EXCLUDED.source_graph_name, graph_registry.source_graph_name),
                         updated_at = now()
                     """,
-                    (name, session_id, description, tags, public),
+                    (name, session_id, description, tags, public, source_graph_name),
                 )
                 await conn.commit()
 
@@ -1340,7 +1359,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                 return await (
                     await conn.execute(
                         """
-                        SELECT name, session_id, description, tags, created_at, updated_at, public
+                        SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name
                         FROM graph_registry WHERE name = %s
                         """,
                         (name,),
@@ -1357,7 +1376,7 @@ class PostgresStorage(AsyncRuntimeStorage):
     ) -> list[dict]:
         async def _read() -> list[tuple]:
             select = (
-                "SELECT name, session_id, description, tags, created_at, updated_at, public "
+                "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
                 "FROM graph_registry"
             )
             clauses: list[str] = []
@@ -1418,7 +1437,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             # Graph registry
             graph_rows = await (
                 await conn.execute(
-                    "SELECT name, session_id, description, tags, created_at, updated_at, public "
+                    "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
                     "FROM graph_registry"
                 )
             ).fetchall()
@@ -1517,13 +1536,14 @@ class PostgresStorage(AsyncRuntimeStorage):
             for g in data.get("graphs") or []:
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, public, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
                         tags = EXCLUDED.tags,
                         public = EXCLUDED.public,
+                        source_graph_name = EXCLUDED.source_graph_name,
                         updated_at = EXCLUDED.updated_at
                     """,
                     (
@@ -1532,6 +1552,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                         g.get("description", ""),
                         g.get("tags", ""),
                         g.get("public", False),
+                        g.get("source_graph_name"),
                         g.get("updated_at", datetime.now(UTC).isoformat()),
                     ),
                 )

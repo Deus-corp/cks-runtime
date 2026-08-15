@@ -222,16 +222,24 @@ class InMemoryStorage(RuntimeStorage):
         description: str = "",
         tags: str = "",
         public: bool = False,
+        source_graph_name: str | None = None,
     ) -> None:
         now = datetime.now(UTC).isoformat()
         existing = self._graphs.get(name)
         created_at = existing["created_at"] if existing is not None else now
+        # A plain re-register (source_graph_name=None) must not erase
+        # lineage recorded by an earlier clone_graph(copy_name=...) call
+        # for this same name -- same rationale as SQLiteStorage.
+        resolved_source_graph_name = source_graph_name
+        if resolved_source_graph_name is None and existing is not None:
+            resolved_source_graph_name = existing.get("source_graph_name")
         self._graphs[name] = {
             "name": name,
             "session_id": session_id,
             "description": description,
             "tags": tags,
             "public": public,
+            "source_graph_name": resolved_source_graph_name,
             "created_at": created_at,
             "updated_at": now,
         }

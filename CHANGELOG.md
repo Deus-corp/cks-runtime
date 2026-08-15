@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.50.0] - 2026-08-15
+
+### Added
+- **Graph clone lineage** – `register_graph()` and all storage backends now accept an optional `source_graph_name` parameter. SQLite and Postgres add a nullable `source_graph_name` column to `graph_registry` with migration, InMemory keeps it in memory. This allows cloned graphs to record where they were forked from (used by `cks-mcp`'s `clone_graph` tool).
+- **Lineage-preserving re-register** – when `source_graph_name=None`, existing lineage on that graph name is preserved instead of being cleared.
+
+### Changed
+- `get_graph()` / `list_graphs()` now return `source_graph_name` (or `None` for older rows).
+- `SyncStorageAdapter` and abstract storage interfaces updated accordingly.
+
+### Tests
+- Existing graph registry tests remain passing; migrations are backward-compatible.
+
+---
+
 ## [1.49.2] - 2026-08-09
 
 ### Added

@@ -18,8 +18,8 @@ url: "https://github.com/Deus-corp/cks-runtime"
 
 license: "MIT"
 
-version: "1.49.2"
-date-released: "2026-08-09"
+version: "1.50.0"
+date-released: "2026-08-15"
 
 abstract: >
   CKS Runtime is the reference operational environment for

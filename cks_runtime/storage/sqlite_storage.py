@@ -317,6 +317,17 @@ class SQLiteStorage(RuntimeStorage):
             self._conn.execute(
                 "ALTER TABLE graph_registry ADD COLUMN public INTEGER NOT NULL DEFAULT 0"
             )
+        # `source_graph_name` (clone lineage): the registry name of the
+        # graph this one was cloned from via clone_graph(copy_name=...),
+        # or NULL for graphs that weren't cloned / were cloned from a
+        # bare session id with no registered name. Lets the gallery show
+        # "forked from X" and link back to the original. NULL by default
+        # so every pre-existing registered graph is treated as having no
+        # known lineage, preserving backward compatibility.
+        if "source_graph_name" not in graph_cols:
+            self._conn.execute(
+                "ALTER TABLE graph_registry ADD COLUMN source_graph_name TEXT"
+            )
         # Standalone agent liveness (ADR-014). One row per process
         # instance (not per process_kind) -- a restarted process gets a
         # fresh instance_id rather than overwriting its predecessor's
@@ -1346,7 +1357,7 @@ class SQLiteStorage(RuntimeStorage):
         graphs = [
             self._graph_row_to_dict(row)
             for row in self._conn.execute(
-                "SELECT name, session_id, description, tags, created_at, updated_at, public "
+                "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
                 "FROM graph_registry ORDER BY updated_at DESC"
             ).fetchall()
         ]
@@ -1440,14 +1451,15 @@ class SQLiteStorage(RuntimeStorage):
             for g in data.get("graphs", []):
                 self._conn.execute(
                     "INSERT OR IGNORE INTO graph_registry "
-                    "(name, session_id, description, tags, public, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(name, session_id, description, tags, public, source_graph_name, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         g["name"],
                         g["session_id"],
                         g.get("description", ""),
                         g.get("tags", ""),
                         int(g.get("public", False)),
+                        g.get("source_graph_name"),
                         g.get("created_at", ""),
                         g.get("updated_at", ""),
                     ),
@@ -1608,6 +1620,7 @@ class SQLiteStorage(RuntimeStorage):
             "created_at": row[4],
             "updated_at": row[5],
             "public": bool(row[6]),
+            "source_graph_name": row[7] if len(row) > 7 else None,
         }
 
     @_synchronized
@@ -1618,20 +1631,27 @@ class SQLiteStorage(RuntimeStorage):
         description: str = "",
         tags: str = "",
         public: bool = False,
+        source_graph_name: str | None = None,
     ) -> None:
         def _write() -> None:
+            # COALESCE(excluded.source_graph_name, graph_registry.source_graph_name):
+            # a plain re-register (e.g. update_registered_graph editing the
+            # description) passes source_graph_name=None and must not wipe
+            # out lineage recorded by an earlier clone_graph(copy_name=...)
+            # call for this same name.
             self._conn.execute(
                 """
-                INSERT INTO graph_registry (name, session_id, description, tags, public, updated_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     session_id = excluded.session_id,
                     description = excluded.description,
                     tags = excluded.tags,
                     public = excluded.public,
+                    source_graph_name = COALESCE(excluded.source_graph_name, graph_registry.source_graph_name),
                     updated_at = datetime('now')
                 """,
-                (name, session_id, description, tags, int(public)),
+                (name, session_id, description, tags, int(public), source_graph_name),
             )
             self._conn.commit()
 
@@ -1641,7 +1661,7 @@ class SQLiteStorage(RuntimeStorage):
     def get_graph(self, name: str) -> dict | None:
         row = self._conn.execute(
             """
-            SELECT name, session_id, description, tags, created_at, updated_at, public
+            SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name
             FROM graph_registry WHERE name = ?
             """,
             (name,),
@@ -1655,7 +1675,7 @@ class SQLiteStorage(RuntimeStorage):
         self, tag: str | None = None, public_only: bool = False
     ) -> list[dict]:
         select = (
-            "SELECT name, session_id, description, tags, created_at, updated_at, public "
+            "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
             "FROM graph_registry"
         )
         clauses: list[str] = []
