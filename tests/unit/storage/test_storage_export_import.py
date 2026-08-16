@@ -189,6 +189,24 @@ def test_graph_registry_round_trip(storage):
     assert g2["session_id"] == "s2"
 
 
+def test_graph_registry_lifecycle_state_round_trip(storage):
+    storage.register_graph("g1", "s1", lifecycle_state="under_review")
+    storage.register_graph("g2", "s2")  # default -> draft
+
+    dump = storage.export_storage()
+    assert dump["graphs"][0]["lifecycle_state"] in ("under_review", "draft")
+
+    if isinstance(storage, InMemoryStorage):
+        target = InMemoryStorage()
+    else:
+        target = SQLiteStorage(":memory:")
+
+    target.import_storage(dump, mode="clear")
+
+    assert target.get_graph("g1")["lifecycle_state"] == "under_review"
+    assert target.get_graph("g2")["lifecycle_state"] == "draft"
+
+
 # ---------------------------------------------------------------------------
 # Outbox tasks (SQLite only — InMemoryStorage doesn't persist them)
 # ---------------------------------------------------------------------------

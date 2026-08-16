@@ -6,6 +6,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.52.0] - 2026-08-15
+
+### Added
+- **Graph Lifecycle state** – `register_graph()` and all storage backends now accept an optional `lifecycle_state`. Supported states: `draft`, `published`, `active`, `stale`, `under_review`, `archived`.
+- **Schema migration** – SQLite and Postgres automatically add `lifecycle_state` to `graph_registry` and backfill existing rows (`published` if public, otherwise `draft`).
+- **Lifecycle-preserving re-register** – a plain re-register (`lifecycle_state=None`) leaves an existing lifecycle state untouched, so metadata updates don’t accidentally reset it.
+- **Export/import support** – graph registry export/import now round-trips `lifecycle_state` (and, as a side fix, SQLite export now also preserves `visibility` and `team`, matching Postgres).
+
+### Changed
+- `get_graph` / `list_graphs` now return `lifecycle_state`.
+- Abstract storage interfaces and `SyncStorageAdapter` updated accordingly.
+
+### Tests
+- Added coverage for default values, explicit round-trip, re-register preservation, SQLite legacy migration, and export/import round-trip.
+
+---
+
 ## [1.51.1] - 2026-08-15
 
 ### Added

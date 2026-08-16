@@ -225,6 +225,7 @@ class InMemoryStorage(RuntimeStorage):
         source_graph_name: str | None = None,
         visibility: str | None = None,
         team: str | None = None,
+        lifecycle_state: str | None = None,
     ) -> None:
         now = datetime.now(UTC).isoformat()
         existing = self._graphs.get(name)
@@ -236,6 +237,18 @@ class InMemoryStorage(RuntimeStorage):
         if resolved_source_graph_name is None and existing is not None:
             resolved_source_graph_name = existing.get("source_graph_name")
         resolved_visibility = visibility or ("public" if public else "private")
+        # `lifecycle_state`: same "don't clobber on plain re-register"
+        # rationale as source_graph_name above. A first-time
+        # registration with no explicit value defaults to 'published'
+        # for a public graph, otherwise 'draft'.
+        resolved_lifecycle_state = lifecycle_state
+        if resolved_lifecycle_state is None:
+            if existing is not None:
+                resolved_lifecycle_state = existing.get("lifecycle_state")
+            else:
+                resolved_lifecycle_state = (
+                    "published" if resolved_visibility == "public" else "draft"
+                )
         self._graphs[name] = {
             "name": name,
             "session_id": session_id,
@@ -245,6 +258,7 @@ class InMemoryStorage(RuntimeStorage):
             "source_graph_name": resolved_source_graph_name,
             "visibility": resolved_visibility,
             "team": team,
+            "lifecycle_state": resolved_lifecycle_state,
             "created_at": created_at,
             "updated_at": now,
         }

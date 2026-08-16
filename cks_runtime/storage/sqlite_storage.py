@@ -347,6 +347,20 @@ class SQLiteStorage(RuntimeStorage):
             self._conn.execute(
                 "ALTER TABLE graph_registry ADD COLUMN team TEXT"
             )
+        # `lifecycle_state` (Graph Lifecycle -- first slice): one of
+        # 'draft', 'published', 'active', 'stale', 'under_review',
+        # 'archived'. Existing rows are backfilled to 'published' when
+        # already public, otherwise 'draft', so nothing already shared
+        # via the gallery silently reverts to draft.
+        if "lifecycle_state" not in graph_cols:
+            self._conn.execute(
+                "ALTER TABLE graph_registry ADD COLUMN lifecycle_state TEXT"
+            )
+            self._conn.execute(
+                "UPDATE graph_registry SET lifecycle_state = "
+                "CASE WHEN visibility = 'public' THEN 'published' ELSE 'draft' END "
+                "WHERE lifecycle_state IS NULL"
+            )
         # Standalone agent liveness (ADR-014). One row per process
         # instance (not per process_kind) -- a restarted process gets a
         # fresh instance_id rather than overwriting its predecessor's
@@ -1376,7 +1390,8 @@ class SQLiteStorage(RuntimeStorage):
         graphs = [
             self._graph_row_to_dict(row)
             for row in self._conn.execute(
-                "SELECT name, session_id, description, tags, created_at, updated_at, public, source_graph_name "
+                "SELECT name, session_id, description, tags, created_at, updated_at, "
+                "public, source_graph_name, visibility, team, lifecycle_state "
                 "FROM graph_registry ORDER BY updated_at DESC"
             ).fetchall()
         ]
@@ -1468,10 +1483,13 @@ class SQLiteStorage(RuntimeStorage):
 
             # Graphs
             for g in data.get("graphs", []):
+                resolved_visibility = g.get("visibility") or (
+                    "public" if g.get("public") else "private"
+                )
                 self._conn.execute(
                     "INSERT OR IGNORE INTO graph_registry "
-                    "(name, session_id, description, tags, public, source_graph_name, visibility, team, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(name, session_id, description, tags, public, source_graph_name, visibility, team, lifecycle_state, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         g["name"],
                         g["session_id"],
@@ -1479,8 +1497,10 @@ class SQLiteStorage(RuntimeStorage):
                         g.get("tags", ""),
                         int(g.get("public", False)),
                         g.get("source_graph_name"),
-                        g.get("visibility") or ("public" if g.get("public") else "private"),
+                        resolved_visibility,
                         g.get("team"),
+                        g.get("lifecycle_state")
+                        or ("published" if resolved_visibility == "public" else "draft"),
                         g.get("created_at", ""),
                         g.get("updated_at", ""),
                     ),
@@ -1633,12 +1653,15 @@ class SQLiteStorage(RuntimeStorage):
 
     _GRAPH_COLUMNS = (
         "name, session_id, description, tags, created_at, updated_at, "
-        "public, source_graph_name, visibility, team"
+        "public, source_graph_name, visibility, team, lifecycle_state"
     )
 
     @staticmethod
     def _graph_row_to_dict(row: tuple) -> dict:
         visibility = row[8] if len(row) > 8 and row[8] else ("public" if row[6] else "private")
+        lifecycle_state = row[10] if len(row) > 10 and row[10] else (
+            "published" if visibility == "public" else "draft"
+        )
         return {
             "name": row[0],
             "session_id": row[1],
@@ -1650,6 +1673,7 @@ class SQLiteStorage(RuntimeStorage):
             "source_graph_name": row[7] if len(row) > 7 else None,
             "visibility": visibility,
             "team": row[9] if len(row) > 9 else None,
+            "lifecycle_state": lifecycle_state,
         }
 
     @_synchronized
@@ -1663,13 +1687,20 @@ class SQLiteStorage(RuntimeStorage):
         source_graph_name: str | None = None,
         visibility: str | None = None,
         team: str | None = None,
+        lifecycle_state: str | None = None,
     ) -> None:
         # `visibility` takes precedence when given; a caller still using
         # the legacy `public` bool alone gets the equivalent scope, so
         # existing integrations (register_graph(public=True)) keep working.
         resolved_visibility = visibility or ("public" if public else "private")
         resolved_public = resolved_visibility == "public"
-
+        # A plain re-register (lifecycle_state=None) must not overwrite
+        # a lifecycle state set by a later update_graph_lifecycle call
+        # -- same COALESCE-on-conflict rationale as source_graph_name
+        # below. When NULL (unset, whether on a brand-new row or an
+        # existing one that predates this column), _graph_row_to_dict
+        # computes the same 'published'-if-public-else-'draft' default
+        # on read.
         def _write() -> None:
             # COALESCE(excluded.source_graph_name, graph_registry.source_graph_name):
             # a plain re-register (e.g. update_registered_graph editing the
@@ -1678,8 +1709,8 @@ class SQLiteStorage(RuntimeStorage):
             # call for this same name.
             self._conn.execute(
                 """
-                INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, lifecycle_state, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     session_id = excluded.session_id,
                     description = excluded.description,
@@ -1688,6 +1719,7 @@ class SQLiteStorage(RuntimeStorage):
                     source_graph_name = COALESCE(excluded.source_graph_name, graph_registry.source_graph_name),
                     visibility = excluded.visibility,
                     team = excluded.team,
+                    lifecycle_state = COALESCE(excluded.lifecycle_state, graph_registry.lifecycle_state),
                     updated_at = datetime('now')
                 """,
                 (
@@ -1699,6 +1731,7 @@ class SQLiteStorage(RuntimeStorage):
                     source_graph_name,
                     resolved_visibility,
                     team,
+                    lifecycle_state,
                 ),
             )
             self._conn.commit()

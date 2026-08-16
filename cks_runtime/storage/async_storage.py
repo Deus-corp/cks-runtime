@@ -457,6 +457,7 @@ class AsyncRuntimeStorage(ABC):
         source_graph_name: str | None = None,
         visibility: str | None = None,
         team: str | None = None,
+        lifecycle_state: str | None = None,
     ) -> None:
         """
         Register (or update) a ``name -> session_id`` mapping. No-op by

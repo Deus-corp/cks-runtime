@@ -126,3 +126,95 @@ def test_sqlite_migration_defaults_existing_rows_to_private(tmp_path):
         assert store.list_graphs(public_only=True) == []
     finally:
         store.clear()
+
+
+# ---------------------------------------------------------------------------
+# lifecycle_state: defaults, round-trip, and re-register preservation
+# ---------------------------------------------------------------------------
+
+
+def test_lifecycle_state_defaults_to_draft(storage):
+    storage.register_graph("g1", "s1")
+    record = storage.get_graph("g1")
+    assert record["lifecycle_state"] == "draft"
+
+
+def test_lifecycle_state_defaults_to_published_when_public(storage):
+    storage.register_graph("g1", "s1", public=True)
+    record = storage.get_graph("g1")
+    assert record["lifecycle_state"] == "published"
+
+
+def test_lifecycle_state_explicit_value_round_trips(storage):
+    storage.register_graph("g1", "s1", lifecycle_state="under_review")
+    record = storage.get_graph("g1")
+    assert record["lifecycle_state"] == "under_review"
+
+
+def test_lifecycle_state_survives_plain_reregister(storage):
+    storage.register_graph("g1", "s1", lifecycle_state="active")
+    assert storage.get_graph("g1")["lifecycle_state"] == "active"
+
+    # A plain re-register (e.g. update_registered_graph editing the
+    # description) must not silently reset lifecycle_state back to
+    # draft/published.
+    storage.register_graph("g1", "s1", description="updated desc")
+    assert storage.get_graph("g1")["lifecycle_state"] == "active"
+
+
+def test_lifecycle_state_can_be_explicitly_transitioned(storage):
+    storage.register_graph("g1", "s1", lifecycle_state="draft")
+    storage.register_graph("g1", "s1", lifecycle_state="published")
+    assert storage.get_graph("g1")["lifecycle_state"] == "published"
+
+
+def test_list_graphs_includes_lifecycle_state(storage):
+    storage.register_graph("g1", "s1", lifecycle_state="stale")
+    entries = storage.list_graphs()
+    assert entries[0]["lifecycle_state"] == "stale"
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility: pre-existing rows without `lifecycle_state` set
+# ---------------------------------------------------------------------------
+
+
+def test_sqlite_migration_defaults_existing_rows_lifecycle_state(tmp_path):
+    db_path = str(tmp_path / "v2.db")
+
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE graph_registry (
+            name        TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            description TEXT,
+            tags        TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            public      INTEGER NOT NULL DEFAULT 0,
+            source_graph_name TEXT,
+            visibility  TEXT NOT NULL DEFAULT 'private',
+            team        TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO graph_registry (name, session_id, public, visibility) "
+        "VALUES ('legacy-private', 's0', 0, 'private')"
+    )
+    conn.execute(
+        "INSERT INTO graph_registry (name, session_id, public, visibility) "
+        "VALUES ('legacy-public', 's1', 1, 'public')"
+    )
+    conn.commit()
+    conn.close()
+
+    store = SQLiteStorage(db_path)
+    try:
+        assert store.get_graph("legacy-private")["lifecycle_state"] == "draft"
+        assert store.get_graph("legacy-public")["lifecycle_state"] == "published"
+    finally:
+        store.clear()

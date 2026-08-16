@@ -289,6 +289,19 @@ _MIGRATE_GRAPH_REGISTRY_TEAM = """
     ALTER TABLE graph_registry ADD COLUMN team TEXT
 """
 
+# `lifecycle_state` (Graph Lifecycle -- first slice) -- same rationale
+# and migration pattern as SQLiteStorage. Existing rows are backfilled
+# to 'published' when already public, otherwise 'draft'.
+_MIGRATE_GRAPH_REGISTRY_LIFECYCLE_STATE = """
+    ALTER TABLE graph_registry ADD COLUMN lifecycle_state TEXT
+"""
+
+_MIGRATE_GRAPH_REGISTRY_LIFECYCLE_STATE_BACKFILL = """
+    UPDATE graph_registry SET lifecycle_state =
+        CASE WHEN visibility = 'public' THEN 'published' ELSE 'draft' END
+    WHERE lifecycle_state IS NULL
+"""
+
 # ---------------------------------------------------------------------------
 # DDL — standalone agent liveness (ADR-014). One row per process
 # instance (not per process_kind) -- see SQLiteStorage's schema comment
@@ -435,6 +448,12 @@ class PostgresStorage(AsyncRuntimeStorage):
                 await conn.rollback()
             try:
                 await conn.execute(_MIGRATE_GRAPH_REGISTRY_TEAM)
+                await conn.commit()
+            except psycopg.errors.DuplicateColumn:
+                await conn.rollback()
+            try:
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_LIFECYCLE_STATE)
+                await conn.execute(_MIGRATE_GRAPH_REGISTRY_LIFECYCLE_STATE_BACKFILL)
                 await conn.commit()
             except psycopg.errors.DuplicateColumn:
                 await conn.rollback()
@@ -1335,12 +1354,15 @@ class PostgresStorage(AsyncRuntimeStorage):
 
     _GRAPH_COLUMNS = (
         "name, session_id, description, tags, created_at, updated_at, "
-        "public, source_graph_name, visibility, team"
+        "public, source_graph_name, visibility, team, lifecycle_state"
     )
 
     @staticmethod
     def _graph_row_to_dict(row: tuple) -> dict:
         visibility = row[8] if len(row) > 8 and row[8] else ("public" if row[6] else "private")
+        lifecycle_state = row[10] if len(row) > 10 and row[10] else (
+            "published" if visibility == "public" else "draft"
+        )
         return {
             "name": row[0],
             "session_id": row[1],
@@ -1352,6 +1374,7 @@ class PostgresStorage(AsyncRuntimeStorage):
             "source_graph_name": row[7] if len(row) > 7 else None,
             "visibility": visibility,
             "team": row[9] if len(row) > 9 else None,
+            "lifecycle_state": lifecycle_state,
         }
 
     async def register_graph(
@@ -1364,6 +1387,7 @@ class PostgresStorage(AsyncRuntimeStorage):
         source_graph_name: str | None = None,
         visibility: str | None = None,
         team: str | None = None,
+        lifecycle_state: str | None = None,
     ) -> None:
         resolved_visibility = visibility or ("public" if public else "private")
         resolved_public = resolved_visibility == "public"
@@ -1372,12 +1396,16 @@ class PostgresStorage(AsyncRuntimeStorage):
             # COALESCE: a plain re-register (source_graph_name=None) must
             # not wipe out lineage recorded by an earlier
             # clone_graph(copy_name=...) call for this same name -- same
-            # rationale as SQLiteStorage.
+            # rationale as SQLiteStorage. `lifecycle_state` follows the
+            # same COALESCE rule so a plain re-register doesn't undo a
+            # transition made via update_graph_lifecycle; when NULL on
+            # a brand-new row, _graph_row_to_dict computes the
+            # 'published'-if-public-else-'draft' default on read.
             async with self._pool.connection() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, lifecycle_state, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
@@ -1386,6 +1414,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                         source_graph_name = COALESCE(EXCLUDED.source_graph_name, graph_registry.source_graph_name),
                         visibility = EXCLUDED.visibility,
                         team = EXCLUDED.team,
+                        lifecycle_state = COALESCE(EXCLUDED.lifecycle_state, graph_registry.lifecycle_state),
                         updated_at = now()
                     """,
                     (
@@ -1397,6 +1426,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                         source_graph_name,
                         resolved_visibility,
                         team,
+                        lifecycle_state,
                     ),
                 )
                 await conn.commit()
@@ -1585,10 +1615,13 @@ class PostgresStorage(AsyncRuntimeStorage):
 
             # Graph registry
             for g in data.get("graphs") or []:
+                resolved_visibility = g.get("visibility") or (
+                    "public" if g.get("public") else "private"
+                )
                 await conn.execute(
                     """
-                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO graph_registry (name, session_id, description, tags, public, source_graph_name, visibility, team, lifecycle_state, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (name) DO UPDATE SET
                         session_id = EXCLUDED.session_id,
                         description = EXCLUDED.description,
@@ -1597,6 +1630,7 @@ class PostgresStorage(AsyncRuntimeStorage):
                         source_graph_name = EXCLUDED.source_graph_name,
                         visibility = EXCLUDED.visibility,
                         team = EXCLUDED.team,
+                        lifecycle_state = EXCLUDED.lifecycle_state,
                         updated_at = EXCLUDED.updated_at
                     """,
                     (
@@ -1606,8 +1640,10 @@ class PostgresStorage(AsyncRuntimeStorage):
                         g.get("tags", ""),
                         g.get("public", False),
                         g.get("source_graph_name"),
-                        g.get("visibility") or ("public" if g.get("public") else "private"),
+                        resolved_visibility,
                         g.get("team"),
+                        g.get("lifecycle_state")
+                        or ("published" if resolved_visibility == "public" else "draft"),
                         g.get("updated_at", datetime.now(UTC).isoformat()),
                     ),
                 )

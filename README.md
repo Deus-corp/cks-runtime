@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-809%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-824%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
 > 🚀 **[Live demo →](https://deus-corp.github.io/cks-website/demo/demo.html)** — explore the CKS ecosystem graph directly in your browser, no server required.
@@ -353,7 +353,7 @@ Current implementation status:
 | **Graph Registry** | ✅ Complete |
 | **Backup & Disaster Recovery (ADR-012)** | ✅ Complete |
 | **Outbox: task-type filter, DLQ** | ✅ Complete |
-| Test Suite | ✅ 809 tests passing (+69 requiring optional backends: Postgres, gossip) |
+| Test Suite | ✅ 824 tests passing (+68 requiring optional backends: Postgres, gossip) |
 
 The current implementation serves as the reference implementation of the
 CKS Runtime Standard (SPEC-001 … SPEC-008).

@@ -535,6 +535,7 @@ class RuntimeStorage(ABC):
         source_graph_name: str | None = None,
         visibility: str | None = None,
         team: str | None = None,
+        lifecycle_state: str | None = None,
     ) -> None:
         """
         Register (or update) a ``name -> session_id`` mapping so a
@@ -563,6 +564,15 @@ class RuntimeStorage(ABC):
         lineage on this name untouched rather than clearing it, so a
         plain re-register (e.g. via ``update_registered_graph``) can't
         accidentally erase where a graph was forked from.
+
+        ``lifecycle_state`` (Graph Lifecycle) is one of ``'draft'``,
+        ``'published'``, ``'active'``, ``'stale'``, ``'under_review'``,
+        or ``'archived'``. ``None`` leaves any existing lifecycle state
+        on this name untouched (same "don't clobber on plain
+        re-register" rationale as ``source_graph_name``); a first-time
+        registration with no explicit value defaults to ``'published'``
+        when ``public``/``visibility='public'`` is set, otherwise
+        ``'draft'``.
         """
 
     def get_graph(self, name: str) -> dict | None:
@@ -570,9 +580,10 @@ class RuntimeStorage(ABC):
         Look up a registered graph by name. Returns a dict with keys
         ``name``, ``session_id``, ``description``, ``tags``,
         ``public``, ``visibility``, ``team``, ``source_graph_name``,
-        ``created_at``, ``updated_at``, or ``None`` if no graph is
-        registered under that name. ``None`` by default -- backends
-        that support the graph registry override this.
+        ``lifecycle_state``, ``created_at``, ``updated_at``, or
+        ``None`` if no graph is registered under that name. ``None``
+        by default -- backends that support the graph registry
+        override this.
         """
         return None
 
