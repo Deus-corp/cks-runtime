@@ -587,6 +587,20 @@ class RuntimeStorage(ABC):
         """
         return None
 
+    def unregister_graph(self, name: str) -> bool:
+        """
+        Remove a registered ``name -> session_id`` mapping from the
+        graph registry. Returns ``True`` if an entry existed under
+        ``name`` and was removed, ``False`` otherwise. ``False`` by
+        default -- backends that support the graph registry override
+        this.
+
+        This only removes the registry entry; it does not delete the
+        underlying session or its Knowledge Structure, which remain
+        addressable by session id.
+        """
+        return False
+
     def list_graphs(
         self,
         tag: str | None = None,

@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.53.0] - 2026-08-16
+
+### Added
+- **`unregister_graph` storage method** – graph registry can now explicitly remove a registered graph by name. Implemented for InMemoryStorage, SQLiteStorage, and PostgresStorage, plus abstract interfaces and `SyncStorageAdapter`.
+- The underlying session / Knowledge Structure is left untouched; only the `name → session_id` mapping is removed.
+
+### Changed
+- Storage abstraction now exposes `unregister_graph` alongside `register_graph` / `get_graph` / `list_graphs`.
+
+### Tests
+- Added tests for `unregister_graph` in `tests/unit/storage/test_graph_registry.py` (memory + sqlite, parametrized).
+
+---
+
 ## [1.52.0] - 2026-08-15
 
 ### Added

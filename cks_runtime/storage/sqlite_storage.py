@@ -1749,6 +1749,25 @@ class SQLiteStorage(RuntimeStorage):
         return self._graph_row_to_dict(row)
 
     @_synchronized
+    def unregister_graph(self, name: str) -> bool:
+        """Remove a registered graph entry by name.
+
+        Returns True if a row existed and was deleted, False otherwise.
+        Only removes the registry mapping -- the underlying session and
+        its Knowledge Structure are left untouched.
+        """
+
+        def _write() -> bool:
+            cursor = self._conn.execute(
+                "DELETE FROM graph_registry WHERE name = ?",
+                (name,),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+        return _retry_on_locked(_write)
+
+    @_synchronized
     def list_graphs(
         self,
         tag: str | None = None,

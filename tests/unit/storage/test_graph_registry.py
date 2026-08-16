@@ -51,6 +51,36 @@ def test_get_graph_missing_returns_none(storage):
     assert storage.get_graph("nope") is None
 
 
+# ---------------------------------------------------------------------------
+# unregister_graph
+# ---------------------------------------------------------------------------
+
+
+def test_unregister_graph_removes_entry(storage):
+    storage.register_graph("g1", "s1")
+    assert storage.get_graph("g1") is not None
+
+    removed = storage.unregister_graph("g1")
+
+    assert removed is True
+    assert storage.get_graph("g1") is None
+
+
+def test_unregister_graph_missing_returns_false(storage):
+    removed = storage.unregister_graph("nope")
+    assert removed is False
+
+
+def test_unregister_graph_does_not_affect_other_entries(storage):
+    storage.register_graph("g1", "s1")
+    storage.register_graph("g2", "s2")
+
+    storage.unregister_graph("g1")
+
+    assert storage.get_graph("g1") is None
+    assert storage.get_graph("g2") is not None
+
+
 def test_reregister_updates_public_flag(storage):
     storage.register_graph("g1", "s1", public=False)
     assert storage.get_graph("g1")["public"] is False

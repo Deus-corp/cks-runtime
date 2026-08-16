@@ -1448,6 +1448,25 @@ class PostgresStorage(AsyncRuntimeStorage):
             return None
         return self._graph_row_to_dict(row)
 
+    async def unregister_graph(self, name: str) -> bool:
+        """Remove a registered graph entry by name.
+
+        Returns True if a row existed and was deleted, False otherwise.
+        Only removes the registry mapping -- the underlying session and
+        its Knowledge Structure are left untouched.
+        """
+
+        async def _write() -> bool:
+            async with self._pool.connection() as conn:
+                cursor = await conn.execute(
+                    "DELETE FROM graph_registry WHERE name = %s",
+                    (name,),
+                )
+                await conn.commit()
+                return cursor.rowcount > 0
+
+        return await _retry_on_transient(_write)
+
     async def list_graphs(
         self,
         tag: str | None = None,

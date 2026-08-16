@@ -282,6 +282,9 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
     async def get_graph(self, name: str) -> dict | None:
         return await asyncio.to_thread(self._sync.get_graph, name)
 
+    async def unregister_graph(self, name: str) -> bool:
+        return await asyncio.to_thread(self._sync.unregister_graph, name)
+
     async def list_graphs(
         self,
         tag: str | None = None,

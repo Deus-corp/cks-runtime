@@ -472,6 +472,13 @@ class AsyncRuntimeStorage(ABC):
         """
         return None
 
+    async def unregister_graph(self, name: str) -> bool:
+        """
+        Remove a registered graph by name. ``False`` by default -- see
+        ``RuntimeStorage.unregister_graph`` (``storage.py``).
+        """
+        return False
+
     async def list_graphs(
         self,
         tag: str | None = None,

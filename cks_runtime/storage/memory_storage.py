@@ -267,6 +267,16 @@ class InMemoryStorage(RuntimeStorage):
         entry = self._graphs.get(name)
         return deepcopy(entry) if entry is not None else None
 
+    def unregister_graph(self, name: str) -> bool:
+        """Remove a registered graph entry by name.
+
+        Returns True if an entry existed and was removed, False if
+        there was nothing registered under ``name``. This only removes
+        the registry mapping (name -> session_id); it does not delete
+        the underlying session or its Knowledge Structure.
+        """
+        return self._graphs.pop(name, None) is not None
+
     def list_graphs(
         self,
         tag: str | None = None,
