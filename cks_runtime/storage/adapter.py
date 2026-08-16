@@ -138,8 +138,12 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
             self._sync.list_tasks_by_type, task_type, session_id, drain
         )
 
-    async def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
-        return await asyncio.to_thread(self._sync.list_dead_letter_tasks, task_type)
+    async def list_dead_letter_tasks(
+        self, task_type: str | None = None, session_id: str | None = None
+    ) -> list[OutboxTask]:
+        return await asyncio.to_thread(
+            self._sync.list_dead_letter_tasks, task_type, session_id
+        )
 
     @property
     def supports_outbox(self) -> bool:
@@ -151,6 +155,11 @@ class SyncStorageAdapter(AsyncRuntimeStorage):
 
     async def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
         await asyncio.to_thread(self._sync.upsert_agent_liveness, record)
+
+    async def prune_agent_liveness(self, older_than_seconds: float) -> int:
+        return await asyncio.to_thread(
+            self._sync.prune_agent_liveness, older_than_seconds
+        )
 
     async def list_agent_liveness(self) -> list[AgentLivenessRecord]:
         return await asyncio.to_thread(self._sync.list_agent_liveness)

@@ -228,13 +228,19 @@ class AsyncRuntimeStorage(ABC):
         """
         return []
 
-    async def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+    async def list_dead_letter_tasks(
+        self, task_type: str | None = None, session_id: str | None = None
+    ) -> list[OutboxTask]:
         """
         Return every ``DEAD``-lettered task (optionally filtered to one
-        ``task_type``), oldest first, for inspection -- never drains.
-        Empty by default.
+        ``task_type`` and/or one ``session_id``), oldest first, for
+        inspection -- never drains. Empty by default.
         """
         return []
+
+    async def prune_agent_liveness(self, older_than_seconds: float) -> int:
+        """See ``RuntimeStorage.prune_agent_liveness``. Empty by default."""
+        return 0
 
     async def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
         """

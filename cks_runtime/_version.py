@@ -1,2 +1,2 @@
 """Single source of truth for the cks-runtime package version."""
-__version__ = "1.53.0"
+__version__ = "1.54.0"

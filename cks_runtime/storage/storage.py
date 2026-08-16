@@ -276,14 +276,27 @@ class RuntimeStorage(ABC):
         """
         return []
 
-    def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+    def list_dead_letter_tasks(
+        self, task_type: str | None = None, session_id: str | None = None
+    ) -> list[OutboxTask]:
         """
         Return every ``DEAD``-lettered task (optionally filtered to one
-        ``task_type``), oldest first, for inspection -- never drains.
-        Empty by default -- backends that support the outbox override
-        this.
+        ``task_type`` and/or one ``session_id``), oldest first, for
+        inspection -- never drains. Empty by default -- backends that
+        support the outbox override this.
         """
         return []
+
+    def prune_agent_liveness(self, older_than_seconds: float) -> int:
+        """
+        Delete liveness rows whose last heartbeat is older than
+        ``older_than_seconds`` -- cks_agent_liveness is an append/upsert
+        table with no natural expiry (see ADR-014), so processes that
+        died without a clean shutdown accumulate forever otherwise.
+        Returns the number of rows removed. No-op (returns 0) by
+        default -- backends that support agent liveness override this.
+        """
+        return 0
 
     def upsert_agent_liveness(self, record: AgentLivenessRecord) -> None:
         """

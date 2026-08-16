@@ -896,6 +896,23 @@ class SQLiteStorage(RuntimeStorage):
         _retry_on_locked(_write)
 
     @_synchronized
+    def prune_agent_liveness(self, older_than_seconds: float) -> int:
+        def _write() -> int:
+            from datetime import UTC, timedelta
+
+            cutoff = (
+                datetime.now(UTC) - timedelta(seconds=older_than_seconds)
+            ).isoformat()
+            cur = self._conn.execute(
+                "DELETE FROM cks_agent_liveness WHERE last_heartbeat_at < ?",
+                (cutoff,),
+            )
+            self._conn.commit()
+            return cur.rowcount if cur.rowcount is not None else 0
+
+        return _retry_on_locked(_write)
+
+    @_synchronized
     def list_agent_liveness(self) -> list[AgentLivenessRecord]:
         rows = self._conn.execute(
             """
@@ -1193,28 +1210,26 @@ class SQLiteStorage(RuntimeStorage):
         ]
 
     @_synchronized
-    def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+    def list_dead_letter_tasks(
+        self, task_type: str | None = None, session_id: str | None = None
+    ) -> list[OutboxTask]:
         """Return every DEAD-lettered task, oldest first. Never drains."""
         def _write() -> list[tuple]:
-            if task_type is None:
-                rows = self._conn.execute(
-                    """
-                    SELECT task_id, task_type, session_id, payload, retry_count, last_error
-                    FROM cks_outbox_tasks
-                    WHERE status = 'DEAD'
-                    ORDER BY created_at ASC
-                    """
-                ).fetchall()
-            else:
-                rows = self._conn.execute(
-                    """
-                    SELECT task_id, task_type, session_id, payload, retry_count, last_error
-                    FROM cks_outbox_tasks
-                    WHERE status = 'DEAD' AND task_type = ?
-                    ORDER BY created_at ASC
-                    """,
-                    (task_type,),
-                ).fetchall()
+            clauses = ["status = 'DEAD'"]
+            params: list[str] = []
+            if task_type is not None:
+                clauses.append("task_type = ?")
+                params.append(task_type)
+            if session_id is not None:
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            query = f"""
+                SELECT task_id, task_type, session_id, payload, retry_count, last_error
+                FROM cks_outbox_tasks
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at ASC
+                """
+            rows = self._conn.execute(query, tuple(params)).fetchall()
             return rows
 
         rows = _retry_on_locked(_write)

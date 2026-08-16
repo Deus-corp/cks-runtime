@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.54.0] - 2026-08-16
+
+### Added
+- **Dead-letter session filtering** – `list_dead_letter_tasks` now accepts an optional `session_id` filter across all storage backends and adapters, so cks-mcp can list dead-lettered tasks for a single session.
+- **Agent liveness pruning** – new `prune_agent_liveness(older_than_seconds)` storage capability. SQLite and Postgres now support deleting stale standalone-agent liveness rows; InMemory and adapters provide compatible no-op/interface support.
+
+### Changed
+- `AsyncRuntimeStorage` / `RuntimeStorage` signatures extended for the new methods.
+- `SyncStorageAdapter` proxies both `list_dead_letter_tasks` with `session_id` and `prune_agent_liveness`.
+
+### Tests
+- Existing storage and conformance tests remain green.
+
+---
+
 ## [1.53.0] - 2026-08-16
 
 ### Added

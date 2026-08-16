@@ -995,33 +995,27 @@ class PostgresStorage(AsyncRuntimeStorage):
             for row in rows
         ]
 
-    async def list_dead_letter_tasks(self, task_type: str | None = None) -> list[OutboxTask]:
+    async def list_dead_letter_tasks(
+        self, task_type: str | None = None, session_id: str | None = None
+    ) -> list[OutboxTask]:
         """Return every DEAD-lettered task, oldest first. Never drains."""
         async def _read() -> list[tuple]:
+            clauses = ["status = 'DEAD'"]
+            params: list[str] = []
+            if task_type is not None:
+                clauses.append("task_type = %s")
+                params.append(task_type)
+            if session_id is not None:
+                clauses.append("session_id = %s")
+                params.append(session_id)
+            query = f"""
+                SELECT task_id, task_type, session_id, payload, retry_count, last_error
+                FROM cks_outbox_tasks
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at ASC
+                """
             async with self._pool.connection() as conn:
-                if task_type is None:
-                    rows = await (
-                        await conn.execute(
-                            """
-                            SELECT task_id, task_type, session_id, payload, retry_count, last_error
-                            FROM cks_outbox_tasks
-                            WHERE status = 'DEAD'
-                            ORDER BY created_at ASC
-                            """
-                        )
-                    ).fetchall()
-                else:
-                    rows = await (
-                        await conn.execute(
-                            """
-                            SELECT task_id, task_type, session_id, payload, retry_count, last_error
-                            FROM cks_outbox_tasks
-                            WHERE status = 'DEAD' AND task_type = %s
-                            ORDER BY created_at ASC
-                            """,
-                            (task_type,),
-                        )
-                    ).fetchall()
+                rows = await (await conn.execute(query, tuple(params))).fetchall()
                 return rows
 
         rows = await _retry_on_transient(_read)
@@ -1736,6 +1730,21 @@ class PostgresStorage(AsyncRuntimeStorage):
                 ),
             )
             await conn.commit()
+
+    async def prune_agent_liveness(self, older_than_seconds: float) -> int:
+        async def _write() -> int:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    DELETE FROM cks_agent_liveness
+                    WHERE last_heartbeat_at < (now() - %s * INTERVAL '1 second')
+                    """,
+                    (older_than_seconds,),
+                )
+                await conn.commit()
+                return cur.rowcount if cur.rowcount is not None else 0
+
+        return await _retry_on_transient(_write)
 
     async def list_agent_liveness(self) -> list[AgentLivenessRecord]:
         async with self._pool.connection() as conn:
