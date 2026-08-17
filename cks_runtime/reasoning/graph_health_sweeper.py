@@ -128,7 +128,7 @@ async def _version_freshness_score(session: RuntimeSession) -> float:
         component_name = obj.identity.name or obj.identity.id
         graph_version = obj.structure.get("version")
 
-        repo, candidate_paths = _resolve_component(component_name, obj.structure)
+        repo, candidate_paths, _ = _resolve_component(component_name, obj.structure)
         if repo is None:
             continue
 
