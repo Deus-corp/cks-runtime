@@ -40,11 +40,20 @@ class OutboxEmbeddingWorker:
         core_bridge: Any,
         embedding_client: EmbeddingClient | None = None,
         poll_interval: float = 2.0,
+        max_retries: int = 5,
     ) -> None:
         self._storage = storage
         self._core_bridge = core_bridge
         self._embedding_client = embedding_client or StubEmbeddingClient()
         self._poll_interval = poll_interval
+        #: after this many failed attempts at one task, dead-letter it
+        #: instead of scheduling yet another backoff retry -- without
+        #: this, a task whose failure cause is *not* transient (e.g. a
+        #: genuinely corrupted patch chain -- see
+        #: ``_execute_task``/``_reconstruct_with_retry``'s docstrings)
+        #: retries forever with exponentially-growing backoff and
+        #: never actually goes away.
+        self._max_retries = max_retries
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -118,6 +127,19 @@ class OutboxEmbeddingWorker:
         except Exception as exc:  # noqa: BLE001 -- any failure must route to the retry/backoff path below; logged
             logger.error("Outbox task %s failed: %s", task.task_id, exc)
             retry_count = task.retry_count + 1
+            if retry_count >= self._max_retries:
+                # Give up for good instead of retrying forever with
+                # ever-growing backoff -- a hash-mismatch (or any
+                # other) failure that survives ``_execute_task``'s own
+                # reload-and-retry is not transient, and an unbounded
+                # fail/backoff loop would otherwise never surface that
+                # to an operator.
+                await self._storage.dead_letter_outbox_task(task.task_id, str(exc))
+                logger.error(
+                    "Outbox task %s dead-lettered after %s attempt(s): %s",
+                    task.task_id, retry_count, exc,
+                )
+                return
             delay_seconds = min(2 ** retry_count, 3600)
             next_retry = (datetime.now(UTC) + timedelta(seconds=delay_seconds)).isoformat()
             await self._storage.fail_outbox_task(
@@ -136,8 +158,18 @@ class OutboxEmbeddingWorker:
         if session is None:
             raise ValueError(f"Session {session_id} not found")
 
-        # Reconstruct the full Knowledge Structure for the new version
-        new_structure = session.get_version_state(new_version_id, self._core_bridge)
+        # Reconstruct the full Knowledge Structure for the new version.
+        # A hash mismatch here (RuntimeSession.get_version_state
+        # raising ValueError) can be a genuine data-integrity problem,
+        # but it can also be a snapshot-consistency race: this
+        # worker's ``load_session`` read may have landed between two
+        # writes from a concurrent agent updating the same session
+        # (e.g. a snapshot compaction not yet visible when the version
+        # rows were, or vice versa). Reloading once and reconstructing
+        # again against a fully-fresh read clears that race without
+        # masking a real corruption -- a genuinely bad patch chain
+        # still fails the same way on the retry and propagates.
+        new_structure = await self._reconstruct_with_retry(session_id, session, new_version_id)
         if new_structure is None:
             raise ValueError(f"Failed to reconstruct state for version {new_version_id}")
 
@@ -157,7 +189,9 @@ class OutboxEmbeddingWorker:
                 prev_version_id = version_ids[index - 1]
 
         if prev_version_id:
-            old_structure = session.get_version_state(prev_version_id, self._core_bridge)
+            old_structure = await self._reconstruct_with_retry(
+                session_id, session, prev_version_id
+            )
         else:
             old_structure = None
 
@@ -219,6 +253,39 @@ class OutboxEmbeddingWorker:
         # objects from the embedding index with no error signal.
         for obj, embedding in zip(objects_to_embed, embeddings, strict=True):
             await self._storage.save_object_embeddings(obj.identity.id, session_id, embedding)
+
+    async def _reconstruct_with_retry(
+        self, session_id: str, session: Any, version_id: str
+    ) -> Any:
+        """
+        Reconstruct ``version_id``'s Knowledge Structure via
+        ``session.get_version_state``, retrying exactly once against
+        a freshly-reloaded ``RuntimeSession`` if the first attempt
+        fails on a state-hash mismatch (see ``_execute_task``'s
+        docstring for why a fresh reload can clear a transient
+        snapshot-consistency race). Any other ``ValueError`` (missing
+        version, no core_bridge for a delta, etc.) is not
+        reload-and-retried -- reloading the same session can't fix
+        those -- and propagates immediately, same as before this
+        method existed. A mismatch that persists after the reload is
+        a genuine corruption, not a race: it also propagates, so the
+        caller's fail/dead-letter accounting in ``_process_next_task``
+        applies to it.
+        """
+        try:
+            return session.get_version_state(version_id, self._core_bridge)
+        except ValueError as exc:
+            if "does not match its recorded hash" not in str(exc):
+                raise
+            logger.warning(
+                "Hash mismatch reconstructing version %s for session %s; "
+                "reloading session from storage and retrying once: %s",
+                version_id, session_id, exc,
+            )
+            fresh_session = await self._storage.load_session(session_id)
+            if fresh_session is None:
+                raise
+            return fresh_session.get_version_state(version_id, self._core_bridge)
 
     @staticmethod
     def _format_for_embedding(obj: Any) -> str:

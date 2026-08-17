@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.55.0] - 2026-08-17
+
+### Fixed
+- **Version reconstruction hash mismatch** – `OutboxEmbeddingWorker` now retries a failed `get_version_state` once against a freshly reloaded session when the failure is a state-hash mismatch. This clears a transient snapshot-consistency race caused by concurrent agent writes, without masking genuine corruption (a persistent mismatch still fails).
+
+### Added
+- **Outbox task retry cap** – after `max_retries` failed attempts (default 5), a task is dead-lettered instead of retrying forever with exponential backoff. This prevents permanently failing tasks (e.g. corrupted patch chains) from looping indefinitely.
+- **`max_retries` parameter** on `OutboxEmbeddingWorker` for configurable retry limits.
+
+### Tests
+- Added regression tests for hash-mismatch recovery, persistent mismatch, dead-letter after max retries, and non-hash-mismatch errors bypassing the reload retry.
+
+---
+
 ## [1.54.0] - 2026-08-16
 
 ### Added
