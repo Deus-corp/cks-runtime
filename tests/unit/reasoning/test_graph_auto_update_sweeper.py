@@ -35,15 +35,27 @@ def storage():
     store.clear()
 
 
-def _component_ks(name: str, version: str, *, repo_url: str | None = None) -> object:
+def _component_ks(
+    name: str,
+    version: str,
+    *,
+    repo_url: str | None = None,
+    version_source: str | None = None,
+) -> object:
     structure: dict[str, object] = {"version": version}
     if repo_url is not None:
         structure["repo_url"] = repo_url
+    if version_source is not None:
+        structure["version_source"] = version_source
     obj = {
         "identity": {"id": f"comp-{name}", "type": "Component", "name": name},
         "structure": structure,
     }
     return cks.parse(json.dumps({"objects": [obj]}))
+
+
+def _fake_package_json_response(version: str) -> SimpleNamespace:
+    return SimpleNamespace(status_code=200, text=json.dumps({"version": version}))
 
 
 def _plain_ks() -> object:
@@ -181,6 +193,148 @@ async def test_unknown_repo_component_skipped_not_escalated(storage):
 
     assert escalated == []
     mock_get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# version_source: "package.json" (JS/TS components)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_package_json_component_resolved_and_checked(storage):
+    ks = _component_ks(
+        "cks-studio",
+        "v0.18.0",
+        repo_url="https://github.com/Deus-corp/cks-studio",
+        version_source="package.json",
+    )
+    _register(storage, "g1", "s1", ks)
+
+    sweeper = GraphAutoUpdateSweeper(storage)
+    with patch(
+        "cks_runtime.reasoning.graph_auto_update_sweeper.safe_get",
+        return_value=_fake_package_json_response("0.19.0"),
+    ) as mock_get:
+        escalated = await sweeper.sweep_once()
+
+    assert len(escalated) == 1
+    assert escalated[0]["outdated_components"][0] == {
+        "component": "cks-studio",
+        "graph_version": "v0.18.0",
+        "actual_version": "0.19.0",
+    }
+    # First candidate path is the repo-root package.json.
+    called_url = mock_get.call_args_list[0].args[0]
+    assert called_url == "https://raw.githubusercontent.com/Deus-corp/cks-studio/main/package.json"
+
+
+@pytest.mark.asyncio
+async def test_package_json_up_to_date_not_escalated(storage):
+    ks = _component_ks(
+        "cks-studio",
+        "0.19.0",
+        repo_url="https://github.com/Deus-corp/cks-studio",
+        version_source="package.json",
+    )
+    _register(storage, "g1", "s1", ks)
+
+    sweeper = GraphAutoUpdateSweeper(storage)
+    with patch(
+        "cks_runtime.reasoning.graph_auto_update_sweeper.safe_get",
+        return_value=_fake_package_json_response("0.19.0"),
+    ):
+        escalated = await sweeper.sweep_once()
+
+    assert escalated == []
+
+
+@pytest.mark.asyncio
+async def test_component_without_version_source_falls_back_to_python(storage):
+    # No version_source set -- must still use the _version.py convention,
+    # not package.json, even though the fake response below would parse
+    # as neither if the wrong regex/parser were used.
+    ks = _component_ks(
+        "widget-lib", "1.0.0", repo_url="https://github.com/acme/widget-lib"
+    )
+    _register(storage, "g1", "s1", ks)
+
+    sweeper = GraphAutoUpdateSweeper(storage)
+    with patch(
+        "cks_runtime.reasoning.graph_auto_update_sweeper.safe_get",
+        return_value=_fake_version_response("1.1.0"),
+    ) as mock_get:
+        escalated = await sweeper.sweep_once()
+
+    assert len(escalated) == 1
+    called_url = mock_get.call_args_list[0].args[0]
+    assert called_url.endswith("/_version.py")
+
+
+@pytest.mark.asyncio
+async def test_known_component_with_version_source_still_uses_package_json(storage):
+    # cks-studio-like case: a name in _KNOWN_COMPONENTS-style ecosystem
+    # map would normally resolve to a Python _version.py path, but an
+    # explicit version_source override on the Component must still win.
+    ks = _component_ks(
+        "cks-core",
+        "1.0.0",
+        repo_url="https://github.com/Deus-corp/cks-core",
+        version_source="package.json",
+    )
+    _register(storage, "g1", "s1", ks)
+
+    sweeper = GraphAutoUpdateSweeper(storage)
+    with patch(
+        "cks_runtime.reasoning.graph_auto_update_sweeper.safe_get",
+        return_value=_fake_package_json_response("2.0.0"),
+    ) as mock_get:
+        escalated = await sweeper.sweep_once()
+
+    assert len(escalated) == 1
+    called_url = mock_get.call_args_list[0].args[0]
+    assert called_url.endswith("package.json")
+
+
+@pytest.mark.asyncio
+async def test_package_json_missing_repo_file_not_escalated(storage):
+    ks = _component_ks(
+        "ghost-app",
+        "1.0.0",
+        repo_url="https://github.com/acme/ghost-app",
+        version_source="package.json",
+    )
+    _register(storage, "g1", "s1", ks)
+
+    sweeper = GraphAutoUpdateSweeper(storage)
+    with patch(
+        "cks_runtime.reasoning.graph_auto_update_sweeper.safe_get",
+        return_value=SimpleNamespace(status_code=404, text="Not Found"),
+    ) as mock_get:
+        escalated = await sweeper.sweep_once()
+
+    assert escalated == []
+    # Tried both candidate package.json locations before giving up.
+    assert mock_get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_package_json_invalid_json_not_escalated(storage):
+    ks = _component_ks(
+        "broken-app",
+        "1.0.0",
+        repo_url="https://github.com/acme/broken-app",
+        version_source="package.json",
+    )
+    _register(storage, "g1", "s1", ks)
+
+    sweeper = GraphAutoUpdateSweeper(storage)
+    with patch(
+        "cks_runtime.reasoning.graph_auto_update_sweeper.safe_get",
+        return_value=SimpleNamespace(status_code=200, text="{not valid json"),
+    ):
+        escalated = await sweeper.sweep_once()
+
+    assert escalated == []
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.56.0] - 2026-08-17
+
+### Added
+- **JS/TS component version support in `GraphAutoUpdateSweeper`** – components with `structure.version_source = "package.json"` now fetch their version from the repository’s `package.json` instead of assuming Python `_version.py`. Includes candidate path fallback (`package.json` and `{pkg}/package.json`) and safe fetching.
+- **Source-aware component resolution** – `_resolve_component` now returns whether a component is `package_json` or `python`, and `GraphAutoUpdateSweeper` selects the appropriate fetch logic accordingly.
+
+### Changed
+- Known components with an explicit `version_source = "package.json"` override use package.json even if they are also present in the Python `_KNOWN_COMPONENTS` map.
+
+### Tests
+- Added coverage for package.json resolution, up-to-date no-escalation, fallback to Python when no `version_source`, override for known components, missing file, and invalid JSON.
+
+---
+
 ## [1.55.1] - 2026-08-17
 
 ### Fixed
