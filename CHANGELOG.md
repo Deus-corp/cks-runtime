@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.55.1] - 2026-08-17
+
+### Fixed
+- **Shared hash-mismatch recovery** – extracted the reload-and-retry logic for `RuntimeSession.get_version_state` into a reusable `cks_runtime/session/reconstruct.py` helper. `OutboxEmbeddingWorker` now delegates to this shared helper instead of maintaining its own copy.
+- **Consistent version reconstruction** – other runtime call sites that reconstruct historical versions can now use the same retry-once-after-reload behavior for stale session reads.
+
+### Changed
+- `OutboxEmbeddingWorker` now imports `reconstruct_with_retry` from the shared module.
+
+### Tests
+- Added unit tests for the new `reconstruct_with_retry` helper covering reload-on-mismatch, persistent mismatch propagation, and non-hash-mismatch errors.
+
+---
+
 ## [1.55.0] - 2026-08-17
 
 ### Fixed

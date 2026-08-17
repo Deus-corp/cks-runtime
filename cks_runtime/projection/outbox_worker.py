@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cks_runtime.embedding.client import EmbeddingClient, StubEmbeddingClient
+from cks_runtime.session.reconstruct import reconstruct_with_retry
 from cks_runtime.storage.async_storage import AsyncRuntimeStorage
 
 logger = logging.getLogger(__name__)
@@ -258,34 +259,20 @@ class OutboxEmbeddingWorker:
         self, session_id: str, session: Any, version_id: str
     ) -> Any:
         """
-        Reconstruct ``version_id``'s Knowledge Structure via
-        ``session.get_version_state``, retrying exactly once against
-        a freshly-reloaded ``RuntimeSession`` if the first attempt
-        fails on a state-hash mismatch (see ``_execute_task``'s
-        docstring for why a fresh reload can clear a transient
-        snapshot-consistency race). Any other ``ValueError`` (missing
-        version, no core_bridge for a delta, etc.) is not
-        reload-and-retried -- reloading the same session can't fix
-        those -- and propagates immediately, same as before this
-        method existed. A mismatch that persists after the reload is
-        a genuine corruption, not a race: it also propagates, so the
-        caller's fail/dead-letter accounting in ``_process_next_task``
-        applies to it.
+        Thin wrapper around the shared
+        ``cks_runtime.session.reconstruct.reconstruct_with_retry``
+        helper, bound to this worker's storage/core_bridge. See that
+        helper's docstring for the reload-and-retry semantics (kept
+        here, not duplicated, so other outbox consumers share the
+        exact same behavior -- see ``_execute_task``'s docstring for
+        why a fresh reload can clear a transient snapshot-consistency
+        race). A mismatch that persists after the reload propagates,
+        so the caller's fail/dead-letter accounting in
+        ``_process_next_task`` applies to it.
         """
-        try:
-            return session.get_version_state(version_id, self._core_bridge)
-        except ValueError as exc:
-            if "does not match its recorded hash" not in str(exc):
-                raise
-            logger.warning(
-                "Hash mismatch reconstructing version %s for session %s; "
-                "reloading session from storage and retrying once: %s",
-                version_id, session_id, exc,
-            )
-            fresh_session = await self._storage.load_session(session_id)
-            if fresh_session is None:
-                raise
-            return fresh_session.get_version_state(version_id, self._core_bridge)
+        return await reconstruct_with_retry(
+            self._storage, session_id, session, version_id, self._core_bridge
+        )
 
     @staticmethod
     def _format_for_embedding(obj: Any) -> str:
