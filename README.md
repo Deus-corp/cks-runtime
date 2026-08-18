@@ -7,7 +7,7 @@
 ![Tests](https://img.shields.io/badge/tests-845%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/cks-runtime)](https://pypi.org/project/cks-runtime/)
 
-> 🚀 **[Live demo →](https://deus-corp.github.io/cks-website/demo/demo.html)** — explore the CKS ecosystem graph directly in your browser, no server required.
+> 🚀 **[Live demo →](https://punctumactus.github.io/cks-website/demo/demo.html)** — explore the CKS ecosystem graph directly in your browser, no server required.
 
 CKS Runtime is the canonical execution environment for
 Canonical Knowledge Structures (CKS).
@@ -29,14 +29,14 @@ Canonical Knowledge Structure.
 
 | Project | Description | Repository |
 |---------|-------------|------------|
-| **cks-core** | Canonical semantic engine – the single source of canonical truth. | [Deus-corp/cks-core](https://github.com/Deus-corp/cks-core) |
-| **cks-runtime** | Operational environment – sessions, transactions, persistence. | [Deus-corp/cks-runtime](https://github.com/Deus-corp/cks-runtime) |
-| **cks-mcp** | MCP server – exposes CKS to LLMs and autonomous agents. | [Deus-corp/cks-mcp](https://github.com/Deus-corp/cks-mcp) |
-| **cks-studio** | Visual workspace – explore, monitor, and manage graphs. | [Deus-corp/cks-studio](https://github.com/Deus-corp/cks-studio) |
-| **cks-website** | Documentation & demo site. | [Deus-corp/cks-website](https://github.com/Deus-corp/cks-website) |
+| **cks-core** | Canonical semantic engine – the single source of canonical truth. | [cks-core](https://github.com/PunctumActus/cks-core) |
+| **cks-runtime** | Operational environment – sessions, transactions, persistence. | [cks-runtime](https://github.com/PunctumActus/cks-runtime) |
+| **cks-mcp** | MCP server – exposes CKS to LLMs and autonomous agents. | [cks-mcp](https://github.com/PunctumActus/cks-mcp) |
+| **cks-studio** | Visual workspace – explore, monitor, and manage graphs. | [cks-studio](https://github.com/PunctumActus/cks-studio) |
+| **cks-website** | Documentation & demo site. | [cks-website](https://github.com/PunctumActus/cks-website) |
 
 📖 **Full documentation, case studies, and an interactive demo**
-are available at the **[CKS Documentation Site](https://deus-corp.github.io/cks-website/)**.
+are available at the **[CKS Documentation Site](https://punctumactus.github.io/cks-website/)**.
 
 ---
 
@@ -236,7 +236,7 @@ pip install cks-runtime
 Or from source:
 
 ```bash
-git clone https://github.com/Deus-corp/cks-runtime.git
+git clone https://github.com/PunctumActus/cks-runtime.git
 
 cd cks-runtime
 
@@ -299,7 +299,7 @@ Sync backends (`InMemoryStorage`, `SQLiteStorage`) are automatically adapted to 
 
 # Documentation
 
-📚 **[CKS Documentation](https://deus-corp.github.io/cks-website/)** — architecture guides, case studies, and API reference across all CKS projects.
+📚 **[CKS Documentation](https://punctumactus.github.io/cks-website/)** — architecture guides, case studies, and API reference across all CKS projects.
 
 The Runtime Standard consists of the following normative specifications.
 

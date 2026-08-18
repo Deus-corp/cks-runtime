@@ -42,9 +42,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Deus-corp/cks-runtime"
-Repository = "https://github.com/Deus-corp/cks-runtime"
-Issues = "https://github.com/Deus-corp/cks-runtime/issues"
+Homepage = "https://github.com/PunctumActus/cks-runtime"
+Repository = "https://github.com/PunctumActus/cks-runtime"
+Issues = "https://github.com/PunctumActus/cks-runtime/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "cks_runtime._version.__version__"}
