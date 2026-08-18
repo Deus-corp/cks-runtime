@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.56.1] - 2026-08-18
+
+### Changed
+- **Dependency bump** – require `cks-core >= 1.23.0`, which adds the opt-in Constraints-as-Data pilot (`OntologyRule` / `include_structure_constraints`). Runtime itself remains backward compatible; this is a metadata-only release to keep the ecosystem aligned.
+
+---
+
 ## [1.56.0] - 2026-08-17
 
 ### Added
