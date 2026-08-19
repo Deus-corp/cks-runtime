@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.57.1] - 2026-08-19
+
+### Changed
+- **Dependency bump** – require `cks-core >= 1.23.1`, which splits `cks.evolution` into a package while preserving its public API.
+
+### Tests
+- 773 passed, 69 skipped.
+
+---
+
 ## [1.57.0] - 2026-08-19
 
 ### Changed
