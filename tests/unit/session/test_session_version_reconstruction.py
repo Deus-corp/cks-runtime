@@ -16,6 +16,7 @@ from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.core_api.bridge import CoreBridge
 from cks_runtime.core_api.interfaces import CoreInterface
 from cks_runtime.session.session import RuntimeSession
+from cks_runtime.versioning.version import RuntimeVersion
 from cks_runtime.versioning.version_manager import VersionManager
 
 
@@ -192,3 +193,105 @@ def test_get_version_state_detects_tampered_history(
             target_version.version_id,
             bridge,
         )
+
+
+# ----------------------------------------------------------------------
+# Regression: replaying a patch whose AddObject targets an id that's
+# already present in the state it's replayed on top of must not crash
+# reconstruction (cks.evolution.AddObject._mutate raises a bare
+# ValueError('Object ... already exists.') otherwise).
+# ----------------------------------------------------------------------
+
+
+def _make_session_with_replay_collision(*, conflicting: bool) -> tuple[RuntimeSession, CoreBridge]:
+    """
+    Build a two-version session by hand where v1's stored patch
+    contains an AddObject for an id ("shared") that's already present
+    in v0's snapshot -- simulating a base version reconstruction that
+    shares object ids with the structure a patch was originally
+    captured against.
+
+    ``conflicting=False``: the AddObject's object is identical to
+    what's already there (a clean replay artefact).
+    ``conflicting=True``: it differs (a genuine conflict that must be
+    surfaced, not silently resolved).
+    """
+    bridge = CoreBridge(implementation=CksCoreAdapter())
+
+    v0_structure = make_structure(["shared", "other"])
+    v0 = RuntimeVersion(
+        session_id="s1",
+        transaction_id="tx0",
+        knowledge_structure=v0_structure,
+        metadata={},
+        version_id="v0",
+        state_hash=bridge.hash(v0_structure),
+    )
+
+    shared_replay_value = "different" if conflicting else "shared"
+    replayed_obj = cks.KnowledgeObject(
+        cks.ObjectIdentity(id="shared", type="Thing", name=shared_replay_value),
+    )
+    patch = [cks.AddObject(replayed_obj)]
+
+    # The correct end state after this patch is applied is the same
+    # as v0 for the "shared" object (the AddObject is a stale replay
+    # step, whether or not its payload matches) -- construct that
+    # directly and hash it, exactly as VersionManager would have when
+    # the version was first recorded.
+    v1_structure = v0_structure
+    v1 = RuntimeVersion(
+        session_id="s1",
+        transaction_id="tx1",
+        knowledge_structure=None,
+        metadata={},
+        version_id="v1",
+        state_hash=bridge.hash(v1_structure),
+        patch=patch,
+    )
+
+    session = RuntimeSession(knowledge_structure=v1_structure, session_id="s1")
+    session.version_history = [v0, v1]
+    return session, bridge
+
+
+def test_get_version_state_replay_add_object_identical_duplicate_is_noop():
+    session, bridge = _make_session_with_replay_collision(conflicting=False)
+
+    reconstructed = session.get_version_state("v1", bridge)
+
+    assert reconstructed.get("shared").identity.name == "shared"
+    assert {o.identity.id for o in reconstructed.objects} == {"shared", "other"}
+
+
+def test_get_version_state_replay_add_object_conflict_logs_warning_not_raise(caplog):
+    session, bridge = _make_session_with_replay_collision(conflicting=True)
+
+    with caplog.at_level("WARNING"):
+        reconstructed = session.get_version_state("v1", bridge)
+
+    # The existing ("shared") object wins over the stale replayed
+    # ("different") one -- reconstruction succeeds and matches the
+    # recorded state_hash rather than crashing.
+    assert reconstructed.get("shared").identity.name == "shared"
+    assert any(
+        "already exists with different content" in message
+        for message in caplog.messages
+    )
+
+
+def test_get_version_state_add_object_conflict_for_live_edit_still_raises():
+    """
+    The dedupe above is specific to reconstruction replay
+    (get_version_state). A live evolve() call with a genuine duplicate
+    AddObject -- e.g. a user-supplied operation in evolve_knowledge or
+    fork_sandbox -- must still raise, not be silently swallowed.
+    """
+    adapter = CksCoreAdapter()
+    structure = make_structure(["shared"])
+    duplicate = cks.AddObject(
+        cks.KnowledgeObject(cks.ObjectIdentity(id="shared", type="Thing", name="dup"))
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        adapter.evolve(structure, [duplicate])

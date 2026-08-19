@@ -73,7 +73,7 @@ _DEFAULT_BRANCH = "main"
 # duplicated here rather than shared.
 _KNOWN_COMPONENTS: dict[str, dict[str, str]] = {
     "cks-core": {"repo": "punctumactus/cks-core", "path": "src/cks/_version.py"},
-    "cks-runtime": {"repo": "punctumactus/cks-runtime", "path": "cks_runtime/_version.py"},
+    "cks-runtime": {"repo": "punctumactus/cks-runtime", "path": "src/cks_runtime/_version.py"},
     "cks-mcp": {"repo": "punctumactus/cks-mcp", "path": "src/cks_mcp/_version.py"},
 }
 

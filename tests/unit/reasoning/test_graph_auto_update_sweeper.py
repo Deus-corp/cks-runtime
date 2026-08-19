@@ -12,9 +12,12 @@ import cks
 import pytest
 
 from cks_runtime.reasoning.graph_auto_update_sweeper import (
+    _KNOWN_COMPONENTS,
     DEFAULT_SWEEP_INTERVAL_SECONDS,
     GraphAutoUpdateSweeper,
+    _raw_url,
     _repo_from_url,
+    _resolve_component,
 )
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.memory_storage import InMemoryStorage
@@ -116,6 +119,54 @@ async def test_finds_outdated_component_and_escalates(storage):
     outbox = _outbox_payloads(storage)
     assert len(outbox) == 1
     assert outbox[0]["name"] == "g1"
+
+
+def test_known_python_component_uses_src_layout_path():
+    # Regression: after the src-layout migration, cks-runtime's
+    # _version.py lives at src/cks_runtime/_version.py, not
+    # cks_runtime/_version.py -- see GraphAutoUpdateSweeper's raw
+    # GitHub fetch failing before this fix.
+    repo, candidate_paths, source = _resolve_component("cks-runtime", {})
+    assert repo == "punctumactus/cks-runtime"
+    assert source == "python"
+    assert candidate_paths == ("src/cks_runtime/_version.py",)
+    assert _raw_url(repo, candidate_paths[0]) == (
+        "https://raw.githubusercontent.com/punctumactus/cks-runtime/main/"
+        "src/cks_runtime/_version.py"
+    )
+
+
+def test_known_components_python_paths_include_src_prefix():
+    for name, info in _KNOWN_COMPONENTS.items():
+        if info["path"].endswith("package.json"):
+            continue
+        assert info["path"].startswith("src/"), (
+            f"{name}'s _version.py path should live under src/ "
+            f"post src-layout migration, got {info['path']!r}"
+        )
+
+
+def test_known_component_version_source_package_json_still_no_src_prefix():
+    # version_source: "package.json" must keep fetching package.json
+    # at the repo root, unaffected by the Python src-layout fix.
+    repo, candidate_paths, source = _resolve_component(
+        "cks-runtime", {"version_source": "package.json"}
+    )
+    assert repo == "punctumactus/cks-runtime"
+    assert source == "package_json"
+    assert all("src/" not in p for p in candidate_paths)
+
+
+def test_unknown_version_source_falls_back_to_python_src_layout():
+    # An unrecognized/garbage version_source value should not be
+    # treated as npm -- it falls back to the Python src-layout
+    # convention just like no version_source at all.
+    repo, candidate_paths, source = _resolve_component(
+        "cks-runtime", {"version_source": "something-unexpected"}
+    )
+    assert repo == "punctumactus/cks-runtime"
+    assert source == "python"
+    assert candidate_paths == ("src/cks_runtime/_version.py",)
 
 
 @pytest.mark.asyncio

@@ -4,9 +4,94 @@ Runtime Session.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
+
+
+def _dedupe_replayed_add_objects(state: Any, patch: Any) -> Any:
+    """
+    Filter a stored patch (about to be replayed via
+    ``core_bridge.evolve``) so that an ``AddObject`` whose target id
+    already exists in ``state`` never reaches ``cks.evolution.compose``.
+
+    This is specifically about *replaying a historical patch during
+    version reconstruction* (``get_version_state``), not general
+    evolution: ``cks.evolution.AddObject._mutate`` raises a bare
+    ``ValueError('Object ... already exists.')`` when an id collides,
+    which is the right behavior for a live edit (see
+    ``fork_sandbox``/``evolve_knowledge`` -- a caller-supplied
+    ``AddObject`` for an id that already exists is a genuine error to
+    report, not something to silently paper over). Reconstruction is
+    different: replaying a stored patch chain can reapply an
+    ``AddObject`` for an id introduced earlier in the same chain, or
+    already present in the snapshot the chain is replayed on top of,
+    whenever the version being reconstructed shares object ids with
+    the structure the patch was originally captured against. Scoping
+    this dedupe to only the reconstruction replay loop (rather than
+    ``CksCoreAdapter.evolve`` generally) keeps that distinction
+    intact.
+
+    Two cases when a collision is found, so genuine corruption isn't
+    silently hidden:
+
+    * The existing object is identical (same identity + structure) to
+      the one ``AddObject`` would add: a true no-op replay -- drop the
+      operator.
+    * The existing object differs: a real conflict, not a replay
+      artefact. Logged as a warning and dropped rather than applied,
+      since blindly overwriting could discard data, and blindly
+      raising would crash reconstruction entirely (the original bug).
+
+    Non-``AddObject`` operators (including ``RemoveObject``, tracked
+    here so a same-batch remove-then-add for the same id -- the
+    pattern cks-core's own diff produces for any "replace this
+    object's identity" edit -- still lets the add through) pass
+    through unchanged. If ``patch`` isn't a plain list/tuple of
+    operators, or contains no ``AddObject`` at all, it's returned
+    untouched.
+    """
+    if not isinstance(patch, (list, tuple)):
+        return patch
+
+    from cks.evolution import AddObject, RemoveObject
+
+    if not any(isinstance(op, AddObject) for op in patch):
+        return patch
+
+    existing = {obj.identity.id: obj for obj in state.objects}
+    filtered: list[Any] = []
+    for op in patch:
+        if isinstance(op, RemoveObject):
+            existing.pop(op.object_id, None)
+            filtered.append(op)
+            continue
+        if isinstance(op, AddObject) and op.obj.identity.id in existing:
+            current = existing[op.obj.identity.id]
+            if current == op.obj:
+                logger.warning(
+                    "Reconstruction replay: AddObject for '%s' targets "
+                    "an object that already exists and is identical; "
+                    "treating as a no-op.",
+                    op.obj.identity.id,
+                )
+            else:
+                logger.warning(
+                    "Reconstruction replay: AddObject for '%s' targets "
+                    "an object that already exists with different "
+                    "content; skipping to avoid crashing reconstruction. "
+                    "This may indicate a genuine data conflict and "
+                    "should be investigated.",
+                    op.obj.identity.id,
+                )
+            continue
+        filtered.append(op)
+        if isinstance(op, AddObject):
+            existing[op.obj.identity.id] = op.obj
+    return filtered
 
 
 @dataclass(slots=True)
@@ -167,7 +252,8 @@ class RuntimeSession:
                     f"stored snapshot nor a recorded patch; cannot "
                     f"reconstruct the chain past it."
                 )
-            state = core_bridge.evolve(state, version.patch)
+            patch = _dedupe_replayed_add_objects(state, version.patch)
+            state = core_bridge.evolve(state, patch)
             verify_checkpoint(version, state)
 
         return state

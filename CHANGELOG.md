@@ -6,6 +6,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.57.3] - 2026-08-19
+
+### Fixed
+- **GraphAutoUpdateSweeper source path** – Python components now fetch `_version.py` using the post src-layout path (`src/cks_runtime/_version.py`), not the old flat layout path. JS/TS components using `version_source: "package.json"` are unaffected.
+- **Version reconstruction idempotency** – `RuntimeSession.get_version_state()` no longer crashes when replaying a historical patch containing `AddObject` for an object id already present in the base state. Identical duplicates are treated as no-ops; conflicting duplicates are logged as warnings and skipped to avoid a hard reconstruction failure. Live `evolve()` calls still raise on genuine duplicate `AddObject`.
+
+### Added
+- Regression tests for:
+  - src-layout Python path resolution and `package.json` version-source precedence.
+  - idempotent reconstruction replay for identical/conflicting `AddObject`.
+  - live evolve duplicate `AddObject` still raises.
+
+### Changed
+- No public API changes.
+
+---
+
 ## [1.57.2] - 2026-08-19
 
 ### Fixed
