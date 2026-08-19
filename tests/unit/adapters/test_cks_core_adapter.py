@@ -7,12 +7,12 @@ from unittest.mock import Mock
 import cks
 import pytest
 
+from cks_runtime.adapters.cks_core import (
+    CksCoreAdapter,
+)
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.core_api.validation_result import (
     RuntimeValidationResult,
-)
-from cks_runtime_plugins.cks_core.adapter import (
-    CksCoreAdapter,
 )
 
 # ruff: noqa: RUF012
@@ -73,7 +73,7 @@ def test_evolve(monkeypatch, adapter):
     expected = object()
 
     monkeypatch.setattr(
-        "cks_runtime_plugins.cks_core.adapter.compose",
+        "cks_runtime.adapters.cks_core.compose",
         lambda ks, ops: expected,
     )
 
@@ -117,7 +117,7 @@ def test_explain(monkeypatch, adapter):
             ]
 
     monkeypatch.setattr(
-        "cks_runtime_plugins.cks_core.adapter.cks_inspect",
+        "cks_runtime.adapters.cks_core.cks_inspect",
         lambda ks: "summary",
     )
 
@@ -199,7 +199,7 @@ def test_evolve_calls_compose(monkeypatch, adapter):
     )
 
     monkeypatch.setattr(
-        "cks_runtime_plugins.cks_core.adapter.compose",
+        "cks_runtime.adapters.cks_core.compose",
         compose,
     )
 
@@ -275,7 +275,7 @@ def test_explain_calls_inspect(monkeypatch, adapter):
     )
 
     monkeypatch.setattr(
-        "cks_runtime_plugins.cks_core.adapter.cks_inspect",
+        "cks_runtime.adapters.cks_core.cks_inspect",
         inspect,
     )
 

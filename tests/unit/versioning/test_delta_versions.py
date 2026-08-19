@@ -5,10 +5,10 @@ Tests for delta (patch-only) version storage and reconstruction.
 import cks
 import pytest
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.core_api.bridge import CoreBridge
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.versioning.version_manager import VersionManager
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 
 def make_structure(ids: list[str]):

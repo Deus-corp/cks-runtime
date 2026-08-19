@@ -546,10 +546,10 @@ Only the public semantic API forms the supported integration contract between th
 
 # 12. Reference Package Structure
 
-The Reference Runtime (`cks_runtime/`) is organised as:
+The Reference Runtime (`src/cks_runtime/`) is organised as:
 
 ```text
-cks_runtime/
+src/cks_runtime/
     runtime.py          # Runtime facade — public entry point
     config.py            # RuntimeConfig
     session/              # Session Manager
@@ -571,9 +571,8 @@ cks_runtime/
     net/                   # Outbound-fetch safety (SSRF-safe HTTP)
     gc/                    # Session garbage collection
     metrics/               # Runtime metrics
-
-cks_runtime_plugins/
-    cks_core/              # Concrete CoreInterface implementation (CksCoreAdapter)
+    adapters/              # Concrete CoreInterface implementations
+        cks_core.py        # CksCoreAdapter — the default/required adapter
 ```
 
 Equivalent layouts are permitted provided architectural responsibilities

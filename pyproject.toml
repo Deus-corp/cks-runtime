@@ -50,11 +50,7 @@ Issues = "https://github.com/PunctumActus/cks-runtime/issues"
 version = {attr = "cks_runtime._version.__version__"}
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = [
-    "cks_runtime*",
-    "cks_runtime_plugins*",
-]
+where = ["src"]
 
 [project.optional-dependencies]
 postgres = [

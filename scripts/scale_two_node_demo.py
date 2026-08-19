@@ -13,6 +13,7 @@ from pathlib import Path
 
 import cks
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.events.runtime_event import GossipConflictDetected
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.http_transport import GossipServer, HTTPGossipTransport
@@ -21,7 +22,6 @@ from cks_runtime.gossip.service import GossipService
 from cks_runtime.operations.operation_types import EvolveOperation
 from cks_runtime.runtime import Runtime
 from cks_runtime.storage.sqlite_storage import SQLiteStorage
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 logging.basicConfig(level=logging.ERROR)
 

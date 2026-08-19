@@ -9,7 +9,7 @@ from __future__ import annotations
 from cks.constraints.builtin import OPTIONAL_CONSTRAINTS_BY_NAME
 from cks.core import KnowledgeObject, KnowledgeStructure, ObjectIdentity
 
-from cks_runtime_plugins.cks_core.adapter import CksCoreAdapter
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 
 CLAIM_INTEGRITY = OPTIONAL_CONSTRAINTS_BY_NAME["claim_integrity"]
 

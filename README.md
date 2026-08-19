@@ -249,7 +249,7 @@ pip install -e .
 
 ```python
 from cks_runtime import Runtime
-from cks_runtime_plugins.cks_core import CksCoreAdapter
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.operations.operation_types import (
     ValidateOperation,
     EvolveOperation,

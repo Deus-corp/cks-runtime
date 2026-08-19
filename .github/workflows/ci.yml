@@ -46,10 +46,10 @@ jobs:
       - name: Ruff
         run: |
           pip install ruff
-          ruff check .
+          ruff check src/ tests/
 
       - name: mypy
-        run: mypy cks_runtime
+        run: mypy src/cks_runtime
 
       - name: pytest
         run: pytest tests/ -v

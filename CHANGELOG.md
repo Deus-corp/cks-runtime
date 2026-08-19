@@ -6,6 +6,26 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.57.0] - 2026-08-19
+
+### Changed
+- **Repository migrated to src-layout** – package now lives under `src/cks_runtime`, aligning with `cks-core` and `cks-mcp`.
+- **Core adapter relocated** – `cks_runtime_plugins/cks_core/adapter.py` moved to `cks_runtime/adapters/cks_core.py`.
+- CI now runs `ruff check src/ tests/` and `mypy src/cks_runtime`.
+
+### Breaking
+- External code importing `cks_runtime_plugins.cks_core.adapter` must update to `cks_runtime.adapters.cks_core`.
+- The old `cks_runtime_plugins` path is removed.
+
+### Fixed
+- CI configuration was still pointing to the old flat layout.
+- Removed stale `mypy` section for non-existent `cks_runtime.explainability`.
+
+### Tests
+- 773 passed, 69 skipped.
+
+---
+
 ## [1.56.1] - 2026-08-18
 
 ### Changed

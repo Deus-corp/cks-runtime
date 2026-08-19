@@ -11,11 +11,11 @@ from uuid import uuid4
 import cks
 import pytest
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.crdt.crdt_store import InMemoryCRDTStore
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.runtime import Runtime
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 pytestmark = pytest.mark.asyncio
 

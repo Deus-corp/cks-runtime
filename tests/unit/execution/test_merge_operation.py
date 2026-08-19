@@ -6,11 +6,11 @@ import cks
 import pytest
 from cks.evolution import AddObject, RemoveObject
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.core_api.merge_conflict import RuntimeMergeConflictError
 from cks_runtime.execution.operation_executor import OperationStatus
 from cks_runtime.operations.operation_types import EvolveOperation, MergeOperation
 from cks_runtime.runtime import Runtime
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 pytestmark = pytest.mark.asyncio
 

@@ -10,13 +10,13 @@ from uuid import uuid4
 
 import pytest
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.crdt.crdt_store import InMemoryCRDTStore
 from cks_runtime.crdt.version_vector import VersionVector
 from cks_runtime.events.event_bus import EventBus
 from cks_runtime.events.runtime_event import CRDTForkDetected
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.runtime import Runtime
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 pytestmark = pytest.mark.asyncio
 

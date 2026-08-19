@@ -4,7 +4,7 @@ Runtime-native Merge Conflict model.
 Core implementations may raise their own, implementation-specific
 merge-conflict exceptions (e.g. cks-core's ``MergeConflictError``).
 Runtime never propagates those upward as-is -- the same boundary rule
-already applied to diagnostics in ``cks_runtime_plugins.cks_core``'s
+already applied to diagnostics in ``cks_runtime.adapters.cks_core``'s
 ``_translate_diagnostic`` applies here: only this Runtime-native shape
 crosses the CoreInterface/CoreBridge boundary, so callers never need
 to know which Core implementation is attached.

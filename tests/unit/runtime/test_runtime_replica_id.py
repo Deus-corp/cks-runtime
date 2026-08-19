@@ -18,12 +18,12 @@ from __future__ import annotations
 import cks
 import pytest
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.operations.operation_types import EvolveOperation
 from cks_runtime.runtime import Runtime
 from cks_runtime.storage.memory_storage import InMemoryStorage
 from cks_runtime.storage.sqlite_storage import SQLiteStorage
 from cks_runtime.versioning.version_vector import VersionVector
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 pytestmark = pytest.mark.asyncio
 

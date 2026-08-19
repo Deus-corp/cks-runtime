@@ -15,6 +15,7 @@ from __future__ import annotations
 import cks
 import pytest
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.gossip.adapter import GossipAdapter
 from cks_runtime.gossip.discovery import PeerDiscovery, PeerDiscoveryError
 from cks_runtime.gossip.envelope import GossipEnvelope
@@ -24,7 +25,6 @@ from cks_runtime.gossip.transport import GossipTransport, GossipTransportError
 from cks_runtime.operations.operation_types import EvolveOperation
 from cks_runtime.runtime import Runtime
 from cks_runtime.session.session import RuntimeSession
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 pytestmark = pytest.mark.asyncio
 

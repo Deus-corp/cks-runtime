@@ -1,6 +1,7 @@
 import pytest
 
 from cks_runtime import Runtime
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.core_api.interfaces import (
     CoreInterface,
 )
@@ -18,7 +19,6 @@ from cks_runtime.pipeline.execution_pipeline import (
 from cks_runtime.versioning.version import (
     RuntimeVersion,
 )
-from cks_runtime_plugins.cks_core import CksCoreAdapter
 
 pytestmark = pytest.mark.asyncio
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import cks
 
+from cks_runtime.adapters.cks_core import CksCoreAdapter
 from cks_runtime.core_api.field_operation import RuntimeFieldOperation
-from cks_runtime_plugins.cks_core.adapter import CksCoreAdapter
 
 
 def _structure(objects_json: str) -> cks.core.KnowledgeStructure:
