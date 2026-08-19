@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.57.2] - 2026-08-19
+
+### Fixed
+- **Stale GitHub username in component version checks** – `GraphAutoUpdateSweeper` and related code now use `punctumactus/cks-*` instead of `Deus-corp/cks-*`, restoring live version fetching after the GitHub username change.
+- **Component repo resolution** – `_repo_from_url()` now accepts both full GitHub URLs and bare `owner/repo` strings, so components can store either form without breaking version checks.
+
+### Changed
+- Replaced non-historical `Deus-corp` references across source, tests, and configuration with `punctumactus`.
+
+### Tests
+- Updated `test_graph_auto_update_sweeper.py` to cover bare `owner/repo` repo resolution and the new username mapping.
+- Full suite green.
+
+---
+
 ## [1.57.1] - 2026-08-19
 
 ### Changed

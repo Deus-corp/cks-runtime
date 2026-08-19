@@ -14,6 +14,7 @@ import pytest
 from cks_runtime.reasoning.graph_auto_update_sweeper import (
     DEFAULT_SWEEP_INTERVAL_SECONDS,
     GraphAutoUpdateSweeper,
+    _repo_from_url,
 )
 from cks_runtime.session.session import RuntimeSession
 from cks_runtime.storage.memory_storage import InMemoryStorage
@@ -205,7 +206,7 @@ async def test_package_json_component_resolved_and_checked(storage):
     ks = _component_ks(
         "cks-studio",
         "v0.18.0",
-        repo_url="https://github.com/Deus-corp/cks-studio",
+        repo_url="https://github.com/punctumactus/cks-studio",
         version_source="package.json",
     )
     _register(storage, "g1", "s1", ks)
@@ -225,7 +226,7 @@ async def test_package_json_component_resolved_and_checked(storage):
     }
     # First candidate path is the repo-root package.json.
     called_url = mock_get.call_args_list[0].args[0]
-    assert called_url == "https://raw.githubusercontent.com/Deus-corp/cks-studio/main/package.json"
+    assert called_url == "https://raw.githubusercontent.com/punctumactus/cks-studio/main/package.json"
 
 
 @pytest.mark.asyncio
@@ -233,7 +234,7 @@ async def test_package_json_up_to_date_not_escalated(storage):
     ks = _component_ks(
         "cks-studio",
         "0.19.0",
-        repo_url="https://github.com/Deus-corp/cks-studio",
+        repo_url="https://github.com/punctumactus/cks-studio",
         version_source="package.json",
     )
     _register(storage, "g1", "s1", ks)
@@ -278,7 +279,7 @@ async def test_known_component_with_version_source_still_uses_package_json(stora
     ks = _component_ks(
         "cks-core",
         "1.0.0",
-        repo_url="https://github.com/Deus-corp/cks-core",
+        repo_url="https://github.com/punctumactus/cks-core",
         version_source="package.json",
     )
     _register(storage, "g1", "s1", ks)
@@ -504,3 +505,35 @@ async def test_start_stop_lifecycle(storage):
 
 def test_default_interval_matches_module_constant():
     assert DEFAULT_SWEEP_INTERVAL_SECONDS == 3600
+
+
+# ---------------------------------------------------------------------------
+# _repo_from_url: full URL and bare "owner/repo" forms (GitHub username
+# migration Deus-corp -> punctumactus; repo strings may come from stored
+# graph data using either form).
+# ---------------------------------------------------------------------------
+
+
+def test_repo_from_url_full_https_url():
+    assert _repo_from_url("https://github.com/punctumactus/cks-runtime") == "punctumactus/cks-runtime"
+
+
+def test_repo_from_url_full_https_url_with_git_suffix():
+    assert _repo_from_url("https://github.com/punctumactus/cks-runtime.git") == "punctumactus/cks-runtime"
+
+
+def test_repo_from_url_bare_owner_repo():
+    assert _repo_from_url("punctumactus/cks-runtime") == "punctumactus/cks-runtime"
+
+
+def test_repo_from_url_bare_owner_repo_with_git_suffix():
+    assert _repo_from_url("punctumactus/cks-runtime.git") == "punctumactus/cks-runtime"
+
+
+def test_repo_from_url_non_github_url_rejected():
+    assert _repo_from_url("https://gitlab.com/punctumactus/cks-runtime") is None
+
+
+def test_repo_from_url_garbage_rejected():
+    assert _repo_from_url("not-a-repo") is None
+    assert _repo_from_url("") is None

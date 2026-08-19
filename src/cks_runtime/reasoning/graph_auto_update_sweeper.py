@@ -72,9 +72,9 @@ _DEFAULT_BRANCH = "main"
 # never the reverse -- ADR-001, Runtime Layering), so this map is
 # duplicated here rather than shared.
 _KNOWN_COMPONENTS: dict[str, dict[str, str]] = {
-    "cks-core": {"repo": "Deus-corp/cks-core", "path": "src/cks/_version.py"},
-    "cks-runtime": {"repo": "Deus-corp/cks-runtime", "path": "cks_runtime/_version.py"},
-    "cks-mcp": {"repo": "Deus-corp/cks-mcp", "path": "src/cks_mcp/_version.py"},
+    "cks-core": {"repo": "punctumactus/cks-core", "path": "src/cks/_version.py"},
+    "cks-runtime": {"repo": "punctumactus/cks-runtime", "path": "cks_runtime/_version.py"},
+    "cks-mcp": {"repo": "punctumactus/cks-mcp", "path": "src/cks_mcp/_version.py"},
 }
 
 # Candidate _version.py locations tried, in order, for a component
@@ -99,10 +99,22 @@ _PACKAGE_JSON_CANDIDATE_PATHS = (
 
 
 def _repo_from_url(repo_url: str) -> str | None:
+    """Resolve a component's declared 'repo_url' to an 'owner/repo'
+    string. Accepts a full GitHub URL (e.g.
+    'https://github.com/punctumactus/cks-runtime', with or without a
+    trailing '.git' or path suffix) as well as a bare 'owner/repo'
+    string (e.g. 'punctumactus/cks-runtime'), since some callers/tests
+    and older stored graph data supply the short form directly rather
+    than a full URL."""
     parsed = urlparse(repo_url)
-    if not parsed.netloc or "github.com" not in parsed.netloc:
-        return None
-    parts = [p for p in parsed.path.split("/") if p]
+    if parsed.netloc:
+        if "github.com" not in parsed.netloc:
+            return None
+        parts = [p for p in parsed.path.split("/") if p]
+    else:
+        # No scheme/netloc -- treat as a bare "owner/repo" (or
+        # "owner/repo.git") string.
+        parts = [p for p in repo_url.strip("/").split("/") if p]
     if len(parts) < 2:
         return None
     owner, repo = parts[0], parts[1]
