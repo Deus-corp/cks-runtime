@@ -6,6 +6,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ---
 
+## [1.58.0] - 2026-08-20
+
+### Added
+- **Dead-letter task retry/requeue** – new `retry_dead_letter_task(task_id: str) -> bool` method on runtime storage interfaces and implementations.
+- Implemented for `SQLiteStorage` and `PostgresStorage`; no-op/`False` for unsupported backends such as `InMemoryStorage`.
+- Requeue moves a DEAD outbox task back to PENDING and resets `claimed_at`, `last_error`, and retry/lease state while preserving `task_type`, `payload`, and `session_id`.
+- Added conformance tests for successful requeue, missing/non-DEAD tasks, re-claim after requeue, and unsupported backend no-op behavior.
+
+### Changed
+- `RuntimeStorage` and `AsyncRuntimeStorage` now declare `retry_dead_letter_task`.
+- `SyncStorageAdapter` forwards `retry_dead_letter_task` to the wrapped sync storage.
+
+### Notes
+- No breaking changes to existing storage methods or public behavior.
+
+---
+
 ## [1.57.3] - 2026-08-19
 
 ### Fixed

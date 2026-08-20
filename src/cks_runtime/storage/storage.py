@@ -287,6 +287,27 @@ class RuntimeStorage(ABC):
         """
         return []
 
+    def retry_dead_letter_task(self, task_id: int) -> bool:
+        """
+        Move a ``DEAD``-lettered task back to ``PENDING`` so it can be
+        claimed again -- the counterpart to ``dead_letter_outbox_task``,
+        for use once a human or automated system believes the root
+        cause of the original failure has been addressed.
+
+        Only a task currently in ``DEAD`` status is eligible; requeuing
+        a task that doesn't exist, or that is ``PENDING``/``IN_PROGRESS``,
+        is refused. On success, ``claimed_at``, ``last_error``, and
+        ``retry_count`` are reset to safe defaults (and ``next_retry_at``
+        set to now) so the task is immediately eligible for
+        ``dequeue_next_outbox_task``; ``task_type``, ``payload``, and
+        ``session_id`` are left untouched.
+
+        Returns ``True`` if the task was requeued, ``False`` otherwise
+        (not found, or not in ``DEAD`` status). No-op (returns ``False``)
+        by default -- backends that support the outbox override this.
+        """
+        return False
+
     def prune_agent_liveness(self, older_than_seconds: float) -> int:
         """
         Delete liveness rows whose last heartbeat is older than

@@ -1128,6 +1128,34 @@ class SQLiteStorage(RuntimeStorage):
         _retry_on_locked(_write)
 
     @_synchronized
+    def retry_dead_letter_task(self, task_id: int) -> bool:
+        """
+        Move a ``DEAD``-lettered task back to ``PENDING`` -- see
+        ``RuntimeStorage.retry_dead_letter_task`` for the rationale.
+        Only succeeds if the task exists and is currently ``DEAD``;
+        ``task_type``, ``payload``, and ``session_id`` are preserved,
+        while ``claimed_at``, ``last_error``, and ``retry_count`` are
+        reset so the task is immediately eligible to be claimed again.
+        """
+        def _write() -> bool:
+            cur = self._conn.execute(
+                """
+                UPDATE cks_outbox_tasks
+                SET status = 'PENDING',
+                    retry_count = 0,
+                    next_retry_at = datetime('now'),
+                    last_error = NULL,
+                    claimed_at = NULL
+                WHERE task_id = ? AND status = 'DEAD'
+                """,
+                (task_id,),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+        return _retry_on_locked(_write)
+
+    @_synchronized
     def touch_outbox_task(self, task_id: int) -> bool:
         """
         Renew the lease on an ``IN_PROGRESS`` task by bumping

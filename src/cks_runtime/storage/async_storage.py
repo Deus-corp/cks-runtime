@@ -238,6 +238,14 @@ class AsyncRuntimeStorage(ABC):
         """
         return []
 
+    async def retry_dead_letter_task(self, task_id: int) -> bool:
+        """
+        See ``RuntimeStorage.retry_dead_letter_task``. Moves a ``DEAD``
+        task back to ``PENDING`` so it can be claimed again. No-op
+        (returns ``False``) by default.
+        """
+        return False
+
     async def prune_agent_liveness(self, older_than_seconds: float) -> int:
         """See ``RuntimeStorage.prune_agent_liveness``. Empty by default."""
         return 0

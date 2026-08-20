@@ -18,8 +18,8 @@ url: "https://github.com/PunctumActus/cks-runtime"
 
 license: "MIT"
 
-version: "1.57.3"
-date-released: "2026-08-19"
+version: "1.58.0"
+date-released: "2026-08-20"
 
 abstract: >
   CKS Runtime is the reference operational environment for

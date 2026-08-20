@@ -915,6 +915,27 @@ class PostgresStorage(AsyncRuntimeStorage):
 
         await _retry_on_transient(_write)
 
+    async def retry_dead_letter_task(self, task_id: int) -> bool:
+        """Move a DEAD task back to PENDING -- see SQLiteStorage's counterpart."""
+        async def _write() -> bool:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    UPDATE cks_outbox_tasks
+                    SET status = 'PENDING',
+                        retry_count = 0,
+                        next_retry_at = now(),
+                        last_error = NULL,
+                        claimed_at = NULL
+                    WHERE task_id = %s AND status = 'DEAD'
+                    """,
+                    (task_id,),
+                )
+                await conn.commit()
+                return cur.rowcount > 0
+
+        return await _retry_on_transient(_write)
+
     async def touch_outbox_task(self, task_id: int) -> bool:
         """Renew an IN_PROGRESS task's lease -- see SQLiteStorage's counterpart."""
         async def _write() -> bool:

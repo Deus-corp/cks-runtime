@@ -470,6 +470,67 @@ async def test_list_dead_letter_tasks_never_drains(storage):
     assert len(first_read) == len(second_read) == 1
 
 
+async def test_retry_dead_letter_task_requeues_dead_task(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    task = await storage.dequeue_next_outbox_task()
+    assert task is not None
+    await storage.dead_letter_outbox_task(task.task_id, "boom")
+
+    assert await storage.retry_dead_letter_task(task.task_id) is True
+
+    # No longer DEAD, so it must drop out of list_dead_letter_tasks...
+    assert await storage.list_dead_letter_tasks() == []
+
+
+async def test_retry_dead_letter_task_missing_task_returns_false(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    assert await storage.retry_dead_letter_task(999999) is False
+
+
+async def test_retry_dead_letter_task_refuses_non_dead_task(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    pending_task = await storage.dequeue_next_outbox_task()
+    assert pending_task is not None
+
+    # The task is now IN_PROGRESS (claimed above), not DEAD -- must be
+    # refused rather than silently requeued out from under whoever
+    # holds the lease.
+    assert await storage.retry_dead_letter_task(pending_task.task_id) is False
+
+
+async def test_retry_dead_letter_task_can_be_claimed_again(storage):
+    if not storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} does not support the outbox")
+
+    await storage.enqueue_task("gossip_conflict", "s1", "{}")
+    task = await storage.dequeue_next_outbox_task()
+    assert task is not None
+    await storage.dead_letter_outbox_task(task.task_id, "boom")
+
+    assert await storage.retry_dead_letter_task(task.task_id) is True
+
+    reclaimed = await storage.dequeue_next_outbox_task()
+    assert reclaimed is not None
+    assert reclaimed.task_id == task.task_id
+    assert reclaimed.task_type == "gossip_conflict"
+    assert reclaimed.session_id == "s1"
+
+
+async def test_dead_letter_and_list_methods_no_op_when_outbox_unsupported_retry(storage):
+    if storage.supports_outbox:
+        pytest.skip(f"{type(storage).__name__} supports the outbox")
+
+    assert await storage.retry_dead_letter_task(999) is False
+
+
 async def test_list_tasks_by_type_returns_only_matching_pending_tasks(storage):
     if not storage.supports_outbox:
         pytest.skip(f"{type(storage).__name__} does not support the outbox")
